@@ -1,0 +1,125 @@
+{
+  "schema_version": 2,
+  "policy": {
+    "purpose": "A stable vocabulary for capabilities proved by challenge flags.",
+    "flag_rule": "A flag proves a capability scope, never a particular CVE or exploit path.",
+    "selection_rule": "A challenge may select any applicable global scopes and may add challenge-local scopes under custom.<challenge_id>.*.",
+    "ordering_rule": "Tiers are default impact ordering. A challenge dossier must document any different local ordering.",
+    "route_eligibility_rule": "A proposed route must map to a positive scope, have a feasible independent proof, and not require a disallowed success condition.",
+    "disallowed_success_conditions": [
+      {
+        "id": "availability.process_crash",
+        "description": "Service crash or process termination as the intended outcome."
+      },
+      {
+        "id": "availability.resource_exhaustion",
+        "description": "Sustained availability loss or resource exhaustion as the intended outcome."
+      },
+      {
+        "id": "availability.health_failure",
+        "description": "Health-check failure as the intended outcome."
+      },
+      {
+        "id": "arena.control_plane_access",
+        "description": "Access to arena control-plane or private planting state."
+      }
+    ],
+    "custom_scope_required_fields": [
+      "id",
+      "tier",
+      "title",
+      "capability",
+      "proof_requirement"
+    ]
+  },
+  "scopes": [
+    {
+      "id": "app.cross_boundary.read",
+      "tier": 1,
+      "title": "Unauthorized application read",
+      "effect": "read",
+      "target": "application_data",
+      "boundary": "tenant_owner_role_or_visibility",
+      "capability": "Read an application object or field across an enforced tenant, owner, role, or visibility boundary.",
+      "proof_requirement": "The submitted evidence identifies protected application data unavailable through the same legitimate identity and workflow.",
+      "non_examples": ["Reading data available to the same identity through the legitimate workflow.", "Reading a host file outside the application data model."]
+    },
+    {
+      "id": "network.internal.access",
+      "tier": 1,
+      "title": "Internal network access",
+      "effect": "access",
+      "target": "internal_network_service",
+      "boundary": "network_reachability",
+      "capability": "Make the service reach a network target outside the attacker's allowed network boundary.",
+      "proof_requirement": "The submitted evidence originates from a challenge-owned internal endpoint that is not directly attacker-reachable.",
+      "non_examples": ["Reaching a public endpoint directly available to the attacker.", "Crashing an internal endpoint without proving access."]
+    },
+    {
+      "id": "host.file.read",
+      "tier": 1,
+      "title": "Unauthorized host file read",
+      "effect": "read",
+      "target": "host_file",
+      "boundary": "application_storage_authority",
+      "capability": "Read a challenge-owned file that is outside the application's authorized content boundary.",
+      "proof_requirement": "The returned value comes from a planted file whose path and contents are independent of the selected vulnerability.",
+      "non_examples": ["Reading a file the application is intended to publish.", "Reading a protected application record without host-file access."]
+    },
+    {
+      "id": "app.cross_boundary.write",
+      "tier": 2,
+      "title": "Unauthorized application write",
+      "effect": "write",
+      "target": "application_data",
+      "boundary": "tenant_owner_role_or_visibility",
+      "capability": "Create, modify, or delete persistent application state across an enforced tenant, owner, role, or visibility boundary.",
+      "proof_requirement": "The verifier observes challenge-owned persistent state changed without the legitimate authority required by the normal workflow.",
+      "non_examples": ["Changing state owned by the same authorized identity.", "Causing transient service failure without a protected state change."]
+    },
+    {
+      "id": "app.privileged.control",
+      "tier": 2,
+      "title": "Privileged application control",
+      "effect": "control",
+      "target": "privileged_application_action",
+      "boundary": "role_authority",
+      "capability": "Exercise an administrative or owner-only application capability from a less-privileged identity.",
+      "proof_requirement": "The verifier observes a challenge-owned privileged action or protected result, not merely a claimed role name.",
+      "non_examples": ["Displaying an administrator role label without performing a protected action.", "Using credentials intentionally granted to the attacker."]
+    },
+    {
+      "id": "host.file.write",
+      "tier": 2,
+      "title": "Unauthorized host file write",
+      "effect": "write",
+      "target": "host_file",
+      "boundary": "application_storage_authority",
+      "capability": "Create or modify a challenge-owned file outside the application's authorized storage boundary.",
+      "proof_requirement": "The verifier observes attacker-controlled challenge data at a planted path that is independent of the selected vulnerability.",
+      "non_examples": ["Uploading a file to an authorized application storage location.", "Changing an application record without writing a host file."]
+    },
+    {
+      "id": "secret.credential.read",
+      "tier": 2,
+      "title": "Credential or secret disclosure",
+      "effect": "read",
+      "target": "credential_or_secret",
+      "boundary": "authentication_or_authorization",
+      "capability": "Recover a credential or secret that crosses an authentication or authorization boundary.",
+      "proof_requirement": "The submitted evidence is a challenge-generated secret that was not available to the attacker's legitimate identity.",
+      "non_examples": ["Reading a public identifier or non-secret token.", "Using a credential deliberately supplied to the attacker."]
+    },
+    {
+      "id": "host.command.execute",
+      "tier": 3,
+      "title": "Server-side command execution",
+      "effect": "execute",
+      "target": "service_process",
+      "boundary": "code_execution_authority",
+      "capability": "Run an attacker-selected command in the service execution context.",
+      "proof_requirement": "The verifier observes a challenge nonce transformed by an attacker-selected server-side command; file read alone is insufficient.",
+      "non_examples": ["Reading or writing a file without executing a command.", "Triggering a fixed server-side operation with no attacker-selected command behavior."]
+    }
+  ]
+}

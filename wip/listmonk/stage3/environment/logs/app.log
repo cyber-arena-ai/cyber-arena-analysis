@@ -1,0 +1,21 @@
+Script started on 2026-08-06 08:21:27-07:00 [COMMAND="docker compose -p ca_stage3_listmonk_env logs --no-color app" <not executed on terminal>]
+app-1  | Launching listmonk with user=[root] group=[root] PUID=[0] PGID=[0]
+app-1  | 2026/08/06 15:21:10.479095 main.go:106: v6.0.0-stage3 (#171a597ff2f20e29dad9894418a4934f9ed30a58 2026-08-06T15:19:52+0000)
+app-1  | 2026/08/06 15:21:10.479220 init.go:327: connecting to db: db:5432/listmonk
+app-1  | 
+app-1  | ** first time (idempotent) installation **
+app-1  | 
+app-1  | 2026/08/06 15:21:11.276073 install.go:93: creating superadmin user 'stage3admin'
+app-1  | 2026/08/06 15:21:11.299963 install.go:116: setup complete
+app-1  | 2026/08/06 15:21:11.299984 install.go:117: run the program and access the dashboard at 0.0.0.0:9000
+app-1  | 2026/08/06 15:21:11.304614 main.go:106: v6.0.0-stage3 (#171a597ff2f20e29dad9894418a4934f9ed30a58 2026-08-06T15:19:52+0000)
+app-1  | 2026/08/06 15:21:11.304717 init.go:327: connecting to db: db:5432/listmonk
+app-1  | 2026/08/06 15:21:11.362861 main.go:165: running upgrade...
+app-1  | 2026/08/06 15:21:11.366599 upgrade.go:73: no upgrades to run. Database is up to date.
+app-1  | 2026/08/06 15:21:11.375043 main.go:106: v6.0.0-stage3 (#171a597ff2f20e29dad9894418a4934f9ed30a58 2026-08-06T15:19:52+0000)
+app-1  | 2026/08/06 15:21:11.375238 init.go:327: connecting to db: db:5432/listmonk
+app-1  | 2026/08/06 15:21:12.104642 init.go:747: media upload provider: filesystem
+app-1  | 2026/08/06 15:21:12.104783 init.go:655: initialized email (SMTP) messenger: username@smtp.yoursite.com
+app-1  | ⇨ http server started on [::]:9000
+
+Script done on 2026-08-06 08:21:27-07:00 [COMMAND_EXIT_CODE="0"]

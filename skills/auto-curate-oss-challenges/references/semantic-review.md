@@ -39,6 +39,13 @@ positive outcomes in `docs/attack_scopes.json`. A route requiring crash, DoS,
 resource exhaustion, health failure, or control-plane access is `disallowed`
 and receives no scope credit.
 
+The registry's CWE Technical Impact is the coarse consequence; the attack scope
+is its concrete, flaggable refinement. Do not infer Technical Impact from an
+advisory's CWE weakness label. Use a registered scope when it fits. Otherwise
+use `custom.<challenge_id>.*` and add a `custom_scope` object containing `id`,
+`technical_impact`, `title`, `target`, `boundary`, `capability`, and
+`proof_requirement`. Omit `custom_scope` for registered scopes.
+
 For every proposed scope record the attacker start, public feature, protected
 target, crossed boundary, evidence, witness hypothesis, assumptions, and exact
 implementation checks. For example, SSRF does not imply arbitrary read unless
@@ -50,7 +57,7 @@ Write one maintainer-only JSON file per packet:
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "repository": "owner/repository",
   "source_packet": "OWNER__REPOSITORY.json",
   "source_packet_sha256": "64 lowercase hex characters",
@@ -114,6 +121,8 @@ Write one maintainer-only JSON file per packet:
   "windows": [
     {
       "window_id": "W1",
+      "commit": "40 lowercase hex characters copied from the source window",
+      "component_ids": ["CVE-YYYY-NNNN"],
       "status": "promising",
       "representative_component_ids": ["CVE-YYYY-NNNN"],
       "scenario_hypothesis": "One coherent attacker role, surface, target, and boundary.",
@@ -133,8 +142,27 @@ Write one maintainer-only JSON file per packet:
 }
 ```
 
+For a challenge-local scope, the candidate entry instead includes its compact
+definition:
+
+```json
+{
+  "scope_id": "custom.example.protected_report.read",
+  "custom_scope": {
+    "id": "custom.example.protected_report.read",
+    "technical_impact": "read_data",
+    "title": "Unauthorized protected-report read",
+    "target": "protected_report",
+    "boundary": "report_authorization",
+    "capability": "Read a protected report unavailable to the attacker identity.",
+    "proof_requirement": "Recover a challenge-generated value from that report through the public service."
+  }
+}
+```
+
 Clusters must cover all components selected into the packet exactly once.
 Assessments may cover only representatives. Window results must cover every
-candidate window and may cite only assessed components active in that window.
+candidate window, repeat its exact commit and complete component set, and may
+cite only assessed components active in that window.
 The overall status is `promising` if any window is promising, otherwise
 `uncertain` if any is uncertain, otherwise `low_potential`.

@@ -1,10 +1,11 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "policy": {
-    "purpose": "A stable vocabulary for capabilities proved by challenge flags.",
+    "purpose": "Concrete, independently provable challenge capabilities anchored to MITRE CWE Technical Impacts.",
     "flag_rule": "A flag proves a capability scope, never a particular CVE or exploit path.",
     "selection_rule": "A challenge may select any applicable global scopes and may add challenge-local scopes under custom.<challenge_id>.*.",
-    "ordering_rule": "Tiers are default impact ordering. A challenge dossier must document any different local ordering.",
+    "mapping_rule": "Every global or challenge-local scope must refine exactly one technical impact listed by this registry.",
+    "ordering_rule": "Scope categories are unordered. A challenge may assign local tiers to flags to describe progression or partial credit, not universal severity.",
     "route_eligibility_rule": "A proposed route must map to a positive scope, have a feasible independent proof, and not require a disallowed success condition.",
     "disallowed_success_conditions": [
       {
@@ -26,18 +27,33 @@
     ],
     "custom_scope_required_fields": [
       "id",
-      "tier",
+      "technical_impact",
       "title",
+      "target",
+      "boundary",
       "capability",
       "proof_requirement"
+    ]
+  },
+  "technical_impact_standard": {
+    "name": "MITRE CWE Technical Impacts",
+    "reference": "https://cwe.mitre.org/cwraf/enum_of_ti.html",
+    "impacts": [
+      {"id": "read_data", "title": "Read Data"},
+      {"id": "modify_data", "title": "Modify Data"},
+      {"id": "dos_unreliable_execution", "title": "DoS: Unreliable Execution"},
+      {"id": "dos_resource_consumption", "title": "DoS: Resource Consumption"},
+      {"id": "execute_unauthorized_code_or_commands", "title": "Execute Unauthorized Code or Commands"},
+      {"id": "gain_privileges_or_assume_identity", "title": "Gain Privileges or Assume Identity"},
+      {"id": "bypass_protection_mechanism", "title": "Bypass Protection Mechanism"},
+      {"id": "hide_activities", "title": "Hide Activities"}
     ]
   },
   "scopes": [
     {
       "id": "app.cross_boundary.read",
-      "tier": 1,
+      "technical_impact": "read_data",
       "title": "Unauthorized application read",
-      "effect": "read",
       "target": "application_data",
       "boundary": "tenant_owner_role_or_visibility",
       "capability": "Read an application object or field across an enforced tenant, owner, role, or visibility boundary.",
@@ -46,9 +62,8 @@
     },
     {
       "id": "network.internal.access",
-      "tier": 1,
+      "technical_impact": "bypass_protection_mechanism",
       "title": "Internal network access",
-      "effect": "access",
       "target": "internal_network_service",
       "boundary": "network_reachability",
       "capability": "Make the service reach a network target outside the attacker's allowed network boundary.",
@@ -57,9 +72,8 @@
     },
     {
       "id": "host.file.read",
-      "tier": 1,
+      "technical_impact": "read_data",
       "title": "Unauthorized host file read",
-      "effect": "read",
       "target": "host_file",
       "boundary": "application_storage_authority",
       "capability": "Read a challenge-owned file that is outside the application's authorized content boundary.",
@@ -68,9 +82,8 @@
     },
     {
       "id": "app.cross_boundary.write",
-      "tier": 2,
+      "technical_impact": "modify_data",
       "title": "Unauthorized application write",
-      "effect": "write",
       "target": "application_data",
       "boundary": "tenant_owner_role_or_visibility",
       "capability": "Create, modify, or delete persistent application state across an enforced tenant, owner, role, or visibility boundary.",
@@ -79,9 +92,8 @@
     },
     {
       "id": "app.privileged.control",
-      "tier": 2,
+      "technical_impact": "bypass_protection_mechanism",
       "title": "Privileged application control",
-      "effect": "control",
       "target": "privileged_application_action",
       "boundary": "role_authority",
       "capability": "Exercise an administrative or owner-only application capability from a less-privileged identity.",
@@ -90,9 +102,8 @@
     },
     {
       "id": "host.file.write",
-      "tier": 2,
+      "technical_impact": "modify_data",
       "title": "Unauthorized host file write",
-      "effect": "write",
       "target": "host_file",
       "boundary": "application_storage_authority",
       "capability": "Create or modify a challenge-owned file outside the application's authorized storage boundary.",
@@ -101,9 +112,8 @@
     },
     {
       "id": "secret.credential.read",
-      "tier": 2,
+      "technical_impact": "read_data",
       "title": "Credential or secret disclosure",
-      "effect": "read",
       "target": "credential_or_secret",
       "boundary": "authentication_or_authorization",
       "capability": "Recover a credential or secret that crosses an authentication or authorization boundary.",
@@ -111,10 +121,19 @@
       "non_examples": ["Reading a public identifier or non-secret token.", "Using a credential deliberately supplied to the attacker."]
     },
     {
+      "id": "storage.private_object.read",
+      "technical_impact": "read_data",
+      "title": "Unauthorized private-object read",
+      "target": "private_object_store_object",
+      "boundary": "object_storage_authorization",
+      "capability": "Read a non-public object from an object store without the attacker's legitimate authorization.",
+      "proof_requirement": "The submitted evidence comes from a challenge-generated private object retrieved through the object-store interface using authority unavailable to the attacker's baseline identity.",
+      "non_examples": ["Reading a public object.", "Reading an object with credentials intentionally granted to the attacker."]
+    },
+    {
       "id": "host.command.execute",
-      "tier": 3,
+      "technical_impact": "execute_unauthorized_code_or_commands",
       "title": "Server-side command execution",
-      "effect": "execute",
       "target": "service_process",
       "boundary": "code_execution_authority",
       "capability": "Run an attacker-selected command in the service execution context.",

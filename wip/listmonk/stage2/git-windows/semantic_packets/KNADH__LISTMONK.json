@@ -1,0 +1,618 @@
+{
+  "candidate_windows": [
+    {
+      "affected_units": [
+        "GIT:knadh/listmonk",
+        "Go:github.com/knadh/listmonk"
+      ],
+      "checkpoint_evidence": {
+        "commit": "171a597ff2f20e29dad9894418a4934f9ed30a58",
+        "committed_at": "2026-03-21T05:24:13+00:00",
+        "on_head_lineage": true,
+        "sources": [
+          {
+            "component_id": "CVE-2026-34584",
+            "fixed": "347f5976759232c36e571cf58b4bfe33c2794f35",
+            "parent_index": 0,
+            "type": "pre_fixed"
+          }
+        ],
+        "stable_release_tags": []
+      },
+      "component_ids": [
+        "CVE-2026-34584",
+        "CVE-2026-34828",
+        "CVE-2026-62361"
+      ],
+      "cwes": [
+        "CWE-613",
+        "CWE-639",
+        "CWE-89"
+      ],
+      "fix_boundaries": [
+        "1b5e8d38c778e869003486d3c38bc7a964661e91",
+        "347f5976759232c36e571cf58b4bfe33c2794f35",
+        "c0a6525009a65265230185f16e8674dcc83aa024",
+        "db82035d619348949512dafdaf60c86037cafc9e",
+        "ef0a75872463f10a4848af6c547d1c057405453a"
+      ],
+      "inventory_id": "H1",
+      "marginal_component_distance": null,
+      "ready_for_semantic_review": true,
+      "representative_checkpoint": "171a597ff2f20e29dad9894418a4934f9ed30a58",
+      "selection_reason": "widest_reported_overlap",
+      "signals": {
+        "affected_unit_count": 2,
+        "committed_at": "2026-03-21T05:24:13+00:00",
+        "evidence_complete_component_count": 3,
+        "fix_boundary_count": 5,
+        "introduced_from_origin_component_count": 1,
+        "on_head_lineage": true,
+        "reported_overlap_count": 3,
+        "stable_release_checkpoint": false,
+        "vulnerability_class_count": 3
+      },
+      "window_id": "W1"
+    },
+    {
+      "affected_units": [
+        "GIT:knadh/listmonk",
+        "Go:github.com/knadh/listmonk"
+      ],
+      "checkpoint_evidence": {
+        "commit": "347f5976759232c36e571cf58b4bfe33c2794f35",
+        "committed_at": "2026-03-23T11:07:22+00:00",
+        "on_head_lineage": true,
+        "sources": [
+          {
+            "component_id": "CVE-2026-34828",
+            "fixed": "db82035d619348949512dafdaf60c86037cafc9e",
+            "parent_index": 0,
+            "type": "pre_fixed"
+          }
+        ],
+        "stable_release_tags": []
+      },
+      "component_ids": [
+        "CVE-2026-34828",
+        "CVE-2026-62361"
+      ],
+      "cwes": [
+        "CWE-613",
+        "CWE-89"
+      ],
+      "fix_boundaries": [
+        "1b5e8d38c778e869003486d3c38bc7a964661e91",
+        "c0a6525009a65265230185f16e8674dcc83aa024",
+        "db82035d619348949512dafdaf60c86037cafc9e",
+        "ef0a75872463f10a4848af6c547d1c057405453a"
+      ],
+      "inventory_id": "H2",
+      "marginal_component_distance": 1,
+      "ready_for_semantic_review": true,
+      "representative_checkpoint": "347f5976759232c36e571cf58b4bfe33c2794f35",
+      "selection_reason": "marginal_component_set_diversity",
+      "signals": {
+        "affected_unit_count": 2,
+        "committed_at": "2026-03-23T11:07:22+00:00",
+        "evidence_complete_component_count": 2,
+        "fix_boundary_count": 4,
+        "introduced_from_origin_component_count": 1,
+        "on_head_lineage": true,
+        "reported_overlap_count": 2,
+        "stable_release_checkpoint": false,
+        "vulnerability_class_count": 2
+      },
+      "window_id": "W2"
+    },
+    {
+      "affected_units": [
+        "GIT:knadh/listmonk"
+      ],
+      "checkpoint_evidence": {
+        "commit": "e3499cf722155a11b8ca1a2baec3c09a61b9e1ed",
+        "committed_at": "2026-06-19T10:06:47+00:00",
+        "on_head_lineage": true,
+        "sources": [
+          {
+            "component_id": "CVE-2026-62361",
+            "fixed": "c0a6525009a65265230185f16e8674dcc83aa024",
+            "parent_index": 0,
+            "type": "pre_fixed"
+          }
+        ],
+        "stable_release_tags": []
+      },
+      "component_ids": [
+        "CVE-2026-62361"
+      ],
+      "cwes": [
+        "CWE-89"
+      ],
+      "fix_boundaries": [
+        "c0a6525009a65265230185f16e8674dcc83aa024",
+        "ef0a75872463f10a4848af6c547d1c057405453a"
+      ],
+      "inventory_id": "H3",
+      "marginal_component_distance": 1,
+      "ready_for_semantic_review": true,
+      "representative_checkpoint": "e3499cf722155a11b8ca1a2baec3c09a61b9e1ed",
+      "selection_reason": "marginal_component_set_diversity",
+      "signals": {
+        "affected_unit_count": 1,
+        "committed_at": "2026-06-19T10:06:47+00:00",
+        "evidence_complete_component_count": 1,
+        "fix_boundary_count": 2,
+        "introduced_from_origin_component_count": 1,
+        "on_head_lineage": true,
+        "reported_overlap_count": 1,
+        "stable_release_checkpoint": false,
+        "vulnerability_class_count": 1
+      },
+      "window_id": "W3"
+    }
+  ],
+  "claim_boundary": "Reported affected ranges and immutable fix-boundary checkpoints only; application fit, feature reachability, candidate scopes, and exploitability remain semantic or dynamic checks.",
+  "components": [
+    {
+      "affected_units": [
+        "GIT:knadh/listmonk"
+      ],
+      "behavioral_evidence": [
+        {
+          "count": 1,
+          "type": "osv_summary"
+        },
+        {
+          "count": 1,
+          "type": "osv_details"
+        }
+      ],
+      "component_id": "CVE-2026-34584",
+      "cwes": [
+        "CWE-639"
+      ],
+      "detail_excerpts": [
+        {
+          "original_characters": 381,
+          "text": "listmonk is a standalone, self-hosted, newsletter and mailing list manager. From version 4.1.0 to before version 6.1.0, bugs in list permission checks allows users in a multi-user environment to access to lists (which they don't have access to) under different scenarios. This only affects multi-user environments with untrusted users. This issue has been patched in version 6.1.0.",
+          "truncated": false
+        }
+      ],
+      "earliest_osv_publication": "2026-04-02T17:31:37.615000+00:00",
+      "fixes": [
+        {
+          "sha": "1b5e8d38c778e869003486d3c38bc7a964661e91",
+          "source": "osv_git_fixed",
+          "url": "https://github.com/knadh/listmonk/commit/1b5e8d38c778e869003486d3c38bc7a964661e91"
+        },
+        {
+          "sha": "347f5976759232c36e571cf58b4bfe33c2794f35",
+          "source": "osv_git_fixed",
+          "url": "https://github.com/knadh/listmonk/commit/347f5976759232c36e571cf58b4bfe33c2794f35"
+        },
+        {
+          "sha": "347f5976759232c36e571cf58b4bfe33c2794f35",
+          "source": "reference_fix",
+          "url": "https://github.com/knadh/listmonk/commit/347f5976759232c36e571cf58b4bfe33c2794f35"
+        }
+      ],
+      "full_evidence_sources": [
+        "GIT.zip:CVE-2026-34584.json"
+      ],
+      "ids": [
+        "CVE-2026-34584",
+        "GHSA-85j8-5c6w-gcpv"
+      ],
+      "introduced_from_origin": false,
+      "packages": [],
+      "project_git_ranges": [
+        {
+          "events": [
+            {
+              "introduced": "0a27de16c6e23b7d4b84d4d91fe59bea10877ad1"
+            },
+            {
+              "fixed": "1b5e8d38c778e869003486d3c38bc7a964661e91"
+            },
+            {
+              "fixed": "347f5976759232c36e571cf58b4bfe33c2794f35"
+            }
+          ],
+          "repo": "https://github.com/knadh/listmonk"
+        }
+      ],
+      "references": [
+        {
+          "type": "ADVISORY",
+          "url": "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/34xxx/CVE-2026-34584.json"
+        },
+        {
+          "type": "ADVISORY",
+          "url": "https://github.com/knadh/listmonk/security/advisories/GHSA-85j8-5c6w-gcpv"
+        },
+        {
+          "type": "ADVISORY",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-34584"
+        },
+        {
+          "type": "FIX",
+          "url": "https://github.com/knadh/listmonk/commit/347f5976759232c36e571cf58b4bfe33c2794f35"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/knadh/listmonk/releases/tag/v6.1.0"
+        }
+      ],
+      "repair_evidence": [
+        {
+          "sha": "1b5e8d38c778e869003486d3c38bc7a964661e91",
+          "source": "osv_git_fixed",
+          "url": "https://github.com/knadh/listmonk/commit/1b5e8d38c778e869003486d3c38bc7a964661e91"
+        },
+        {
+          "sha": "347f5976759232c36e571cf58b4bfe33c2794f35",
+          "source": "osv_git_fixed",
+          "url": "https://github.com/knadh/listmonk/commit/347f5976759232c36e571cf58b4bfe33c2794f35"
+        },
+        {
+          "sha": "347f5976759232c36e571cf58b4bfe33c2794f35",
+          "source": "reference_fix",
+          "url": "https://github.com/knadh/listmonk/commit/347f5976759232c36e571cf58b4bfe33c2794f35"
+        }
+      ],
+      "severities": [
+        "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N"
+      ],
+      "source_databases": [
+        "GIT"
+      ],
+      "summaries": [
+        "listmonk: Broken Access Control in CSV Import (Unauthorized List Assignment)"
+      ],
+      "verified_fix_boundaries": [
+        "1b5e8d38c778e869003486d3c38bc7a964661e91",
+        "347f5976759232c36e571cf58b4bfe33c2794f35"
+      ]
+    },
+    {
+      "affected_units": [
+        "GIT:knadh/listmonk",
+        "Go:github.com/knadh/listmonk"
+      ],
+      "behavioral_evidence": [
+        {
+          "count": 3,
+          "type": "osv_summary"
+        },
+        {
+          "count": 3,
+          "type": "osv_details"
+        }
+      ],
+      "component_id": "CVE-2026-34828",
+      "cwes": [
+        "CWE-613"
+      ],
+      "detail_excerpts": [
+        {
+          "original_characters": 4191,
+          "text": "### Summary\nA session management vulnerability allows previously issued authenticated sessions to remain valid after sensitive account security changes, specifically password reset and password change. As a result, an attacker who has already obtained a valid session cookie can retain access to the account even after the victim changes or resets their password.\n\nThis weakens account recovery and session security guarantees. I reproduced the issue on listmonk v6.0.0.\n\n### Details\nThe application updates account credentials successfully, but existing active sessions are not revoked afterward.\n\nThis behavior was confirmed in two flows:\n\n1. **Password reset flow**\n   - A user resets their password through the forgot/reset flow.\n   - The old password becomes invalid.\n   - The new password works.\n   - However, a session cookie issued **before** the reset remains valid and continues to authenticate successfully.\n\n2. **Authenticated password change flow**\n   - The same user logs in from two separate sessions.\n   - Using session A, the password is changed through the authenticated profile endpoint.\n   - The old password becomes invalid.\n   - The new password works.\n   - However, session B, issued before the password change, remains valid and continues to authenticate successfully.\n\nFrom the source review, the reset flow consumes the reset token, updates the password, and creates a fresh session, but there does not appear to be any revocation of older sessions. The same applies to the profile password change flow.\n\nRelevant code areas observed during review:\n- `cmd/auth.go` \u2014 forgot/reset flow\n- `cmd/users.go` \u2014 authenticated profile update flow\n- `internal/core/users.go` \u2014 password update path\n\nAdditionally:\n- It was verified that reset links are single-use.\n- It was verified that password reset on a TOTP-enabled account still enforces TOTP on fresh login.\n- However, already-issued sessions still remain valid after reset.\n\n### PoC\n#### Case 1: Password reset does not revoke existing session\n\n1. Create or use a normal user account.\n2. Log in as that user and save the authenticated session cookie.\n3. Trigger forgot-password for the account.\n4. Use the emailed reset link and set a new password.\n5. Verify:\n   - the old password no longer works\n   - the new password works\n6. Replay the **old pre-reset session cookie** against an authenticated endpoint such as `/api/profile`.\n\nExample validation request:\n```http\nGET /api/profile HTTP/1.1\nHost: 127.0.0.1:9000\nCookie: session=<old_pre_reset_session>\n```\n\nObserved result:\n\nServer returns `HTTP/1.1 200 OK`\nResponse contains the authenticated user profile\n\n#### Case 2: Password change does not revoke other active sessions\n\n1. Log in twice as the same user and save two authenticated session cookies:\n   - session A\n   - session B\n\n2. Using session A, change the password through the authenticated profile update endpoint.\n\n3. Verify:\n   - the old password no longer works\n   - the new password works\n\n4. Replay session B against an authenticated endpoint such as `/api/profile`.\n\nExample password change request:\n```http\nPUT /api/profile HTTP/1.1\nHost: 127.0.0.1:9000\nCookie: session=<session_A>\nContent-Type: application/json\n\n{\n  \"name\":\"victim1\",\n  \"email\":\"victim1@test.local\",\n  \"password\":\"VictimChanged123\"\n}\n```\n\nThen validate session B:\n```http\nGET /api/profile HTTP/1.1\nHost: 127.0.0.1:9000\nCookie: session=<session_B>\n```\n\nObserved result:\n- Server returns `HTTP/1.1 200 OK`\n- Response contains the authenticated user profile\n\n## Impact\n\nThis issue allows persistence of unauthorized access after credential recovery actions.\n\nIf an attacker has already stolen a valid session cookie through any means (for example malware, browser compromise, XSS, shared machine access, proxy leakage, or other session theft), the victim cannot fully recover the account by changing or resetting the password alone. The attacker\u2019s existing session remains valid.\n\nThis impacts account recovery expectations and session securi",
+          "truncated": true
+        },
+        {
+          "original_characters": 580,
+          "text": "listmonk is a standalone, self-hosted, newsletter and mailing list manager. From version 4.1.0 to before version 6.1.0, a session management vulnerability allows previously issued authenticated sessions to remain valid after sensitive account security changes, specifically password reset and password change. As a result, an attacker who has already obtained a valid session cookie can retain access to the account even after the victim changes or resets their password. This weakens account recovery and session security guarantees. This issue has been patched in version 6.1.0.",
+          "truncated": false
+        },
+        {
+          "original_characters": 109,
+          "text": "listmonk's active sessions remain valid after password reset and password change in github.com/knadh/listmonk",
+          "truncated": false
+        }
+      ],
+      "earliest_osv_publication": "2026-04-01T23:48:43+00:00",
+      "fixes": [
+        {
+          "sha": "1b5e8d38c778e869003486d3c38bc7a964661e91",
+          "source": "osv_git_fixed",
+          "url": "https://github.com/knadh/listmonk/commit/1b5e8d38c778e869003486d3c38bc7a964661e91"
+        },
+        {
+          "sha": "db82035d619348949512dafdaf60c86037cafc9e",
+          "source": "osv_git_fixed",
+          "url": "https://github.com/knadh/listmonk/commit/db82035d619348949512dafdaf60c86037cafc9e"
+        },
+        {
+          "sha": "db82035d619348949512dafdaf60c86037cafc9e",
+          "source": "reference_fix",
+          "url": "https://github.com/knadh/listmonk/commit/db82035d619348949512dafdaf60c86037cafc9e"
+        }
+      ],
+      "full_evidence_sources": [
+        "GIT.zip:CVE-2026-34828.json",
+        "Go.zip:GHSA-h5j9-cvrw-v5qh.json",
+        "Go.zip:GO-2026-5414.json"
+      ],
+      "ids": [
+        "CVE-2026-34828",
+        "GHSA-h5j9-cvrw-v5qh",
+        "GO-2026-5414"
+      ],
+      "introduced_from_origin": false,
+      "packages": [
+        "Go:github.com/knadh/listmonk"
+      ],
+      "project_git_ranges": [
+        {
+          "events": [
+            {
+              "introduced": "0a27de16c6e23b7d4b84d4d91fe59bea10877ad1"
+            },
+            {
+              "fixed": "1b5e8d38c778e869003486d3c38bc7a964661e91"
+            },
+            {
+              "fixed": "db82035d619348949512dafdaf60c86037cafc9e"
+            }
+          ],
+          "repo": "https://github.com/knadh/listmonk"
+        }
+      ],
+      "references": [
+        {
+          "type": "ADVISORY",
+          "url": "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/34xxx/CVE-2026-34828.json"
+        },
+        {
+          "type": "ADVISORY",
+          "url": "https://github.com/knadh/listmonk/security/advisories/GHSA-h5j9-cvrw-v5qh"
+        },
+        {
+          "type": "ADVISORY",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-34828"
+        },
+        {
+          "type": "FIX",
+          "url": "https://github.com/knadh/listmonk/commit/db82035d619348949512dafdaf60c86037cafc9e"
+        },
+        {
+          "type": "PACKAGE",
+          "url": "https://github.com/knadh/listmonk"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/knadh/listmonk/commit/db82035d619348949512dafdaf60c86037cafc9e"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/knadh/listmonk/releases/tag/v6.1.0"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/knadh/listmonk/security/advisories/GHSA-h5j9-cvrw-v5qh"
+        }
+      ],
+      "repair_evidence": [
+        {
+          "sha": "1b5e8d38c778e869003486d3c38bc7a964661e91",
+          "source": "osv_git_fixed",
+          "url": "https://github.com/knadh/listmonk/commit/1b5e8d38c778e869003486d3c38bc7a964661e91"
+        },
+        {
+          "sha": "db82035d619348949512dafdaf60c86037cafc9e",
+          "source": "osv_git_fixed",
+          "url": "https://github.com/knadh/listmonk/commit/db82035d619348949512dafdaf60c86037cafc9e"
+        },
+        {
+          "sha": "db82035d619348949512dafdaf60c86037cafc9e",
+          "source": "reference_fix",
+          "url": "https://github.com/knadh/listmonk/commit/db82035d619348949512dafdaf60c86037cafc9e"
+        }
+      ],
+      "severities": [
+        "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:L/A:N"
+      ],
+      "source_databases": [
+        "GIT",
+        "Go"
+      ],
+      "summaries": [
+        "listmonk's active sessions remain valid after password reset and password change",
+        "listmonk's active sessions remain valid after password reset and password change in github.com/knadh/listmonk",
+        "listmonk: Active sessions remain valid after password reset and password change"
+      ],
+      "verified_fix_boundaries": [
+        "1b5e8d38c778e869003486d3c38bc7a964661e91",
+        "db82035d619348949512dafdaf60c86037cafc9e"
+      ]
+    },
+    {
+      "affected_units": [
+        "GIT:knadh/listmonk"
+      ],
+      "behavioral_evidence": [
+        {
+          "count": 1,
+          "type": "osv_summary"
+        },
+        {
+          "count": 1,
+          "type": "osv_details"
+        }
+      ],
+      "component_id": "CVE-2026-62361",
+      "cwes": [
+        "CWE-89"
+      ],
+      "detail_excerpts": [
+        {
+          "original_characters": 537,
+          "text": "listmonk is a standalone, self-hosted, newsletter and mailing list manager. Prior to 6.2.0, listmonk\u2019s GET /api/subscribers/export endpoint injects the user-controlled query parameter into QuerySubscribersForExport in internal/core/subscribers.go without calling validateQueryTables, unlike GET /api/subscribers, allowing an authenticated user with subscribers:sql_query and subscribers:get_all to read arbitrary database tables such as users and settings and execute data-modifying PostgreSQL CTEs. This issue is fixed in version 6.2.0.",
+          "truncated": false
+        }
+      ],
+      "earliest_osv_publication": "2026-07-15T20:56:45.832000+00:00",
+      "fixes": [
+        {
+          "sha": "c0a6525009a65265230185f16e8674dcc83aa024",
+          "source": "osv_git_fixed",
+          "url": "https://github.com/knadh/listmonk/commit/c0a6525009a65265230185f16e8674dcc83aa024"
+        },
+        {
+          "sha": "c0a6525009a65265230185f16e8674dcc83aa024",
+          "source": "reference_fix",
+          "url": "https://github.com/knadh/listmonk/commit/c0a6525009a65265230185f16e8674dcc83aa024"
+        },
+        {
+          "sha": "ef0a75872463f10a4848af6c547d1c057405453a",
+          "source": "osv_git_fixed",
+          "url": "https://github.com/knadh/listmonk/commit/ef0a75872463f10a4848af6c547d1c057405453a"
+        }
+      ],
+      "full_evidence_sources": [
+        "GIT.zip:CVE-2026-62361.json"
+      ],
+      "ids": [
+        "CVE-2026-62361",
+        "GHSA-xgjr-7j9q-2h4r"
+      ],
+      "introduced_from_origin": true,
+      "packages": [],
+      "project_git_ranges": [
+        {
+          "events": [
+            {
+              "introduced": "0"
+            },
+            {
+              "fixed": "c0a6525009a65265230185f16e8674dcc83aa024"
+            },
+            {
+              "fixed": "ef0a75872463f10a4848af6c547d1c057405453a"
+            }
+          ],
+          "repo": "https://github.com/knadh/listmonk"
+        }
+      ],
+      "references": [
+        {
+          "type": "ADVISORY",
+          "url": "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/62xxx/CVE-2026-62361.json"
+        },
+        {
+          "type": "ADVISORY",
+          "url": "https://github.com/knadh/listmonk/security/advisories/GHSA-xgjr-7j9q-2h4r"
+        },
+        {
+          "type": "ADVISORY",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-62361"
+        },
+        {
+          "type": "FIX",
+          "url": "https://github.com/knadh/listmonk/commit/c0a6525009a65265230185f16e8674dcc83aa024"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/knadh/listmonk/releases/tag/v6.2.0"
+        }
+      ],
+      "repair_evidence": [
+        {
+          "sha": "c0a6525009a65265230185f16e8674dcc83aa024",
+          "source": "osv_git_fixed",
+          "url": "https://github.com/knadh/listmonk/commit/c0a6525009a65265230185f16e8674dcc83aa024"
+        },
+        {
+          "sha": "c0a6525009a65265230185f16e8674dcc83aa024",
+          "source": "reference_fix",
+          "url": "https://github.com/knadh/listmonk/commit/c0a6525009a65265230185f16e8674dcc83aa024"
+        },
+        {
+          "sha": "ef0a75872463f10a4848af6c547d1c057405453a",
+          "source": "osv_git_fixed",
+          "url": "https://github.com/knadh/listmonk/commit/ef0a75872463f10a4848af6c547d1c057405453a"
+        }
+      ],
+      "severities": [
+        "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:L/A:N"
+      ],
+      "source_databases": [
+        "GIT"
+      ],
+      "summaries": [
+        "listmonk: SQL Injection in `/api/subscribers/export` bypasses table access control, leaking admin password hashes and SMTP credentials"
+      ],
+      "verified_fix_boundaries": [
+        "c0a6525009a65265230185f16e8674dcc83aa024",
+        "ef0a75872463f10a4848af6c547d1c057405453a"
+      ]
+    }
+  ],
+  "head_reference": {
+    "commit": "911e0b774abad4fbf7b534be43a34a80fb6ace5b",
+    "committed_at": "2026-07-21T07:23:04+00:00",
+    "known_applicable_component_ids": [],
+    "parents": [
+      "0377d5b4aefc807be35a00c96e8693ca2d76cff7"
+    ],
+    "snapshot_limited_no_known_applicable_issue": true,
+    "source": "cached_repository_head_unverified"
+  },
+  "popularity_score": 85,
+  "programmatic_exclusions": [],
+  "project": {
+    "description": "High performance, self-hosted, newsletter and mailing list manager with a modern dashboard. Single binary app.",
+    "forks": 2428,
+    "license": "AGPL-3.0",
+    "pushed_at": "2026-07-20T17:54:49Z",
+    "stars": 22301,
+    "topics": [
+      "campaign",
+      "campaign-management",
+      "email-marketing",
+      "email-subscription",
+      "listmonk",
+      "mailing-list",
+      "newsletter",
+      "newsletter-management",
+      "newsletter-software",
+      "self-hosted",
+      "sms-gateway",
+      "smtp",
+      "transactional-emails"
+    ],
+    "url": "https://github.com/knadh/listmonk"
+  },
+  "ready_for_semantic_review": true,
+  "repository": "knadh/listmonk",
+  "schema_version": 2,
+  "semantic_review_performed": false,
+  "source_method": "osv_git_event_ancestry",
+  "source_provenance": {
+    "candidate_sources": {
+      "osv_manifest": {
+        "path": "../cyber-arena-orche/docs/jt/oss_shortlist_prototype/osv_manifest.json",
+        "sha256": "fe629f6ca100dae76a1dab013c234bb94e8228411fc61aa757d45edb5a5ceb7d"
+      },
+      "projects": {
+        "path": "../cyber-arena-orche/docs/jt/oss_shortlist_prototype/projects.json",
+        "sha256": "a718cd1ed87762eefd49dae1d3fe861f2ca328e80c2d543a820b67daf54a7074"
+      }
+    },
+    "date_cutoff": {
+      "comparison": "earliest active OSV publication is strictly later",
+      "enabled": true,
+      "published_after": "2026-02-16T23:59:59+00:00"
+    }
+  },
+  "source_result": {
+    "path": "KNADH__LISTMONK.json",
+    "sha256": "b3ea6e47bce181771f5ee5b4efc35cb38ea33d7ec60ebaa750a3efa622480137"
+  },
+  "window_selection_method": {
+    "authoritative_score": false,
+    "limit": 5,
+    "name": "widest_then_greedy_marginal_component_diversity"
+  }
+}

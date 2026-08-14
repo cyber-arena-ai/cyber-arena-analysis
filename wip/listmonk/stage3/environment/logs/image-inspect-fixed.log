@@ -1,0 +1,63 @@
+Script started on 2026-08-06 08:24:46-07:00 [COMMAND="docker image inspect cyber-arena-stage3-listmonk:c0a6525" <not executed on terminal>]
+[
+    {
+        "Id": "sha256:5506124f6875da641a9351fb9c0903542d7b5d8304c868216dd7ffa31ee1d8dc",
+        "RepoTags": [
+            "cyber-arena-stage3-listmonk:c0a6525"
+        ],
+        "RepoDigests": [
+            "cyber-arena-stage3-listmonk@sha256:5506124f6875da641a9351fb9c0903542d7b5d8304c868216dd7ffa31ee1d8dc"
+        ],
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-08-06T08:23:47.59687178-07:00",
+        "Config": {
+            "ExposedPorts": {
+                "9000/tcp": {}
+            },
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ],
+            "Entrypoint": [
+                "docker-entrypoint.sh"
+            ],
+            "Cmd": [
+                "./listmonk"
+            ],
+            "WorkingDir": "/listmonk",
+            "ArgsEscaped": true
+        },
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Size": 14768275,
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:31ad4a471c6852bfec14d757cc75a566c82a9769f12c3918cf6bf52cc0eeb3d0",
+                "sha256:15e7956df6fd78f74fd6c9e546ece3eff811b19c70cd8f22fac41784a54e8f85",
+                "sha256:5e3e6ce226433d43e47d67525dd4efe992679cf755c299941489d9aa419542e3",
+                "sha256:a3fbfae6a1e432e9e5c14533a3a68c20223f4aa4fc3dab0e83dcd396d33a3661",
+                "sha256:229a882e36e83f87fc4366a579558958a7bbcd657a525bb7e94f2415882bc831",
+                "sha256:c369a5726e924b9e82dc08563bc0d2971d0777a564cbf75cf1e8e461da7e70cc",
+                "sha256:79002c05483b86a42fefd560228c479df9b2d7f9178ec9cdb73a9cc511d6e79f"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "2026-08-06T15:23:50.527631206Z"
+        },
+        "Descriptor": {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "digest": "sha256:5506124f6875da641a9351fb9c0903542d7b5d8304c868216dd7ffa31ee1d8dc",
+            "size": 856
+        },
+        "Identity": {
+            "Build": [
+                {
+                    "Ref": "csey5upasidr9fkc0ulo9eucw",
+                    "CreatedAt": "2026-08-06T08:23:50.827831139-07:00"
+                }
+            ]
+        }
+    }
+]
+
+Script done on 2026-08-06 08:24:46-07:00 [COMMAND_EXIT_CODE="0"]

@@ -26,7 +26,7 @@ BANNED_PATTERNS = (
     (re.compile(r"\brank(?:ed|ing)?\b", re.IGNORECASE), "rank"),
 )
 SCOPE_RE = re.compile(
-    r"`((?:app|host|network|secret|custom)\.[a-z0-9_.-]+)`"
+    r"`((?:app|host|network|secret|storage|custom)\.[a-z0-9_.-]+)`"
 )
 COMMIT_LINK_RE = re.compile(
     r"\[`([0-9a-f]{40})`\]\([^)]*/commit/([0-9a-f]{40})\)"

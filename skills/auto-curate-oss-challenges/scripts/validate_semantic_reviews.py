@@ -96,7 +96,13 @@ def _validate_application(application: object, errors: list[str]) -> str | None:
     return status if status in STATUSES else None
 
 
-def validate(packet_path: Path, review_path: Path, scopes: set[str]) -> list[str]:
+def validate(
+    packet_path: Path,
+    review_path: Path,
+    scopes: dict[str, str],
+    technical_impacts: set[str],
+    custom_scope_fields: set[str],
+) -> list[str]:
     packet_bytes = packet_path.read_bytes()
     packet = json.loads(packet_bytes)
     review = json.loads(review_path.read_text(encoding="utf-8"))
@@ -106,8 +112,8 @@ def validate(packet_path: Path, review_path: Path, scopes: set[str]) -> list[str
         return ["source packet must be a schema-version 2 JSON object"]
     if not isinstance(review, dict):
         return ["semantic review must be a JSON object"]
-    if review.get("schema_version") != 2:
-        errors.append("schema_version must be 2")
+    if review.get("schema_version") != 3:
+        errors.append("schema_version must be 3")
     if review.get("repository") != packet.get("repository"):
         errors.append("repository does not match source packet")
     if review.get("source_packet") != packet_path.name:
@@ -247,9 +253,28 @@ def validate(packet_path: Path, review_path: Path, scopes: set[str]) -> list[str
                     errors.append(f"{prefix} must be an object")
                     continue
                 scope_id = scope.get("scope_id")
-                if scope_id not in scopes and not str(scope_id).startswith("custom."):
+                custom_scope = scope.get("custom_scope")
+                if scope_id in scopes:
+                    if custom_scope is not None:
+                        errors.append(f"{prefix} registered scope must not define custom_scope")
+                elif not str(scope_id).startswith("custom."):
                     errors.append(f"{prefix} uses unregistered scope {scope_id}")
-                elif isinstance(scope_id, str):
+                elif not isinstance(custom_scope, dict):
+                    errors.append(f"{prefix} custom scope requires custom_scope definition")
+                else:
+                    if custom_scope.get("id") != scope_id:
+                        errors.append(f"{prefix}.custom_scope.id must equal scope_id")
+                    for field in sorted(custom_scope_fields - {"id", "technical_impact"}):
+                        if not _text(custom_scope.get(field)):
+                            errors.append(f"{prefix}.custom_scope.{field} must be non-empty")
+                    if custom_scope.get("technical_impact") not in technical_impacts:
+                        errors.append(
+                            f"{prefix}.custom_scope.technical_impact is not registered"
+                        )
+                if isinstance(scope_id, str) and (
+                    scope_id in scopes
+                    or (scope_id.startswith("custom.") and isinstance(custom_scope, dict))
+                ):
                     scope_ids.add(scope_id)
                 if scope.get("confidence") not in CONFIDENCE:
                     errors.append(f"{prefix}.confidence is invalid")
@@ -294,6 +319,15 @@ def validate(packet_path: Path, review_path: Path, scopes: set[str]) -> list[str
             elif isinstance(window_id, str):
                 review_windows[window_id] = window
             source_window = packet_windows.get(window_id, {})
+            if window.get("commit") != source_window.get("representative_checkpoint"):
+                errors.append(f"{location}.commit does not match the source window")
+            component_ids = _string_list(
+                window.get("component_ids"), f"{location}.component_ids", errors
+            )
+            if component_ids != source_window.get("component_ids", []):
+                errors.append(
+                    f"{location}.component_ids must equal the source-window component set"
+                )
             status = window.get("status")
             if status not in STATUSES:
                 errors.append(f"{location}.status is invalid")
@@ -354,7 +388,16 @@ def main() -> int:
     args = parser.parse_args()
     try:
         scopes_payload = json.loads(args.scope_registry.read_text(encoding="utf-8"))
-        scopes = {str(item["id"]) for item in scopes_payload.get("scopes", [])}
+        impact_items = scopes_payload["technical_impact_standard"]["impacts"]
+        technical_impacts = {str(item["id"]) for item in impact_items}
+        scopes = {
+            str(item["id"]): str(item["technical_impact"])
+            for item in scopes_payload.get("scopes", [])
+        }
+        unknown_parents = set(scopes.values()) - technical_impacts
+        if unknown_parents:
+            parser.error(f"scope registry uses unknown technical impacts: {sorted(unknown_parents)}")
+        custom_scope_fields = set(scopes_payload["policy"]["custom_scope_required_fields"])
         packets = sorted(args.packet_dir.glob("*.json"))
         reviews = {path.name: path for path in args.review_dir.glob("*.json")}
     except (OSError, KeyError, json.JSONDecodeError) as error:
@@ -371,7 +414,13 @@ def main() -> int:
             print(f"FAIL {packet_path}: missing semantic review")
             continue
         try:
-            errors = validate(packet_path, review_path, scopes)
+            errors = validate(
+                packet_path,
+                review_path,
+                scopes,
+                technical_impacts,
+                custom_scope_fields,
+            )
         except (OSError, KeyError, json.JSONDecodeError) as error:
             errors = [str(error)]
         if errors:

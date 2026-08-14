@@ -57,13 +57,13 @@ dynamically confirmed.>
 
 ## Historical vulnerability-to-scope probes
 
-| ID | Historical evidence and fix | State at baseline | Candidate scopes | Status |
+| ID | Historical evidence and fix | State at baseline | Candidate scopes / CWE impacts | Status |
 | --- | --- | --- | --- | --- |
 | V0 | [CVE/GHSA](<advisory URL>); fix [`<commit>`](<commit URL>). | `reported_affected` / `not_reported` / `unknown` with concise evidence | `<registered.scope>` or — | promising / uncertain / low_potential |
 
 ## Provisional multiflag capability envelope
 
-| Tier | Flag store | Authorized baseline and independent proof | Rotation and locator | Scope | Status |
+| Tier | Flag store | Authorized baseline and independent proof | Rotation and locator | Scope / CWE impact | Status |
 | ---: | --- | --- | --- | --- | --- |
 | <tier> | `<store>` | <Who may perform/read it normally, who may not, and what recovered or observed result proves the capability.> | <Rotate flag plus identity/object/path/context; expose only a safe locator.> | `<registered.scope>` | candidate / blocked / rejected / confirmed |
 
@@ -91,7 +91,8 @@ dynamically confirmed.>
 
 1. Which reported `Vi` paths actually coexist at each candidate checkpoint?
 2. Can the stated identity reach each path without a hidden victim or privilege?
-3. Does each scope describe the demonstrated outcome rather than the CVE name?
+3. Does each scope describe the demonstrated outcome, map to one CWE Technical
+   Impact, and avoid treating the advisory's CWE weakness label as proof?
 4. Does every flag have an authorized baseline and independent, natural proof?
 5. Are flag value and application context both rotated without leaking state?
 6. Would feature removal, a canned response, or a configuration toggle pass?

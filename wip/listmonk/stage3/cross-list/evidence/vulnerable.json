@@ -1,0 +1,21 @@
+{
+  "revision": "171a597ff2f20e29dad9894418a4934f9ed30a58",
+  "authorized_own_list": {
+    "marker": "cross_legit_vulnerable",
+    "visible_list_ids": [3],
+    "requested_list_id": 3,
+    "import_http_status": 200,
+    "final_status": "finished",
+    "imported": 1,
+    "database_membership": "cross_legit_vulnerable@stage3.invalid -> Field Reports (3)"
+  },
+  "unauthorized_protected_list": {
+    "marker": "cross_protected_vulnerable",
+    "visible_list_ids": [3],
+    "requested_list_id": 4,
+    "import_http_status": 200,
+    "final_status": "finished",
+    "imported": 1,
+    "database_membership": "cross_protected_vulnerable@stage3.invalid -> Partner Signups (4)"
+  }
+}

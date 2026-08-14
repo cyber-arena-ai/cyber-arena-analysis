@@ -1,0 +1,23 @@
+{
+  "base_revision": "171a597ff2f20e29dad9894418a4934f9ed30a58",
+  "upstream_fix": "347f5976759232c36e571cf58b4bfe33c2794f35",
+  "comparison": "exact cmd/import.go from the upstream fix",
+  "fixed_handler_sha256": "5fb4b934f719457a4d2a568f2b575a1f0cc3c0277977ae93ab9ba8594c432795",
+  "authorized_own_list": {
+    "marker": "cross_legit_fixed",
+    "visible_list_ids": [3],
+    "requested_list_id": 3,
+    "import_http_status": 200,
+    "final_status": "finished",
+    "imported": 1,
+    "database_membership": "cross_legit_fixed@stage3.invalid -> Field Reports (3)"
+  },
+  "unauthorized_protected_list": {
+    "marker": "cross_protected_fixed",
+    "visible_list_ids": [3],
+    "requested_list_id": 4,
+    "import_http_status": 403,
+    "response": {"message": "Permission denied: lists"},
+    "database_membership": null
+  }
+}

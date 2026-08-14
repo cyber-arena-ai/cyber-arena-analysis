@@ -1,4 +1,4 @@
 interface:
   display_name: "Auto-Curate OSS Challenges"
-  short_description: "Curate OSS challenge candidate windows"
-  default_prompt: "Use $auto-curate-oss-challenges to discover evidence-backed OSS candidate windows and prepare them for budgeted semantic review."
+  short_description: "Curate OSS candidates and draft challenge PR reports"
+  default_prompt: "Use $auto-curate-oss-challenges to discover OSS candidates, resolve historical windows, produce a focused runnable feasibility study, or assemble a concise challenge PR report from completed evidence."

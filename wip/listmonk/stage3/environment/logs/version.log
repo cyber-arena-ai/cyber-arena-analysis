@@ -1,0 +1,4 @@
+Script started on 2026-08-06 08:21:25-07:00 [COMMAND="docker compose -p ca_stage3_listmonk_env exec -T app ./listmonk --version" <not executed on terminal>]
+v6.0.0-stage3 (#171a597ff2f20e29dad9894418a4934f9ed30a58 2026-08-06T15:19:52+0000)
+
+Script done on 2026-08-06 08:21:25-07:00 [COMMAND_EXIT_CODE="0"]

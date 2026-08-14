@@ -14,7 +14,13 @@ REGISTRY = Path(__file__).parents[1] / "docs/attack_scopes.json"
 def _write_inputs(tmp_path: Path, *, scope: str = "host.file.read") -> tuple[Path, Path]:
     registry = tmp_path / "attack_scopes.json"
     registry.write_text(
-        json.dumps({"scopes": [{"id": "host.file.read", "tier": 1}]}),
+        json.dumps(
+            {
+                "scopes": [
+                    {"id": "host.file.read", "technical_impact": "read_data"}
+                ]
+            }
+        ),
         encoding="utf-8",
     )
     dossier = tmp_path / "POTENTIAL_CHALLENGE_EXAMPLE.md"
@@ -74,7 +80,7 @@ def test_validator_accepts_a_complete_dossier_and_rejects_unknown_scopes(tmp_pat
 def test_scope_registry_defines_positive_dimensions_and_disallowed_outcomes():
     payload = json.loads(REGISTRY.read_text(encoding="utf-8"))
 
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert {
         item["id"] for item in payload["policy"]["disallowed_success_conditions"]
     } == {
@@ -83,8 +89,24 @@ def test_scope_registry_defines_positive_dimensions_and_disallowed_outcomes():
         "availability.health_failure",
         "arena.control_plane_access",
     }
+    impacts = {
+        item["id"] for item in payload["technical_impact_standard"]["impacts"]
+    }
+    assert impacts == {
+        "read_data",
+        "modify_data",
+        "dos_unreliable_execution",
+        "dos_resource_consumption",
+        "execute_unauthorized_code_or_commands",
+        "gain_privileges_or_assume_identity",
+        "bypass_protection_mechanism",
+        "hide_activities",
+    }
     assert all(
-        {"effect", "target", "boundary", "non_examples"}.issubset(scope)
+        {"technical_impact", "target", "boundary", "non_examples"}.issubset(scope)
+        and scope["technical_impact"] in impacts
         and scope["non_examples"]
+        and "tier" not in scope
+        and "effect" not in scope
         for scope in payload["scopes"]
     )

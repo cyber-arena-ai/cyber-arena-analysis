@@ -1,0 +1,14 @@
+VULNERABLE BUILD
+                   email                   | list_id |      name
+-------------------------------------------+---------+-----------------
+ cross_legit_vulnerable@stage3.invalid     |       3 | Field Reports
+ cross_protected_vulnerable@stage3.invalid |       4 | Partner Signups
+
+FIXED HANDLER BUILD
+                   email                   | list_id |      name
+-------------------------------------------+---------+-----------------
+ cross_legit_fixed@stage3.invalid          |       3 | Field Reports
+ cross_legit_vulnerable@stage3.invalid     |       3 | Field Reports
+ cross_protected_vulnerable@stage3.invalid |       4 | Partner Signups
+
+No cross_protected_fixed subscriber or membership was created.

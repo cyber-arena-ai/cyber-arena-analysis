@@ -1,0 +1,68 @@
+Script started on 2026-08-06 08:21:28-07:00 [COMMAND="docker image inspect cyber-arena-stage3-listmonk:171a597" <not executed on terminal>]
+[
+    {
+        "Id": "sha256:43cf7ef45938f796160a773f969249339dbfb6a23e529681ab37c4ec83643ea0",
+        "RepoTags": [
+            "cyber-arena-stage3-listmonk:171a597"
+        ],
+        "RepoDigests": [
+            "cyber-arena-stage3-listmonk@sha256:43cf7ef45938f796160a773f969249339dbfb6a23e529681ab37c4ec83643ea0"
+        ],
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-08-06T08:20:45.507607012-07:00",
+        "Config": {
+            "ExposedPorts": {
+                "9000/tcp": {}
+            },
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ],
+            "Entrypoint": [
+                "docker-entrypoint.sh"
+            ],
+            "Cmd": [
+                "./listmonk"
+            ],
+            "WorkingDir": "/listmonk",
+            "Labels": {
+                "com.docker.compose.project": "ca_stage3_listmonk_env",
+                "com.docker.compose.service": "app",
+                "com.docker.compose.version": "5.1.0"
+            },
+            "ArgsEscaped": true
+        },
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Size": 14696759,
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:31ad4a471c6852bfec14d757cc75a566c82a9769f12c3918cf6bf52cc0eeb3d0",
+                "sha256:15e7956df6fd78f74fd6c9e546ece3eff811b19c70cd8f22fac41784a54e8f85",
+                "sha256:5e3e6ce226433d43e47d67525dd4efe992679cf755c299941489d9aa419542e3",
+                "sha256:29a0af0f30847620faf40fa24e701f0c6a0afcff140977f50221f75a34be515f",
+                "sha256:dc9cde2b7130ad476bc71b5bc4c2abae213f541983c84b5b0eb55107b224bbee",
+                "sha256:c970733aff6149660213996280e0eeb40e28f0cc954af0df64088d80b0018705",
+                "sha256:755ffa49f9561e39f0ff5e2d969ea0db62d132c8005ee36947f48895bf125391"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "2026-08-06T15:20:48.524052577Z"
+        },
+        "Descriptor": {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "digest": "sha256:43cf7ef45938f796160a773f969249339dbfb6a23e529681ab37c4ec83643ea0",
+            "size": 856
+        },
+        "Identity": {
+            "Build": [
+                {
+                    "Ref": "da0lo2g1mwc1obh8jfc18zc2k",
+                    "CreatedAt": "2026-08-06T08:20:48.989037184-07:00"
+                }
+            ]
+        }
+    }
+]
+
+Script done on 2026-08-06 08:21:28-07:00 [COMMAND_EXIT_CODE="0"]

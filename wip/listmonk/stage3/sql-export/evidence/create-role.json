@@ -1,0 +1,1 @@
+{"data":{"id":2,"created_at":"2026-08-06T15:22:37.840948Z","updated_at":"2026-08-06T15:22:37.840948Z","type":"user","name":"sql_export_operator","permissions":["subscribers:get_all","subscribers:sql_query"],"lists":null}}

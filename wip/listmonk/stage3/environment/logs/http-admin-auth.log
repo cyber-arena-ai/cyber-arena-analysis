@@ -1,0 +1,9 @@
+Script started on 2026-08-06 08:22:14-07:00 [COMMAND="curl --silent --show-error --cookie artifacts/admin.cookies --cookie-jar artifacts/admin.cookies --dump-header - --data-urlencode nonce=ssPD04OJKcjcfuFt --data-urlencode next=/admin --data-urlencode username=stage3admin --data-urlencode password=Stage3Listmonk-2026 http://127.0.0.1:19000/admin/login" <not executed on terminal>]
+HTTP/1.1 302 Found
+Location: /admin
+Set-Cookie: session=Du9tm6GVak4TLroGjWGpmuWkMtR2Uzrg408YlKu8fQrWYs1Pkzz0AosDeJq33cEQ; Path=/; Max-Age=604800; HttpOnly; SameSite=Lax
+Date: Thu, 06 Aug 2026 15:22:14 GMT
+Content-Length: 0
+
+
+Script done on 2026-08-06 08:22:14-07:00 [COMMAND_EXIT_CODE="0"]

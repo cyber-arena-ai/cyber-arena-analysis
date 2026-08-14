@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: listmonk
+      POSTGRES_PASSWORD: listmonk-stage3-fixed
+      POSTGRES_DB: listmonk
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U listmonk -d listmonk"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  app:
+    image: cyber-arena-stage3-listmonk:c0a6525
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:19001:9000"
+    environment:
+      LISTMONK_app__address: 0.0.0.0:9000
+      LISTMONK_db__host: db
+      LISTMONK_db__port: 5432
+      LISTMONK_db__user: listmonk
+      LISTMONK_db__password: listmonk-stage3-fixed
+      LISTMONK_db__database: listmonk
+      LISTMONK_db__ssl_mode: disable
+      LISTMONK_ADMIN_USER: stage3admin
+      LISTMONK_ADMIN_PASSWORD: Stage3Listmonk-2026
+      TZ: Etc/UTC
+    command:
+      - sh
+      - -c
+      - >-
+        ./listmonk --install --idempotent --yes --config '' &&
+        ./listmonk --upgrade --yes --config '' &&
+        ./listmonk --config ''
+
+volumes:
+  db-data:

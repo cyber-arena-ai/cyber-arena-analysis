@@ -1,0 +1,4 @@
+uuid,email,name,attributes,status,created_at,updated_at
+090e3a32-112c-4d30-92d7-6510536236d2,john@example.com,John Doe,"{""city"": ""Bengaluru"", ""good"": true, ""type"": ""known""}",enabled,2026-08-06 15:21:11.18507 +0000 UTC,2026-08-06 15:21:11.18507 +0000 UTC
+d86f18ab-1730-45af-b7e1-1dd534e78b38,anon@example.com,Anon Doe,"{""city"": ""Bengaluru"", ""good"": true, ""type"": ""unknown""}",enabled,2026-08-06 15:21:11.204198 +0000 UTC,2026-08-06 15:21:11.204198 +0000 UTC
+b629908b-9acc-410d-a751-7590f1294bfd,sql_legit@example.test,SQL Legitimate Subscriber,"{""pilot"": ""sql-export""}",enabled,2026-08-06 15:23:03.700088 +0000 UTC,2026-08-06 15:23:03.700088 +0000 UTC

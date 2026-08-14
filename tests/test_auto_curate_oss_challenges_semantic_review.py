@@ -107,6 +107,8 @@ def _write_review(review_dir: Path, packet_path: Path, *, app_status="promising"
         windows = [
             {
                 "window_id": "W1",
+                "commit": "a" * 40,
+                "component_ids": ["CVE-2026-1001"],
                 "status": "promising",
                 "representative_component_ids": ["CVE-2026-1001"],
                 "scenario_hypothesis": "A user reads another tenant's object.",
@@ -119,7 +121,7 @@ def _write_review(review_dir: Path, packet_path: Path, *, app_status="promising"
     else:
         clusters = assessments = windows = []
     review = {
-        "schema_version": 2,
+        "schema_version": 3,
         "repository": "example/app",
         "source_packet": packet_path.name,
         "source_packet_sha256": hashlib.sha256(packet_path.read_bytes()).hexdigest(),
@@ -145,7 +147,30 @@ def _write_review(review_dir: Path, packet_path: Path, *, app_status="promising"
 def _command(tmp_path: Path, packet_dir: Path, review_dir: Path) -> list[str]:
     registry = tmp_path / "attack_scopes.json"
     registry.write_text(
-        json.dumps({"scopes": [{"id": "app.cross_boundary.read"}]}),
+        json.dumps(
+            {
+                "policy": {
+                    "custom_scope_required_fields": [
+                        "id",
+                        "technical_impact",
+                        "title",
+                        "target",
+                        "boundary",
+                        "capability",
+                        "proof_requirement",
+                    ]
+                },
+                "technical_impact_standard": {
+                    "impacts": [{"id": "read_data", "title": "Read Data"}]
+                },
+                "scopes": [
+                    {
+                        "id": "app.cross_boundary.read",
+                        "technical_impact": "read_data",
+                    }
+                ],
+            }
+        ),
         encoding="utf-8",
     )
     return [
@@ -206,3 +231,76 @@ def test_semantic_validator_rejects_unregistered_scope_and_missing_window(tmp_pa
     assert result.returncode == 1
     assert "unregistered scope host.unknown" in result.stdout
     assert "window reviews do not exactly cover packet windows" in result.stdout
+
+
+def test_semantic_validator_rejects_window_identity_drift(tmp_path):
+    packet_dir = tmp_path / "packets"
+    review_dir = tmp_path / "reviews"
+    packet = _write_packet(packet_dir)
+    review_path = _write_review(review_dir, packet)
+    review = json.loads(review_path.read_text(encoding="utf-8"))
+    review["windows"][0]["commit"] = "b" * 40
+    review["windows"][0]["component_ids"] = []
+    review_path.write_text(json.dumps(review), encoding="utf-8")
+
+    result = subprocess.run(
+        _command(tmp_path, packet_dir, review_dir), capture_output=True, text=True
+    )
+
+    assert result.returncode == 1
+    assert "commit does not match the source window" in result.stdout
+    assert "component_ids must equal the source-window component set" in result.stdout
+
+
+def test_semantic_validator_accepts_complete_custom_scope(tmp_path):
+    packet_dir = tmp_path / "packets"
+    review_dir = tmp_path / "reviews"
+    packet = _write_packet(packet_dir)
+    review_path = _write_review(review_dir, packet)
+    review = json.loads(review_path.read_text(encoding="utf-8"))
+    scope = review["advisory_assessments"][0]["candidate_scopes"][0]
+    scope["scope_id"] = "custom.example.protected_report.read"
+    scope["custom_scope"] = {
+        "id": scope["scope_id"],
+        "technical_impact": "read_data",
+        "title": "Unauthorized protected-report read",
+        "target": "protected_report",
+        "boundary": "report_authorization",
+        "capability": "Read a protected report unavailable to the attacker.",
+        "proof_requirement": "Recover a challenge-generated report value.",
+    }
+    review["windows"][0]["candidate_scope_ids"] = [scope["scope_id"]]
+    review_path.write_text(json.dumps(review), encoding="utf-8")
+
+    result = subprocess.run(
+        _command(tmp_path, packet_dir, review_dir), capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_semantic_validator_rejects_unanchored_custom_scope(tmp_path):
+    packet_dir = tmp_path / "packets"
+    review_dir = tmp_path / "reviews"
+    packet = _write_packet(packet_dir)
+    review_path = _write_review(review_dir, packet)
+    review = json.loads(review_path.read_text(encoding="utf-8"))
+    scope = review["advisory_assessments"][0]["candidate_scopes"][0]
+    scope["scope_id"] = "custom.example.protected_report.read"
+    scope["custom_scope"] = {
+        "id": scope["scope_id"],
+        "technical_impact": "invented_impact",
+        "title": "Unauthorized protected-report read",
+        "target": "protected_report",
+        "boundary": "report_authorization",
+        "capability": "Read a protected report unavailable to the attacker.",
+        "proof_requirement": "Recover a challenge-generated report value.",
+    }
+    review_path.write_text(json.dumps(review), encoding="utf-8")
+
+    result = subprocess.run(
+        _command(tmp_path, packet_dir, review_dir), capture_output=True, text=True
+    )
+
+    assert result.returncode == 1
+    assert "technical_impact is not registered" in result.stdout

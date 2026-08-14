@@ -1,0 +1,303 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import json
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+IMAGE_HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def command_result(command: list[str], cwd: Path, timeout: float) -> dict:
+    started = time.monotonic()
+    try:
+        result = subprocess.run(
+            command, cwd=cwd, text=True, capture_output=True,
+            timeout=timeout, check=False,
+        )
+        parsed = None
+        try:
+            parsed = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            pass
+        return {
+            "command": command,
+            "cwd": str(cwd),
+            "timeout_seconds": timeout,
+            "status": "PASS" if result.returncode == 0 else "FAIL",
+            "exit_code": result.returncode,
+            "duration_seconds": round(time.monotonic() - started, 3),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "parsed_json": parsed,
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "command": command,
+            "cwd": str(cwd),
+            "timeout_seconds": timeout,
+            "status": "BLOCKED",
+            "exit_code": None,
+            "duration_seconds": round(time.monotonic() - started, 3),
+            "stdout": exc.stdout or "",
+            "stderr": (exc.stderr or "") + f"\ncommand timed out after {timeout:g}s",
+            "parsed_json": None,
+        }
+
+
+def git(repo: Path, *args: str, timeout: float = 180.0) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], text=True, capture_output=True,
+        timeout=timeout, check=False,
+    )
+
+
+def fail(message: str) -> int:
+    print(f"error: {message}", file=sys.stderr)
+    return 1
+
+
+def write_output(path: Path, payload: dict) -> int:
+    if path.exists():
+        return fail(f"refusing to overwrite {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(path)
+    return 0
+
+
+def built_image_reference(tier_result: dict) -> str | None:
+    """Return the canonical build tier's successful image reference."""
+    parsed = tier_result.get("parsed_json")
+    if not isinstance(parsed, dict):
+        return None
+    checks = parsed.get("checks")
+    if not isinstance(checks, list):
+        return None
+    matches = [
+        check.get("detail")
+        for check in checks
+        if isinstance(check, dict)
+        and check.get("group") == "build"
+        and check.get("name") == "image build"
+        and check.get("status") == "pass"
+        and isinstance(check.get("detail"), str)
+        and check["detail"].strip()
+    ]
+    return matches[0].strip() if len(matches) == 1 else None
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run the frozen canonical challenge verifier.")
+    parser.add_argument("challenge_id")
+    parser.add_argument("--context", type=Path, required=True)
+    parser.add_argument("--repo-root", type=Path, default=Path.cwd())
+    parser.add_argument("--output", type=Path, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--dry-run", action="store_true")
+    mode.add_argument("--execute", action="store_true")
+    parser.add_argument("--tier-timeout", type=float, default=1200.0)
+    parser.add_argument("--lock-timeout", type=float, default=30.0)
+    args = parser.parse_args(argv)
+    if args.tier_timeout <= 0 or args.lock_timeout <= 0:
+        parser.error("timeouts must be positive")
+
+    repo = args.repo_root.resolve()
+    try:
+        context = json.loads(args.context.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return fail(str(exc))
+    if context.get("challenge_id") != args.challenge_id:
+        return fail("challenge id does not match review context")
+    required = ["orchestrator_commit", "verifier_commit", "warehouse_commit", "run_id"]
+    if any(not context.get(key) for key in required):
+        return fail(f"context missing one of {required}")
+
+    worktree = Path("/tmp") / f"cyberarena-verifier-{context['run_id']}"
+    tier_args = [[], ["--build", "--ready-timeout", "150"], ["--game", "--ready-timeout", "150"]]
+    tiers = []
+    for name, extra in zip(["static", "build", "game"], tier_args, strict=True):
+        command = [
+            sys.executable, "-m", "challenges.check", args.challenge_id,
+            *extra, "--json",
+        ]
+        tiers.append({
+            "name": name,
+            "command": command,
+            "cwd": str(worktree),
+            "timeout_seconds": args.tier_timeout,
+            "status": "NOT_RUN",
+            "exit_code": None,
+            "duration_seconds": None,
+            "stdout": "",
+            "stderr": "",
+            "parsed_json": None,
+        })
+    payload = {
+        "mode": "dry-run" if args.dry_run else "execute",
+        "challenge_id": args.challenge_id,
+        "orchestrator_commit": context["orchestrator_commit"],
+        "verifier_commit": context["verifier_commit"],
+        "warehouse_commit": context["warehouse_commit"],
+        "image_reference": None,
+        "image_hash": None,
+        "worktree": str(worktree),
+        "tiers": tiers,
+        "setup": [],
+        "cleanup": [],
+        "error": None,
+    }
+    if args.dry_run:
+        return write_output(args.output, payload)
+
+    key = hashlib.sha256(str(repo).encode()).hexdigest()[:16]
+    lock_path = Path("/tmp") / f"cyberarena-challenge-review-{key}.lock"
+    deadline = time.monotonic() + args.lock_timeout
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    return fail(f"dynamic review lock busy: {lock_path}")
+                time.sleep(0.1)
+        created_worktree = False
+        try:
+            if worktree.exists():
+                payload["error"] = f"worktree path already exists: {worktree}"
+            if payload["error"] is None:
+                command = ["worktree", "add", "--detach", str(worktree), context["orchestrator_commit"]]
+                result = git(repo, *command)
+                payload["setup"].append({
+                    "command": ["git", "-C", str(repo), *command],
+                    "exit_code": result.returncode,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                })
+                if result.returncode == 0:
+                    created_worktree = True
+                else:
+                    payload["error"] = "git worktree add failed"
+
+            if payload["error"] is None:
+                restore = git(
+                    worktree, "restore", f"--source={context['verifier_commit']}",
+                    "--staged", "--worktree", "--", "challenges/check",
+                )
+                payload["setup"].append({
+                    "command": [
+                        "git", "restore", f"--source={context['verifier_commit']}",
+                        "--staged", "--worktree", "--", "challenges/check",
+                    ],
+                    "exit_code": restore.returncode,
+                    "stdout": restore.stdout,
+                    "stderr": restore.stderr,
+                })
+                if restore.returncode != 0:
+                    payload["error"] = "canonical verifier overlay failed"
+
+            if payload["error"] is None:
+                submodule = subprocess.run(
+                    [
+                        "git", "-C", str(worktree), "-c", "protocol.file.allow=always",
+                        "-c", f"submodule.challenge-warehouse.url={repo / 'challenge-warehouse'}",
+                        "submodule", "update", "--init", "challenge-warehouse",
+                    ],
+                    text=True, capture_output=True, timeout=300, check=False,
+                )
+                payload["setup"].append({
+                    "command": ["git", "submodule", "update", "--init", "challenge-warehouse"],
+                    "exit_code": submodule.returncode,
+                    "stdout": submodule.stdout,
+                    "stderr": submodule.stderr,
+                })
+                if submodule.returncode != 0:
+                    payload["error"] = "submodule initialization failed"
+
+            if payload["error"] is None:
+                checkout = git(worktree / "challenge-warehouse", "checkout", "--detach", context["warehouse_commit"])
+                payload["setup"].append({
+                    "command": ["git", "checkout", "--detach", context["warehouse_commit"]],
+                    "exit_code": checkout.returncode,
+                    "stdout": checkout.stdout,
+                    "stderr": checkout.stderr,
+                })
+                if checkout.returncode != 0:
+                    payload["error"] = "warehouse checkout failed"
+
+            if payload["error"] is None:
+                orchestrator_head = git(worktree, "rev-parse", "HEAD")
+                verifier_diff = git(
+                    worktree, "diff", "--quiet", context["verifier_commit"],
+                    "--", "challenges/check",
+                )
+                warehouse_head = git(worktree / "challenge-warehouse", "rev-parse", "HEAD")
+                if orchestrator_head.stdout.strip() != context["orchestrator_commit"]:
+                    payload["error"] = "orchestrator worktree commit mismatch"
+                elif verifier_diff.returncode != 0:
+                    payload["error"] = "canonical verifier tree mismatch"
+                elif warehouse_head.stdout.strip() != context["warehouse_commit"]:
+                    payload["error"] = "warehouse worktree commit mismatch"
+
+            if payload["error"] is None:
+                executed: list[dict] = []
+                for tier in tiers:
+                    result = command_result(tier["command"], worktree, args.tier_timeout)
+                    result["name"] = tier["name"]
+                    executed.append(result)
+                    if result["status"] != "PASS":
+                        break
+                    if tier["name"] == "build":
+                        image_reference = built_image_reference(result)
+                        payload["image_reference"] = image_reference
+                        if image_reference is None:
+                            payload["error"] = "canonical build did not report exactly one image reference"
+                            break
+                        inspection = command_result(
+                            [
+                                "docker", "image", "inspect", "--format",
+                                "{{.Id}}", image_reference,
+                            ],
+                            repo,
+                            min(args.tier_timeout, 60.0),
+                        )
+                        image_hash = inspection["stdout"].strip()
+                        if inspection["status"] != "PASS" or not IMAGE_HASH.fullmatch(image_hash):
+                            payload["error"] = "could not pin canonical built image hash"
+                            break
+                        payload["image_hash"] = image_hash
+                payload["tiers"] = executed + tiers[len(executed):]
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            payload["error"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            if created_worktree:
+                cleanup = git(repo, "worktree", "remove", "--force", str(worktree), timeout=180)
+                payload["cleanup"].append({
+                    "command": ["git", "worktree", "remove", "--force", str(worktree)],
+                    "exit_code": cleanup.returncode,
+                    "stdout": cleanup.stdout,
+                    "stderr": cleanup.stderr,
+                })
+            prune = git(repo, "worktree", "prune")
+            payload["cleanup"].append({
+                "command": ["git", "worktree", "prune"],
+                "exit_code": prune.returncode,
+                "stdout": prune.stdout,
+                "stderr": prune.stderr,
+            })
+    wrote = write_output(args.output, payload)
+    if wrote != 0:
+        return wrote
+    return 0 if payload["error"] is None and all(tier["status"] == "PASS" for tier in payload["tiers"]) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

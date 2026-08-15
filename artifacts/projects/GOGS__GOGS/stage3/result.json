@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "repository": "gogs/gogs",
+  "source_packet": "GOGS__GOGS.json",
+  "source_packet_sha256": "19e942d105d32582ac607e53697d43306263ea729f498814ccfe7c352d6fafb3",
+  "window_id": "W1",
+  "commit": "e3bb4165dceb96b66053a067f9f3584302413a0e",
+  "selected_component_ids": [
+    "CVE-2026-52806"
+  ],
+  "outcome": "ready_for_authoring",
+  "artifacts": {
+    "study": "STAGE3_STUDY.md",
+    "environment": [
+      "Dockerfile.gogs",
+      "Dockerfile.attacker",
+      "compose.yaml"
+    ],
+    "reproduction": "reproduce.py",
+    "evidence": [
+      "evidence/vulnerable.txt",
+      "evidence/fixed.txt"
+    ]
+  }
+}

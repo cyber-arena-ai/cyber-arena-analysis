@@ -1,0 +1,53 @@
+FROM alpine:3.23 AS source
+ARG GOGS_COMMIT
+ARG GOGS_PATCH_COMMIT=""
+RUN apk add --no-cache git
+WORKDIR /src
+RUN git init \
+ && git remote add origin https://github.com/gogs/gogs.git \
+ && git fetch --depth=1 origin "${GOGS_COMMIT}" \
+ && git checkout --detach FETCH_HEAD \
+ && test "$(git rev-parse HEAD)" = "${GOGS_COMMIT}" \
+ && if test -n "${GOGS_PATCH_COMMIT}"; then \
+      git fetch --depth=2 origin "${GOGS_PATCH_COMMIT}" \
+      && git diff "${GOGS_PATCH_COMMIT}^" "${GOGS_PATCH_COMMIT}" \
+           -- internal/database/pull.go \
+         | git apply \
+      && git diff --check; \
+    fi
+
+FROM node:24-alpine AS webbuilder
+RUN corepack enable
+WORKDIR /src
+COPY --from=source /src/ ./
+RUN if test -f package.json; then \
+      pnpm install --frozen-lockfile \
+      && pnpm --filter gogs-web run build; \
+    fi
+
+FROM golang:1.26-alpine3.23 AS binarybuilder
+ARG GOGS_COMMIT
+RUN apk --no-cache --no-progress add build-base git linux-pam-dev
+WORKDIR /gogs.io/gogs
+COPY --from=source /src/ ./
+COPY --from=webbuilder /src/public ./public
+RUN mkdir /out \
+ && if test -d cmd/gogs; then main=./cmd/gogs; else main=.; fi \
+ && go build -v -trimpath -tags "cert pam prod" \
+      -ldflags "-X 'gogs.io/gogs/internal/conf.BuildCommit=${GOGS_COMMIT}'" \
+      -o /out/gogs "${main}"
+
+FROM alpine:3.23
+RUN apk --no-cache --no-progress add \
+  bash ca-certificates curl git linux-pam openssh s6 shadow socat tzdata rsync zlib
+ENV GOGS_CUSTOM=/data/gogs
+COPY --from=source /src/docker/nsswitch.conf /etc/nsswitch.conf
+WORKDIR /app/gogs
+COPY --from=source /src/docker ./docker
+COPY --from=binarybuilder /out/gogs .
+RUN ./docker/build/finalize.sh
+VOLUME ["/data", "/backup"]
+EXPOSE 22 3000
+HEALTHCHECK CMD (curl --noproxy localhost -o /dev/null -sS http://localhost:3000/healthcheck) || exit 1
+ENTRYPOINT ["/app/gogs/docker/start.sh"]
+CMD ["/usr/bin/s6-svscan", "/app/gogs/docker/s6/"]

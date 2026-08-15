@@ -1,4 +1,0 @@
-Script started on 2026-08-06 08:24:47-07:00 [COMMAND="docker compose -p ca_stage3_listmonk_fixed -f compose-fixed.yaml exec -T app ./listmonk --version" <not executed on terminal>]
-v6.0.0-stage3-fixed (#c0a6525009a65265230185f16e8674dcc83aa024 2026-08-06T15:22:52+0000)
-
-Script done on 2026-08-06 08:24:47-07:00 [COMMAND_EXIT_CODE="0"]

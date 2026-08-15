@@ -37,7 +37,7 @@ overall verdict.
 ## Execute in this order
 
 1. Read `<analysis-root>/CONTRIBUTING.md` and
-   `<analysis-root>/skills/auto-curate-oss-challenges/references/attack-scopes.json`.
+   `<analysis-root>/skills/challenge-create/references/attack-scopes.json`.
    Treat advisory CWE weakness labels as root-cause
    evidence, not as the Technical Impact proved by a flag.
    Resolve the challenge's upstream `OWNER/PROJECT` from its maintainer record

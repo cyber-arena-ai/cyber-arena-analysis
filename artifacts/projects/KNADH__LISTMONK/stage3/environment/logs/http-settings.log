@@ -1,4 +1,0 @@
-Script started on 2026-08-06 08:21:37-07:00 [COMMAND="curl --fail-with-body --silent --show-error --user stage3admin:Stage3Listmonk-2026 --dump-header - http://127.0.0.1:19000/api/settings" <not executed on terminal>]
-curl: (7) Failed to connect to 127.0.0.1 port 19000 after 0 ms: Couldn't connect to server
-
-Script done on 2026-08-06 08:21:37-07:00 [COMMAND_EXIT_CODE="7"]

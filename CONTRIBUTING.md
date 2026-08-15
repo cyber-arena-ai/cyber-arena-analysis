@@ -3,7 +3,7 @@
 Use this guide to choose a promising OSS project, shape it into a strong Cyber
 Arena challenge, and understand the evidence expected for admission. Once the
 design is clear, follow the bundled
-[challenge-authoring SOP](skills/auto-curate-oss-challenges/references/challenge-authoring-sop.md)
+[challenge-authoring SOP](skills/challenge-create/references/challenge-authoring-sop.md)
 to implement it in `cyber-arena-orche` and validate it.
 
 ## 1. Select a suitable OSS application
@@ -73,7 +73,7 @@ security fix.
 Each flag represents an observable capability outcome **instead of a CVE or
 exploit path**. In the challenge's `_maintainer/README.md`, map each flag store
 to a scope and tier from the
-[attack-scope registry](skills/auto-curate-oss-challenges/references/attack-scopes.json), and state the concrete
+[attack-scope registry](skills/challenge-create/references/attack-scopes.json), and state the concrete
 evidence that recovering the flag proves in this application.
 
 | Tier | Registered scopes |

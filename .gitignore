@@ -4,5 +4,5 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 
-# Retained snapshots, generated evidence packets, and maintainer dossiers.
-docs/jt/
+# Local working copy of curation and review data; persist durable copies on Hugging Face.
+/artifacts/

@@ -1,8 +1,0 @@
-FROM python:3.12-alpine
-
-RUN apk add --no-cache git
-RUN pip install --no-cache-dir requests==2.32.5
-
-WORKDIR /study
-COPY reproduce.py /study/reproduce.py
-ENTRYPOINT ["python3", "/study/reproduce.py", "--inside"]

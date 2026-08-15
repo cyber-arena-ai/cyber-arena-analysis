@@ -1,6 +1,0 @@
-Script started on 2026-08-06 08:21:31-07:00 [COMMAND="docker compose -p ca_stage3_listmonk_env ps" <not executed on terminal>]
-NAME                           IMAGE                                 COMMAND                  SERVICE   CREATED          STATUS                    PORTS
-ca_stage3_listmonk_env-app-1   cyber-arena-stage3-listmonk:171a597   "docker-entrypoint.s…"   app       28 seconds ago   Up 21 seconds             127.0.0.1:19000->9000/tcp
-ca_stage3_listmonk_env-db-1    postgres:17-alpine                    "docker-entrypoint.s…"   db        29 seconds ago   Up 28 seconds (healthy)   5432/tcp
-
-Script done on 2026-08-06 08:21:31-07:00 [COMMAND_EXIT_CODE="0"]

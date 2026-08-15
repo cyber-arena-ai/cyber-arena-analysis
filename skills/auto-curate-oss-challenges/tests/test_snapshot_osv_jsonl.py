@@ -1,6 +1,12 @@
 import json
+import sys
+from pathlib import Path
 
-from scripts.challenge_research.snapshot_osv import _existing_file, write_advisory_jsonl
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+
+from snapshot_osv import _existing_file, write_advisory_jsonl  # noqa: E402
 
 
 def test_write_advisory_jsonl_is_lossless_and_deterministic(tmp_path):

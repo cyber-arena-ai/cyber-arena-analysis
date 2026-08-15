@@ -14,7 +14,7 @@ from pathlib import Path
 
 try:
     from ._lib import extract_osv_record
-except ImportError:  # direct execution: python scripts/challenge_research/snapshot_osv.py
+except ImportError:  # direct execution from this skill's scripts directory
     from _lib import extract_osv_record
 
 

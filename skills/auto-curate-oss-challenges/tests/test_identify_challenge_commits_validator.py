@@ -4,11 +4,9 @@ import sys
 from pathlib import Path
 
 
-VALIDATOR = (
-    Path(__file__).parents[1]
-    / "skills/auto-curate-oss-challenges/scripts/validate_dossiers.py"
-)
-REGISTRY = Path(__file__).parents[1] / "docs/attack_scopes.json"
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+VALIDATOR = SKILL_ROOT / "scripts/validate_dossiers.py"
+REGISTRY = SKILL_ROOT / "references/attack-scopes.json"
 
 
 def _write_inputs(tmp_path: Path, *, scope: str = "host.file.read") -> tuple[Path, Path]:

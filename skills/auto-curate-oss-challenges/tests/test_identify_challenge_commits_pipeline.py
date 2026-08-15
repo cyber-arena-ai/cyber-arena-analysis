@@ -6,9 +6,7 @@ import zipfile
 from pathlib import Path
 
 
-SCRIPT_DIR = (
-    Path(__file__).parents[1] / "skills/auto-curate-oss-challenges/scripts"
-)
+SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from shortlist_candidates import InputError, generate  # noqa: E402
@@ -385,6 +383,19 @@ def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
             "checkpoints": ["1.1"],
         }
     ]
+
+    candidates = json.loads(candidates_path.read_text(encoding="utf-8"))
+    second = json.loads(json.dumps(candidates["projects"][0]))
+    second["repository"] = "example/second"
+    candidates["projects"].append(second)
+    candidates_path.write_text(json.dumps(candidates), encoding="utf-8")
+
+    scoped = generate_overlaps(
+        candidates_path=candidates_path,
+        raw_dir=raw_dir,
+        repository="example/app",
+    )
+    assert [item["repository"] for item in scoped["projects"]] == ["example/app"]
 
 
 def test_git_range_resolution_finds_immutable_maximum(tmp_path):

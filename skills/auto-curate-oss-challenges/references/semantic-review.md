@@ -35,7 +35,7 @@ or failed programmatic hard gate is a permanent exclusion.
 A scope hypothesis is plausible only when the application naturally contains
 the target, public evidence establishes a connected primitive, the attacker
 role and deployment are realistic, and no missing step is invented. Map only
-positive outcomes in `docs/attack_scopes.json`. A route requiring crash, DoS,
+positive outcomes in the bundled `attack-scopes.json`. A route requiring crash, DoS,
 resource exhaustion, health failure, or control-plane access is `disallowed`
 and receives no scope credit.
 

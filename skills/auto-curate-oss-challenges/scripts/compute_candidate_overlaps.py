@@ -1,26 +1,21 @@
 #!/usr/bin/env python3
-"""Compute pre-semantic OSV overlap for every project in a retained shortlist."""
+"""Compute pre-semantic OSV overlap for selected projects in a retained shortlist."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import re
-import sys
 from collections import defaultdict
 from pathlib import Path
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-if str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPOSITORY_ROOT))
-
-from scripts.challenge_research.osv_history import (  # noqa: E402
+from osv_history import (
     affected_keys,
     analyze_overlap,
     iter_raw_records,
     record_ids,
 )
-from scripts.challenge_research._lib import canonical_github_repo  # noqa: E402
+from _lib import canonical_github_repo
 
 
 def _report_name(repository: str) -> str:
@@ -99,11 +94,19 @@ def _components_with_ranges(components: list[dict], unit: str) -> list[str]:
     )
 
 
-def generate(*, candidates_path: Path, raw_dir: Path) -> dict:
+def generate(
+    *, candidates_path: Path, raw_dir: Path, repository: str | None = None
+) -> dict:
     payload = json.loads(candidates_path.read_text(encoding="utf-8"))
-    selected_repositories = [
+    available_repositories = [
         item["repository"].lower() for item in payload.get("projects", [])
     ]
+    requested_repository = repository.strip().lower() if repository else None
+    if requested_repository and requested_repository not in available_repositories:
+        raise ValueError(f"project missing from candidates: {requested_repository}")
+    selected_repositories = (
+        [requested_repository] if requested_repository else available_repositories
+    )
     project_rows = {
         item["repository"].lower(): item for item in payload.get("projects", [])
     }
@@ -460,9 +463,17 @@ def main() -> int:
     parser.add_argument("--candidates", type=Path, required=True)
     parser.add_argument("--raw-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--repository",
+        help="limit output to one OWNER/REPOSITORY from the candidate index",
+    )
     args = parser.parse_args()
     try:
-        payload = generate(candidates_path=args.candidates, raw_dir=args.raw_dir)
+        payload = generate(
+            candidates_path=args.candidates,
+            raw_dir=args.raw_dir,
+            repository=args.repository,
+        )
         write_reports(payload, args.output_dir)
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
         parser.error(str(error))

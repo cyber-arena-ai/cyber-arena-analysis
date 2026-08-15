@@ -5,10 +5,7 @@ import sys
 from pathlib import Path
 
 
-VALIDATOR = (
-    Path(__file__).parents[1]
-    / "skills/auto-curate-oss-challenges/scripts/validate_stage3_study.py"
-)
+VALIDATOR = Path(__file__).resolve().parents[1] / "scripts/validate_stage3_study.py"
 COMMIT = "a" * 40
 COMPONENT = "CVE-2026-1001"
 

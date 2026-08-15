@@ -22,7 +22,7 @@ that the vulnerable feature existed at repository origin.
 ## Required evidence
 
 Retain raw OSV records, package identities, every range event, references,
-aliases, source database, withdrawal state, and snapshot provenance. A
+aliases, source database, withdrawal state, and source-corpus provenance. A
 component may enter Git resolution only when it has:
 
 - behavioral evidence: non-empty advisory text or a public evidence reference;
@@ -63,15 +63,16 @@ can choose a non-maximal alternative.
 Build the exact-version audit context, then resolve Git ranges:
 
 ```bash
-python3 skills/auto-curate-oss-challenges/scripts/compute_candidate_overlaps.py \
-  --candidates /tmp/oss-candidates.json \
-  --raw-dir docs/jt/oss_shortlist_prototype/raw \
-  --output-dir /tmp/oss-overlap
+python3 <skill-root>/scripts/compute_candidate_overlaps.py \
+  --candidates artifacts/candidates.json \
+  --raw-dir artifacts/sources/osv/raw \
+  --repository OWNER/PROJECT \
+  --output-dir artifacts/projects/OWNER__PROJECT/stage2/overlaps
 
-python3 skills/auto-curate-oss-challenges/scripts/resolve_git_windows.py \
-  --overlap-dir /tmp/oss-overlap/overlap_data \
+python3 <skill-root>/scripts/resolve_git_windows.py \
+  --overlap-dir artifacts/projects/OWNER__PROJECT/stage2/overlaps/overlap_data \
   --repo-cache /tmp/cyber-arena-git-cache \
-  --output-dir /tmp/oss-git-windows
+  --output-dir artifacts/projects/OWNER__PROJECT/stage2/git-windows
 ```
 
 `semantic_packets/*.json` is the Stage 3 handoff. Each packet contains the

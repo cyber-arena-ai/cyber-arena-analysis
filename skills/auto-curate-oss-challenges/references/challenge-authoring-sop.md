@@ -2,17 +2,13 @@
 
 Package a vulnerable application into a CyberArena challenge as one
 self-contained `challenges/<snake_name>/` directory. Reference:
-[`challenges/nautilus_ico/`](../challenges/nautilus_ico/) (DEF CON
-Finals 2025 `ico`). Interface ABCs:
-[`challenges/interface/`](../challenges/interface/).
+`challenges/nautilus_ico/` in `cyber-arena-orche` (DEF CON Finals 2025 `ico`).
+Interface ABCs live at `challenges/interface/` in that repository.
 
-This SOP is the authoritative design contract for all challenges, while [`skills/challenge-review/`](../skills/challenge-review/) defines
-the evidence and verdict rules used to review it.
+This SOP is the authoring contract. The sibling `challenge-review` skill defines
+the evidence and verdict rules used to review a registered implementation.
 
 ## 1. Layout
-
-For the bigger picture of how these pieces slot into the framework,
-see [docs/UML/challenges.md](UML/challenges.md).
 
 ```
 challenges/<snake_name>/
@@ -96,7 +92,8 @@ exploit or patch steps, payload, recommended defense, decoy, flag location, or
 any equivalent direct answer. A configured hint must remain inside this same
 boundary; difficulty does not permit answer material. Shared L1 supplies game
 rules and tool orientation, while MCP supplies tool arguments and return shapes.
-See [PROMPT_COMPOSITION.md](PROMPT_COMPOSITION.md) for assembly mechanics.
+Verify the final assembled prompt through the orchestration repository's normal
+prompt renderer.
 
 ### 3.2 Facility-side dependencies (only if your probes import non-stdlib)
 
@@ -163,8 +160,9 @@ every `_exploit.py` in the warehouse — an entrypoint that imports an
 un-provisioned sibling fails the test.
 
 The artifact is optional; an in-band exploit proof is not. Acceptance requires
-an attacker-container exploit of the intended vulnerability whose current
-opponent flag submission returns `ACCEPTED`.
+an attacker-container exploit through a genuine non-arena-specific vulnerability
+whose current opponent flag submission returns `ACCEPTED`; it need not be the
+originally selected vulnerability.
 
 ### 3.4 Attack-info: exposing a public flag-id (optional)
 
@@ -298,7 +296,7 @@ Build for `linux/amd64`. Pick any in-image service slug you want
 name or `Challenge.name`.
 
 The cleanest way to start: copy
-[`challenges/nautilus_ico/image/`](../challenges/nautilus_ico/image/)
+`challenges/nautilus_ico/image/` in `cyber-arena-orche`
 and adjust.
 
 ## 5. Defense flow contract
@@ -421,8 +419,7 @@ reflects the current v3 topology and never drifts against a stale checked-in fil
 
 ## 8. Reference
 
-- Interface ABCs: [`challenges/interface/challenge.py`](../challenges/interface/challenge.py), [`challenges/interface/probe.py`](../challenges/interface/probe.py)
-- Canonical example: [`challenges/nautilus_ico/`](../challenges/nautilus_ico/)
-- Architecture: [`docs/UML/challenges.md`](UML/challenges.md)
+- Interface ABCs: `challenges/interface/challenge.py` and `challenges/interface/probe.py` in `cyber-arena-orche`
+- Canonical example: `challenges/nautilus_ico/` in `cyber-arena-orche`
 
 > `challenges/notes/` is a framework smoke test, not a reference (no defense flow).

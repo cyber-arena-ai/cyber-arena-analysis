@@ -5,10 +5,7 @@ import sys
 from pathlib import Path
 
 
-VALIDATOR = (
-    Path(__file__).parents[1]
-    / "skills/auto-curate-oss-challenges/scripts/validate_semantic_reviews.py"
-)
+VALIDATOR = Path(__file__).resolve().parents[1] / "scripts/validate_semantic_reviews.py"
 
 
 def _write_packet(packet_dir: Path) -> Path:

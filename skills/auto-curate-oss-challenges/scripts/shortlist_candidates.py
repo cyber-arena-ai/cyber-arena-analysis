@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a compact OSS challenge-candidate shortlist from retained snapshots."""
+"""Build a compact OSS challenge-candidate shortlist from retained sources."""
 
 from __future__ import annotations
 
@@ -7,18 +7,13 @@ import argparse
 import hashlib
 import json
 import re
-import sys
 import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-if str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPOSITORY_ROOT))
-
-from scripts.challenge_research._lib import (  # noqa: E402
+from _lib import (
     canonical_github_repo,
     popularity_score,
 )

@@ -1,7 +1,13 @@
 import json
+import sys
 import zipfile
+from pathlib import Path
 
-from scripts.challenge_research.osv_history import (
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+
+from osv_history import (  # noqa: E402
     analyze_overlap,
     build_components,
     select_project_records,

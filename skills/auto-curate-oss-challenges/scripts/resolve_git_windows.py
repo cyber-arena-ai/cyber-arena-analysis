@@ -835,7 +835,7 @@ def write_outputs(results: list[dict], output_dir: Path) -> None:
         "",
         "> OSV Git ranges evaluated against immutable upstream commits. No semantic filtering has run.",
         "",
-        "| Project | Input | Accepted | Rejected | Origin-introduced | Maximum | Historical windows | Semantic-ready windows | HEAD clean in snapshot |",
+        "| Project | Input | Accepted | Rejected | Origin-introduced | Maximum | Historical windows | Semantic-ready windows | HEAD clean in corpus |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
         *rows,
         "",

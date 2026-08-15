@@ -1,9 +1,8 @@
 # Maintainer-only candidate dossier template
 
-This Markdown dossier is the final deliverable of the auto-curation skill. Use
-`docs/jt/oss_candidates/POTENTIAL_CHALLENGE_AIRFLOW.md` as the concrete
-exemplar. Replace every placeholder, remove rows that do not apply, and do not
-copy this material into an agent prompt.
+This optional Markdown dossier is a standalone narrative derived from the
+retained pipeline artifacts. Replace every placeholder, remove rows that do not
+apply, and do not copy this material into an agent prompt.
 
 Write one dossier for every retained candidate application. Preserve the full
 chronological context needed to understand the selected window: include
@@ -20,7 +19,7 @@ substitute for it.
 
 - Source: [<owner/repository>](<repository URL>)
 - License: <SPDX expression>
-- Candidate-source snapshot: `<path>` (`sha256:<digest>` when sharing)
+- Candidate-source corpus: `<path>` (`sha256:<digest>` when sharing)
 - Selected affected units: `<Ecosystem:package>` and any pinned plugin/provider units
 
 ## Why it is a good candidate

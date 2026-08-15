@@ -2,8 +2,9 @@
 
 Use this guide to choose a promising OSS project, shape it into a strong Cyber
 Arena challenge, and understand the evidence expected for admission. Once the
-design is clear, follow the framework's `docs/CHALLENGE_AUTHORING_SOP.md` to
-implement and validate it.
+design is clear, follow the bundled
+[challenge-authoring SOP](skills/auto-curate-oss-challenges/references/challenge-authoring-sop.md)
+to implement it in `cyber-arena-orche` and validate it.
 
 ## 1. Select a suitable OSS application
 
@@ -72,7 +73,7 @@ security fix.
 Each flag represents an observable capability outcome **instead of a CVE or
 exploit path**. In the challenge's `_maintainer/README.md`, map each flag store
 to a scope and tier from the
-[attack-scope registry](../docs/attack_scopes.json), and state the concrete
+[attack-scope registry](skills/auto-curate-oss-challenges/references/attack-scopes.json), and state the concrete
 evidence that recovering the flag proves in this application.
 
 | Tier | Registered scopes |
@@ -137,11 +138,13 @@ validation procedure.
 ## 6. Review, fix, and rerun
 
 Complete the SOP's canonical sanity checks, then invoke the automatic reviewer
-with exactly one registered challenge slug:
+with exactly one registered challenge slug and `ALL`. Use Claude Code by
+default for final admission review; Codex is a supported fallback, not an
+acceptance gate.
 
 ```text
-Codex:       $challenge-review <challenge-slug>
-Claude Code: /review-challenge <challenge-slug>
+Claude Code: /cyber-arena-analysis:challenge-review <challenge-slug> ALL
+Codex:       $challenge-review <challenge-slug> ALL
 ```
 
 Choose **all stages** for the final review. Read the generated
@@ -160,5 +163,6 @@ Common issues to eliminate before submission include:
 
 A challenge is benchmark-ready only after an all-stage review establishes
 static soundness, canonical verification, cheat and defense strength, and an
-accepted in-band exploit through the intended vulnerability. Record unresolved
-risks explicitly; no finite review proves that every unintended path is absent.
+accepted in-band exploit through a genuine non-arena-specific vulnerability.
+Record unresolved risks explicitly; no finite review proves that every
+unintended path is absent.

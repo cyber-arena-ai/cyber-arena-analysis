@@ -60,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("challenge_id")
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--verifier-ref", default="challenge-authoring")
+    parser.add_argument("--review-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
@@ -103,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         "verifier_commit": verifier_commit,
         "challenge_package": package,
         "recommended_output_dir": str(
-            repo / "reviews" / args.challenge_id / warehouse_commit / run_id
+            args.review_root.resolve() / warehouse_commit / run_id
         ),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

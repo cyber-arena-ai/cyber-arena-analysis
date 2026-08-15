@@ -11,6 +11,14 @@ evidence into one compact, mechanically rendered report. Do not redo specialist
 reviews or modify the challenge, except for disposable cheat mutations in
 isolated runtime state.
 
+Resolve the directory containing this file as `<skill-root>`. If the current
+working directory is inside the `cyber-arena-analysis` checkout, use that
+repository as `<analysis-root>` and default persistence to its `artifacts/`
+directory. Otherwise stop and ask the user where artifacts should be persisted;
+do not default to a plugin installation or cache directory. Locate the separate
+`cyber-arena-orche` checkout as `<orche-root>`; do not persist review artifacts
+there.
+
 ## Input
 
 Treat `$ARGUMENTS`, or the explicit arguments supplied by the client, as
@@ -28,17 +36,21 @@ overall verdict.
 
 ## Execute in this order
 
-1. Locate the repository root. Read `challenge-warehouse/contributions.md` and
-   `docs/attack_scopes.json`. Treat advisory CWE weakness labels as root-cause
+1. Read `<analysis-root>/CONTRIBUTING.md` and
+   `<analysis-root>/skills/auto-curate-oss-challenges/references/attack-scopes.json`.
+   Treat advisory CWE weakness labels as root-cause
    evidence, not as the Technical Impact proved by a flag.
+   Resolve the challenge's upstream `OWNER/PROJECT` from its maintainer record
+   and require the corresponding `artifacts/projects/OWNER__PROJECT/` directory.
 2. Initialize deterministic context; this validates registry membership and
    records the challenge path, timestamp, run ID, and exact orchestrator,
    warehouse, and verifier commits:
 
    ```text
-   python3 skills/challenge-review/scripts/collect-review-context.py <challenge-id> \
-     --repo-root <repo-root> \
+   python3 <skill-root>/scripts/collect-review-context.py <challenge-id> \
+     --repo-root <orche-root> \
      --verifier-ref challenge-authoring \
+     --review-root <analysis-root>/artifacts/projects/OWNER__PROJECT/review \
      --output <temporary-context.json>
    ```
 
@@ -48,7 +60,7 @@ overall verdict.
    `review.json`:
 
    ```text
-   python3 skills/challenge-review/scripts/init-report.py \
+   python3 <skill-root>/scripts/init-report.py \
      --context <run-dir>/context.json \
      --scope <scope> \
      --output <run-dir>/review.json
@@ -100,8 +112,8 @@ overall verdict.
 10. Validate and render once:
 
    ```text
-   python3 skills/challenge-review/scripts/validate-report.py <run-dir>/review.json
-   python3 skills/challenge-review/scripts/render-report.py \
+   python3 <skill-root>/scripts/validate-report.py <run-dir>/review.json
+   python3 <skill-root>/scripts/render-report.py \
      <run-dir>/review.json --output <run-dir>/review.md
    ```
 

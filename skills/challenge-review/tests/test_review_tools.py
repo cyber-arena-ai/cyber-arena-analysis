@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
@@ -22,6 +23,13 @@ assert _VERIFIER_SPEC and _VERIFIER_SPEC.loader
 _VERIFIER_MODULE = importlib.util.module_from_spec(_VERIFIER_SPEC)
 _VERIFIER_SPEC.loader.exec_module(_VERIFIER_MODULE)
 built_image_reference = _VERIFIER_MODULE.built_image_reference
+
+_CONTEXT_SPEC = importlib.util.spec_from_file_location(
+    "challenge_review_collect_context", SCRIPTS / "collect-review-context.py",
+)
+assert _CONTEXT_SPEC and _CONTEXT_SPEC.loader
+_CONTEXT_MODULE = importlib.util.module_from_spec(_CONTEXT_SPEC)
+_CONTEXT_SPEC.loader.exec_module(_CONTEXT_MODULE)
 
 
 def check_evidence(check_id: str, stage: str) -> str:
@@ -80,6 +88,46 @@ class ReviewToolTests(unittest.TestCase):
             capture_output=True,
             check=False,
         )
+
+    def test_context_collector_routes_output_under_review_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "orche"
+            warehouse = root / "challenge-warehouse"
+            challenge_dir = warehouse / "example" / "package"
+            challenge_dir.mkdir(parents=True)
+            (root / ".git").mkdir()
+            output = Path(tmp) / "context.json"
+            review_root = Path(tmp) / "analysis" / "artifacts" / "review"
+
+            def fake_git(repo: Path, *args: str) -> str:
+                if args[0] == "status" or args[0] == "cat-file":
+                    return ""
+                if args == ("rev-parse", "challenge-authoring"):
+                    return "3" * 40
+                if args == ("rev-parse", "HEAD"):
+                    return ("2" if repo == warehouse else "1") * 40
+                raise AssertionError((repo, args))
+
+            with (
+                patch.object(_CONTEXT_MODULE, "registry_package", return_value="package"),
+                patch.object(
+                    _CONTEXT_MODULE,
+                    "resolve_challenge_dir",
+                    return_value=challenge_dir,
+                ),
+                patch.object(_CONTEXT_MODULE, "git", side_effect=fake_git),
+            ):
+                result = _CONTEXT_MODULE.main([
+                    "example",
+                    "--repo-root", str(root),
+                    "--review-root", str(review_root),
+                    "--output", str(output),
+                ])
+
+            self.assertEqual(result, 0)
+            context = json.loads(output.read_text(encoding="utf-8"))
+            expected = review_root / ("2" * 40) / context["run_id"]
+            self.assertEqual(Path(context["recommended_output_dir"]), expected)
 
     def test_valid_report_validates_and_renders_compact_markdown(self) -> None:
         report = valid_report()

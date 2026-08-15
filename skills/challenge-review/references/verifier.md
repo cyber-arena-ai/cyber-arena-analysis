@@ -11,9 +11,9 @@ Do not reimplement or substitute its phases.
 Run this wrapper once in execution mode from the master context:
 
 ```text
-python3 skills/challenge-review/scripts/run-verifier.py <challenge-id> \
+python3 <skill-root>/scripts/run-verifier.py <challenge-id> \
   --context <run-dir>/context.json \
-  --repo-root <repo-root> \
+  --repo-root <orche-root> \
   --output <run-dir>/verifier.json \
   --execute
 ```

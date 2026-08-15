@@ -13,6 +13,8 @@ confirmed vulnerabilities or challenge admissions.
 
 Resolve the directory containing this file as `<skill-root>`.
 Use Python 3.11 or newer for all bundled scripts.
+Before Stage 4, locate the separate `cyber-arena-orche` checkout as
+`<orche-root>`.
 
 1. Read [source-discovery.md](references/source-discovery.md) completely.
 2. Read [attack-scopes.json](references/attack-scopes.json) before proposing capability scopes. Treat
@@ -24,8 +26,8 @@ Use Python 3.11 or newer for all bundled scripts.
 5. Read [stage3-study.md](references/stage3-study.md) before runtime study.
 6. Read [dossier-template.md](references/dossier-template.md) when maintaining a
    research-shortlist dossier.
-7. Read [challenge-authoring-sop.md](references/challenge-authoring-sop.md)
-   completely before Stage 4.
+7. Read `<orche-root>/docs/CHALLENGE_AUTHORING_SOP.md` completely before Stage
+   4. Treat that file as the authoritative authoring contract.
 
 Keep vulnerability, exploit, defense, and flag material maintainer-only.
 
@@ -208,12 +210,12 @@ wrong capability or admit an obvious shortcut.
 ## Stage 4: author and register
 
 Treat the accepted Stage 3 study as the vulnerability and capability contract.
-Follow [challenge-authoring-sop.md](references/challenge-authoring-sop.md) to
-implement the smallest complete package in `cyber-arena-orche` and its
-`challenge-warehouse`, register it with orchestration, and run the canonical
-static, build, and game verification path. Keep implementation code and runtime
-registration in that repository; retain only the authoring handoff report under
-this project's `stage4/` directory.
+Follow `<orche-root>/docs/CHALLENGE_AUTHORING_SOP.md` to implement the smallest
+complete package in `cyber-arena-orche` and its `challenge-warehouse`, register
+it with orchestration, and run the canonical static, build, and game
+verification path. Keep implementation code and runtime registration in that
+repository; retain only the authoring handoff report under this project's
+`stage4/` directory.
 
 Do not proceed to independent admission review until the registered challenge
 passes the canonical verifier. Hand the result to `$challenge-review`; do not

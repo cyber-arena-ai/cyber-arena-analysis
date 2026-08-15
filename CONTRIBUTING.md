@@ -2,9 +2,9 @@
 
 Use this guide to choose a promising OSS project, shape it into a strong Cyber
 Arena challenge, and understand the evidence expected for admission. Once the
-design is clear, follow the bundled
-[challenge-authoring SOP](skills/challenge-create/references/challenge-authoring-sop.md)
-to implement it in `cyber-arena-orche` and validate it.
+design is clear, follow the canonical
+[challenge-authoring SOP](https://github.com/cyber-arena-ai/cyber-arena-orche/blob/main/docs/CHALLENGE_AUTHORING_SOP.md)
+maintained in `cyber-arena-orche` to implement and validate it.
 
 ## 1. Select a suitable OSS application
 

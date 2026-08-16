@@ -57,15 +57,20 @@ artifacts/
     │   └── semantic-reviews/OWNER__PROJECT.json
     ├── stage3/
     ├── stage4/
+    │   ├── warehouse/
+    │   └── pr-report.md
     └── review/
 ```
 
 The source corpus is dynamically refreshed at `artifacts/sources/`; do not copy
 it into project directories. Large archives may use Hugging Face/LFS, but the
 paths or artifact references recorded in `candidates.json` must remain
-retrievable. Git caches, source worktrees, generated overlap Markdown, and
-human dossiers are not required pipeline artifacts. Do not create per-project
-README or status-summary files; the structured stage artifacts are authoritative.
+retrievable. Git caches and Stage 1–3 source worktrees are not required pipeline
+artifacts. Retain the Stage 4 warehouse worktree at
+`artifacts/projects/OWNER__PROJECT/stage4/warehouse`. Generated overlap
+Markdown and human dossiers are not required pipeline artifacts. Do not create
+per-project README or status-summary files; the structured stage artifacts are
+authoritative.
 
 ## Stage 1: refresh sources and shortlist
 
@@ -210,12 +215,16 @@ wrong capability or admit an obvious shortcut.
 ## Stage 4: author and register
 
 Treat the accepted Stage 3 study as the vulnerability and capability contract.
+Create an independent Git worktree from the current challenge-warehouse
+`origin/main` at `artifacts/projects/OWNER__PROJECT/stage4/warehouse`. Enable
+sparse checkout for `_registry` and `<contributor>/<challenge>`; do not
+materialize unrelated challenge packages.
+
 Follow `<orche-root>/docs/CHALLENGE_AUTHORING_SOP.md` to implement the smallest
-complete package in `cyber-arena-orche` and its `challenge-warehouse`, register
-it with orchestration, and run the canonical static, build, and game
-verification path. Keep implementation code and runtime registration in that
-repository; retain only the authoring handoff report under this project's
-`stage4/` directory.
+complete package in that worktree. Run the canonical static, build, and game
+verification path from orchestration with the worktree selected as the
+challenge warehouse. Modify orchestration only when the challenge requires a
+genuine framework change.
 
 Do not proceed to independent admission review until the registered challenge
 passes the canonical verifier. Hand the result to `$challenge-review`; do not

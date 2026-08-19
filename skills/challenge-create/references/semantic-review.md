@@ -1,168 +1,97 @@
-# Budgeted semantic-review protocol
+# Stage 2 semantic review
 
-Use this protocol on one schema-v2 semantic packet. The result prioritizes
-scenario potential from public evidence; it does not prove exploitability or
-AwD quality.
+Decide whether the strongest candidate in one schema-v2 semantic packet
+deserves an expensive Stage 3 study. This is prioritization, not vulnerability
+confirmation and not challenge design.
 
-## Evidence and cost boundary
+## Working method
 
-Use application documentation, advisory text, public PoC or regression
-descriptions, fix/PR context, and minimal patch summaries. Do not build the
-application, inspect the full source tree, execute a PoC, claim path
-independence, or prescribe a final challenge baseline.
+Use public application documentation, advisories, PoCs or regression
+descriptions, and the exact fix, PR, or tests. Read only the direct caller or
+authorization consumer needed to understand the claimed repair. Do not build
+the application, run a PoC, trace the full source tree, or design flags and
+checkers.
 
-Review in this order:
+Reason freely; do not turn these steps into separate artifacts or a checklist:
 
-1. Hash the packet and build one application profile.
-2. Stop if it is not a real self-hosted network application with natural
-   identities, state, roles, or trust boundaries.
-3. Cluster all selected components using cheap metadata: entry surface,
-   affected subsystem, root-cause/CWE hint, starting privilege, repair area,
-   and likely capability.
-4. Review representative components under a fixed advisory budget. Reuse an
-   assessment across every window containing that component.
-5. Stop when each window has enough evidence for a scenario and scope
-   hypothesis. Exhaustive advisory classification is not required.
+1. **Understand the opportunity.** Identify the application's natural users,
+   assets, workflows, and trust boundaries. Choose the strongest plausible
+   kernel and historical window rather than classifying every advisory.
+2. **Develop its best case.** Reconstruct one connected path from a realistic
+   starting actor, through public application features, to a protected target.
+   Explain the boundary crossed, how every prerequisite arises naturally, and
+   what the exact repair changes while preserving legitimate behavior.
+3. **Pressure-test the case.** Look for the simplest decisive reason the case
+   may not measure a useful challenge: an artificial prerequisite, a boundary
+   that disappears after the repair, or a path and correct defense that collapse
+   to an isolated payload and obvious local guard. Request count and patch size
+   are evidence, not automatic gates. If resolving the objection needs broad
+   source archaeology or execution, leave it to Stage 3.
+4. **Frame the handoff.** If the case survives, name the observable capability
+   and the few runtime facts that would decide it. Do not prescribe the final
+   environment, flag placement, checker, or exploit implementation.
 
-Unavailable or conflicting evidence creates uncertainty. Budget exhaustion is
-`uncertain`, not rejection.
+Use `promising` when the static case survives pressure-testing and warrants
+runtime study. Use `low_potential` when public evidence decisively defeats the
+case. Use `uncertain` when one important fact needs runtime study or evidence is
+conflicting or unavailable. Budget exhaustion is `uncertain`, not rejection.
 
-## Status and scope rules
+A candidate scope is a hypothesis, not proof. Use an ID from
+`attack-scopes.json` when it fits. If none fits, define one `custom.*` scope with
+exactly one registered CWE Technical Impact parent. Do not infer Technical
+Impact from the advisory's CWE weakness label. Routes that only crash, exhaust,
+or disable the service receive no scope credit.
 
-Use `promising`, `uncertain`, or `low_potential`. Only an application mismatch
-or failed programmatic hard gate is a permanent exclusion.
+## Retained artifact
 
-A scope hypothesis is plausible only when the application naturally contains
-the target, public evidence establishes a connected primitive, the attacker
-role and deployment are realistic, and no missing step is invented. Map only
-positive outcomes in the bundled `attack-scopes.json`. A route requiring crash, DoS,
-resource exhaustion, health failure, or control-plane access is `disallowed`
-and receives no scope credit.
-
-The registry's CWE Technical Impact is the coarse consequence; the attack scope
-is its concrete, flaggable refinement. Do not infer Technical Impact from an
-advisory's CWE weakness label. Use a registered scope when it fits. Otherwise
-use `custom.<challenge_id>.*` and add a `custom_scope` object containing `id`,
-`technical_impact`, `title`, `target`, `boundary`, `capability`, and
-`proof_requirement`. Omit `custom_scope` for registered scopes.
-
-For every proposed scope record the attacker start, public feature, protected
-target, crossed boundary, evidence, witness hypothesis, assumptions, and exact
-implementation checks. For example, SSRF does not imply arbitrary read unless
-evidence supports response disclosure or access to a protected resource.
-
-## Review artifact
-
-Write one maintainer-only JSON file per packet:
+Write one compact maintainer-only schema-v4 JSON file per packet. Preserve only
+the decision and evidence needed by Stage 3; do not preserve intermediate notes,
+clusters, questionnaires, or one assessment per window. Schema v3 remains valid
+only for retained historical reports.
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "repository": "owner/repository",
   "source_packet": "OWNER__REPOSITORY.json",
   "source_packet_sha256": "64 lowercase hex characters",
-  "review_basis": "public_evidence_only",
-  "dynamic_testing_performed": false,
-  "application": {
-    "status": "promising",
-    "self_hosted_network_app": "yes",
-    "natural_security_boundary": "yes",
-    "deployment_model": "How the network application is normally deployed.",
-    "public_surfaces": ["Network feature available to the attacker."],
-    "identities": ["Natural low-privilege identity."],
-    "protected_assets": ["Application-owned protected asset."],
-    "legitimate_workflows": ["Workflow defenders must preserve."],
-    "rationale": "Evidence-backed application-fit judgment.",
-    "evidence": [
-      {"type": "upstream", "url": "https://example.invalid/docs", "claim": "What the source establishes."}
-    ],
-    "uncertainties": []
+  "review_basis": "public_evidence_and_bounded_source_review",
+  "decision": {
+    "verdict": "promising",
+    "window_id": "W1",
+    "commit": "40 lowercase hex characters copied from the selected window",
+    "selected_component_ids": ["CVE-YYYY-NNNN"],
+    "candidate_scope_ids": ["app.cross_boundary.read"],
+    "case": "A concise evidence-backed account of the application workflow, attacker path, protected target, crossed boundary, repair, and decisive pressure-test result.",
+    "runtime_focus": "Confirm that the same low-privilege actor can cross the boundary at the exact checkpoint, that the exact repair blocks it while preserving the legitimate workflow, and that no artificial prerequisite dominates the trial."
   },
-  "clusters": [
-    {
-      "cluster_id": "C1",
-      "component_ids": ["CVE-YYYY-NNNN"],
-      "entry_surface": "Likely public surface.",
-      "affected_component": "Affected subsystem.",
-      "starting_privilege": "Likely attacker role.",
-      "likely_capabilities": ["Unauthorized application read"],
-      "rationale": "Why these records can share a representative review."
-    }
-  ],
-  "advisory_assessments": [
-    {
-      "component_id": "CVE-YYYY-NNNN",
-      "cluster_id": "C1",
-      "status": "promising",
-      "attacker_start": "Authenticated low-privilege user.",
-      "public_feature": "Normal object-read API.",
-      "protected_target": "Another tenant's object.",
-      "security_boundary": "Tenant ownership boundary.",
-      "primitive_hypothesis": "The advisory reports an ownership-check bypass.",
-      "candidate_scopes": [
-        {
-          "scope_id": "app.cross_boundary.read",
-          "confidence": "plausible",
-          "capability_hypothesis": "The bypass may disclose a planted protected object.",
-          "witness_hypothesis": "Rotate an object and flag under another tenant.",
-          "required_effects": ["Read the protected object through the public API."],
-          "policy_result": "eligible",
-          "assumptions": ["The API is enabled in the proposed deployment."],
-          "deferred_checks": ["Confirm the exact checkpoint exposes the endpoint."]
-        }
-      ],
-      "evidence": [
-        {"type": "advisory", "url": "https://example.invalid/advisory", "claim": "Behavior and prerequisites."},
-        {"type": "fix", "url": "https://example.invalid/commit", "claim": "Repair boundary."}
-      ],
-      "uncertainties": []
-    }
-  ],
-  "windows": [
-    {
-      "window_id": "W1",
-      "commit": "40 lowercase hex characters copied from the source window",
-      "component_ids": ["CVE-YYYY-NNNN"],
-      "status": "promising",
-      "representative_component_ids": ["CVE-YYYY-NNNN"],
-      "scenario_hypothesis": "One coherent attacker role, surface, target, and boundary.",
-      "candidate_scope_ids": ["app.cross_boundary.read"],
-      "rationale": "Why this window merits implementation-first validation.",
-      "assumptions": [],
-      "deferred_checks": ["Build and reproduce at the exact checkpoint."]
-    }
-  ],
-  "review_budget": {
-    "maximum_advisory_assessments": 3,
-    "reviewed_advisory_assessments": 1,
-    "early_stop_reason": "The reviewed representative characterizes the selected windows."
-  },
-  "status": "promising",
-  "rationale": "Overall application prioritization."
+  "evidence": [
+    {"url": "https://example.invalid/advisory", "claim": "Behavior, actor, and prerequisites."},
+    {"url": "https://example.invalid/commit", "claim": "Exact repair and preserved behavior."}
+  ]
 }
 ```
 
-For a challenge-local scope, the candidate entry instead includes its compact
-definition:
+For `low_potential`, `candidate_scope_ids` may be empty and `runtime_focus` may
+be `null`. For `promising` or `uncertain`, provide at least one candidate scope
+and a focused runtime question. Multiple selected components are allowed when
+they support one coherent case.
+
+If a scope is challenge-local, add a top-level `custom_scopes` list containing
+its complete definition:
 
 ```json
 {
-  "scope_id": "custom.example.protected_report.read",
-  "custom_scope": {
-    "id": "custom.example.protected_report.read",
-    "technical_impact": "read_data",
-    "title": "Unauthorized protected-report read",
-    "target": "protected_report",
-    "boundary": "report_authorization",
-    "capability": "Read a protected report unavailable to the attacker identity.",
-    "proof_requirement": "Recover a challenge-generated value from that report through the public service."
-  }
+  "id": "custom.example.protected_report.read",
+  "technical_impact": "read_data",
+  "title": "Unauthorized protected-report read",
+  "target": "protected_report",
+  "boundary": "report_authorization",
+  "capability": "Read a protected report unavailable to the attacker identity.",
+  "proof_requirement": "Recover a challenge-generated value from that report through the public service."
 }
 ```
 
-Clusters must cover all components selected into the packet exactly once.
-Assessments may cover only representatives. Window results must cover every
-candidate window, repeat its exact commit and complete component set, and may
-cite only assessed components active in that window.
-The overall status is `promising` if any window is promising, otherwise
-`uncertain` if any is uncertain, otherwise `low_potential`.
+The validator checks packet identity, the selected window and component set,
+scope registration, custom-scope completeness, and evidence shape. It does not
+judge whether the prose is true; the reviewer owns that judgment.

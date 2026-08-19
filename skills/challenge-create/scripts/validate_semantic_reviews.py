@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate budgeted public-evidence semantic-review batches."""
+"""Validate Stage 2 semantic-review batches."""
 
 from __future__ import annotations
 
@@ -96,6 +96,156 @@ def _validate_application(application: object, errors: list[str]) -> str | None:
     return status if status in STATUSES else None
 
 
+def _validate_v4(
+    packet_path: Path,
+    packet_bytes: bytes,
+    packet: dict,
+    review: dict,
+    scopes: dict[str, str],
+    technical_impacts: set[str],
+    custom_scope_fields: set[str],
+) -> list[str]:
+    errors: list[str] = []
+    allowed_fields = {
+        "schema_version",
+        "repository",
+        "source_packet",
+        "source_packet_sha256",
+        "review_basis",
+        "decision",
+        "evidence",
+        "custom_scopes",
+    }
+    unexpected = set(review) - allowed_fields
+    if unexpected:
+        errors.append(f"unexpected top-level fields: {sorted(unexpected)}")
+
+    if review.get("repository") != packet.get("repository"):
+        errors.append("repository does not match source packet")
+    if review.get("source_packet") != packet_path.name:
+        errors.append("source_packet must equal the packet filename")
+    digest = review.get("source_packet_sha256")
+    if not isinstance(digest, str) or not HEX64.fullmatch(digest):
+        errors.append("source_packet_sha256 must be 64 lowercase hex characters")
+    elif digest != hashlib.sha256(packet_bytes).hexdigest():
+        errors.append("source_packet_sha256 does not match source packet")
+    if review.get("review_basis") != "public_evidence_and_bounded_source_review":
+        errors.append(
+            "review_basis must be public_evidence_and_bounded_source_review"
+        )
+
+    custom_scopes = review.get("custom_scopes", [])
+    custom_scope_ids: set[str] = set()
+    if not isinstance(custom_scopes, list):
+        errors.append("custom_scopes must be a list")
+        custom_scopes = []
+    for index, scope in enumerate(custom_scopes):
+        location = f"custom_scopes[{index}]"
+        if not isinstance(scope, dict):
+            errors.append(f"{location} must be an object")
+            continue
+        scope_id = scope.get("id")
+        if not _text(scope_id) or not str(scope_id).startswith("custom."):
+            errors.append(f"{location}.id must start with custom.")
+        elif scope_id in custom_scope_ids:
+            errors.append(f"duplicate custom scope {scope_id}")
+        else:
+            custom_scope_ids.add(scope_id)
+        for field in sorted(custom_scope_fields - {"id", "technical_impact"}):
+            if not _text(scope.get(field)):
+                errors.append(f"{location}.{field} must be non-empty")
+        if scope.get("technical_impact") not in technical_impacts:
+            errors.append(f"{location}.technical_impact is not registered")
+
+    decision = review.get("decision")
+    if not isinstance(decision, dict):
+        errors.append("decision must be an object")
+        decision = {}
+    else:
+        decision_fields = {
+            "verdict",
+            "window_id",
+            "commit",
+            "selected_component_ids",
+            "candidate_scope_ids",
+            "case",
+            "runtime_focus",
+        }
+        unexpected = set(decision) - decision_fields
+        if unexpected:
+            errors.append(f"unexpected decision fields: {sorted(unexpected)}")
+
+    verdict = decision.get("verdict")
+    if verdict not in STATUSES:
+        errors.append("decision.verdict is invalid")
+    packet_windows = {
+        item.get("window_id"): item
+        for item in packet.get("candidate_windows", [])
+        if isinstance(item, dict) and _text(item.get("window_id"))
+    }
+    window_id = decision.get("window_id")
+    source_window = packet_windows.get(window_id)
+    if source_window is None:
+        errors.append("decision.window_id is outside the source packet")
+        source_window = {}
+    if decision.get("commit") != source_window.get("representative_checkpoint"):
+        errors.append("decision.commit does not match the selected source window")
+
+    component_ids = _string_list(
+        decision.get("selected_component_ids"),
+        "decision.selected_component_ids",
+        errors,
+    )
+    if not component_ids:
+        errors.append("decision must select at least one component")
+    if len(component_ids) != len(set(component_ids)):
+        errors.append("decision.selected_component_ids contains duplicates")
+    if not set(component_ids).issubset(set(source_window.get("component_ids", []))):
+        errors.append("decision selects a component outside the selected window")
+
+    scope_ids = _string_list(
+        decision.get("candidate_scope_ids"),
+        "decision.candidate_scope_ids",
+        errors,
+    )
+    if verdict in {"promising", "uncertain"} and not scope_ids:
+        errors.append(f"{verdict} decision requires a candidate scope")
+    known_scope_ids = set(scopes) | custom_scope_ids
+    for scope_id in scope_ids:
+        if scope_id not in known_scope_ids:
+            errors.append(f"decision uses unregistered scope {scope_id}")
+    unused_custom_scopes = custom_scope_ids - set(scope_ids)
+    if unused_custom_scopes:
+        errors.append(f"unused custom scopes: {sorted(unused_custom_scopes)}")
+
+    if not _text(decision.get("case")):
+        errors.append("decision.case must be non-empty")
+    runtime_focus = decision.get("runtime_focus")
+    if verdict in {"promising", "uncertain"} and not _text(runtime_focus):
+        errors.append(f"{verdict} decision requires decision.runtime_focus")
+    if verdict == "low_potential" and runtime_focus is not None:
+        errors.append("low_potential decision.runtime_focus must be null")
+
+    evidence = review.get("evidence")
+    if not isinstance(evidence, list) or not evidence:
+        errors.append("evidence must be a non-empty list")
+    else:
+        for index, item in enumerate(evidence):
+            location = f"evidence[{index}]"
+            if not isinstance(item, dict):
+                errors.append(f"{location} must be an object")
+                continue
+            if set(item) - {"url", "claim"}:
+                errors.append(f"{location} has unexpected fields")
+            if not _text(item.get("url")) or not str(item["url"]).startswith(
+                ("https://", "http://")
+            ):
+                errors.append(f"{location}.url must be an HTTP(S) URL")
+            if not _text(item.get("claim")):
+                errors.append(f"{location}.claim must be non-empty")
+    return errors
+
+
 def validate(
     packet_path: Path,
     review_path: Path,
@@ -112,8 +262,19 @@ def validate(
         return ["source packet must be a schema-version 2 JSON object"]
     if not isinstance(review, dict):
         return ["semantic review must be a JSON object"]
-    if review.get("schema_version") != 3:
-        errors.append("schema_version must be 3")
+    review_version = review.get("schema_version")
+    if review_version == 4:
+        return _validate_v4(
+            packet_path,
+            packet_bytes,
+            packet,
+            review,
+            scopes,
+            technical_impacts,
+            custom_scope_fields,
+        )
+    if review_version != 3:
+        errors.append("schema_version must be 3 or 4")
     if review.get("repository") != packet.get("repository"):
         errors.append("repository does not match source packet")
     if review.get("source_packet") != packet_path.name:

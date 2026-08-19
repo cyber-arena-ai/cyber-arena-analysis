@@ -154,15 +154,13 @@ caveats.
 
 ### Semantic triage
 
-First read [semantic-review.md](references/semantic-review.md). Review
-application fit once, cluster the selected advisories, and inspect only enough
-public evidence to select one promising historical window and the vulnerability
-primitives worth testing. Reuse one advisory assessment across every window
-containing it.
-
-Use upstream documentation, advisory text, PoC or regression descriptions,
-fix/PR context, and minimal patch summaries. This pass prioritizes work; it does
-not establish runtime facts.
+First read [semantic-review.md](references/semantic-review.md) and the repository
+root `CONTRIBUTING.md`. Decide whether the strongest candidate in this project
+deserves an expensive Stage 3 study. Develop its best evidence-backed case,
+then actively pressure-test that case for an artificial prerequisite, an
+invalid repaired boundary, or a challenge that collapses to an isolated
+payload and obvious local guard. This is a bounded static prioritization pass;
+do not build or execute the application.
 
 Use an existing registered scope when it fits. If none fits, define one
 `custom.<challenge_id>.*` scope inline with exactly one registered CWE Technical
@@ -170,10 +168,11 @@ Impact parent, a concrete target and boundary, and an independent proof
 requirement. Do not add a near-duplicate global category during curation.
 
 Return `promising`, `uncertain`, or `low_potential`. Budget exhaustion is
-`uncertain`, not rejection. Record unsupported steps for the runnable study.
-The semantic review is the Stage 2 report: for every window it must repeat the
-exact checkpoint and complete component set from the packet, then state the
-scenario, candidate scopes, witness hypothesis, and deferred runtime facts.
+`uncertain`, not rejection. Preserve one compact decision that identifies the
+selected window and components, explains the application workflow, attacker
+path, security boundary, repair, and decisive pressure-test result, and names
+the runtime facts Stage 3 must resolve. Do not preserve the agent's intermediate
+notes or classify every advisory when one stronger kernel is sufficient.
 
 Validate a completed review batch:
 

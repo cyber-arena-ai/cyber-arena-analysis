@@ -75,10 +75,11 @@ python3 <skill-root>/scripts/resolve_git_windows.py \
   --output-dir artifacts/projects/OWNER__PROJECT/stage2/git-windows
 ```
 
-`semantic_packets/*.json` is the Stage 3 handoff. Each packet contains the
-selected windows, deduplicated advisory evidence, project metadata, current
-HEAD assessment, exclusions, and a hash of the complete chronological result.
-The complete result remains adjacent to the packet.
+`semantic_packets/*.json` is the mechanical half of the Stage 3 handoff; the
+matching Stage 2 semantic review selects the kernel to study. Each packet
+contains the selected windows, deduplicated advisory evidence, project metadata,
+current HEAD assessment, exclusions, and a hash of the complete chronological
+result. The complete result remains adjacent to the packet.
 
 ## Claim boundary
 

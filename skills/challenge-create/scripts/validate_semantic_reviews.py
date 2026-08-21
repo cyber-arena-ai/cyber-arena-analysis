@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 
@@ -27,6 +28,8 @@ EVIDENCE_TYPES = {
 BEHAVIOR_EVIDENCE = {"advisory", "poc", "regression"}
 REPAIR_EVIDENCE = {"fix", "patch", "pull_request"}
 HEX64 = re.compile(r"[0-9a-f]{64}")
+V4_EVIDENCE_KINDS = {"attack_chain", "repair", "operability"}
+OPERABILITY_RISKS = {"low", "medium", "high", "unknown"}
 
 
 def _text(value: object) -> bool:
@@ -38,6 +41,55 @@ def _string_list(value: object, location: str, errors: list[str]) -> list[str]:
         errors.append(f"{location} must be a list of non-empty strings")
         return []
     return list(value)
+
+
+def _retained_evidence(
+    review_path: Path, item: dict, location: str, errors: list[str]
+) -> str | None:
+    allowed = {"kind", "url", "observed_at", "artifact", "sha256", "claim"}
+    unexpected = set(item) - allowed
+    if unexpected:
+        errors.append(f"{location} has unexpected fields: {sorted(unexpected)}")
+    kind = item.get("kind")
+    if kind not in V4_EVIDENCE_KINDS:
+        errors.append(f"{location}.kind is invalid")
+        kind = None
+    if not _text(item.get("url")) or not str(item["url"]).startswith(
+        ("https://", "http://")
+    ):
+        errors.append(f"{location}.url must be an HTTP(S) URL")
+    observed = item.get("observed_at")
+    try:
+        parsed = datetime.fromisoformat(str(observed).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError
+    except (TypeError, ValueError):
+        errors.append(f"{location}.observed_at must be timezone-qualified ISO-8601")
+    if not _text(item.get("claim")):
+        errors.append(f"{location}.claim must be non-empty")
+
+    artifact = item.get("artifact")
+    digest = item.get("sha256")
+    if not _text(artifact) or Path(str(artifact)).is_absolute():
+        errors.append(f"{location}.artifact must be a nonempty relative path")
+        return kind
+    if not isinstance(digest, str) or not HEX64.fullmatch(digest):
+        errors.append(f"{location}.sha256 must be 64 lowercase hex characters")
+        return kind
+    root = review_path.parent.resolve()
+    path = review_path.parent / str(artifact)
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        errors.append(f"{location}.artifact must resolve inside the review directory")
+        return kind
+    if path.is_symlink() or not resolved.is_file():
+        errors.append(f"{location}.artifact must be a regular retained file")
+        return kind
+    if hashlib.sha256(resolved.read_bytes()).hexdigest() != digest:
+        errors.append(f"{location}.sha256 does not match the retained artifact")
+    return kind
 
 
 def _evidence(items: object, location: str, errors: list[str]) -> set[str]:
@@ -97,6 +149,7 @@ def _validate_application(application: object, errors: list[str]) -> str | None:
 
 
 def _validate_v4(
+    review_path: Path,
     packet_path: Path,
     packet_bytes: bytes,
     packet: dict,
@@ -169,7 +222,8 @@ def _validate_v4(
             "selected_component_ids",
             "candidate_scope_ids",
             "case",
-            "runtime_focus",
+            "next_focus",
+            "operability",
         }
         unexpected = set(decision) - decision_fields
         if unexpected:
@@ -220,13 +274,28 @@ def _validate_v4(
 
     if not _text(decision.get("case")):
         errors.append("decision.case must be non-empty")
-    runtime_focus = decision.get("runtime_focus")
-    if verdict in {"promising", "uncertain"} and not _text(runtime_focus):
-        errors.append(f"{verdict} decision requires decision.runtime_focus")
-    if verdict == "low_potential" and runtime_focus is not None:
-        errors.append("low_potential decision.runtime_focus must be null")
+    next_focus = decision.get("next_focus")
+    if verdict in {"promising", "uncertain"} and not _text(next_focus):
+        errors.append(f"{verdict} decision requires decision.next_focus")
+    if verdict == "low_potential" and next_focus is not None:
+        errors.append("low_potential decision.next_focus must be null")
+
+    operability = decision.get("operability")
+    if operability is None and verdict != "promising":
+        pass
+    elif not isinstance(operability, dict):
+        errors.append("decision.operability must be an object")
+    else:
+        unexpected = set(operability) - {"risk", "deployment"}
+        if unexpected:
+            errors.append(f"decision.operability has unexpected fields: {sorted(unexpected)}")
+        if operability.get("risk") not in OPERABILITY_RISKS:
+            errors.append("decision.operability.risk is invalid")
+        if not _text(operability.get("deployment")):
+            errors.append("decision.operability.deployment must be non-empty")
 
     evidence = review.get("evidence")
+    evidence_kinds: set[str] = set()
     if not isinstance(evidence, list) or not evidence:
         errors.append("evidence must be a non-empty list")
     else:
@@ -235,14 +304,13 @@ def _validate_v4(
             if not isinstance(item, dict):
                 errors.append(f"{location} must be an object")
                 continue
-            if set(item) - {"url", "claim"}:
-                errors.append(f"{location} has unexpected fields")
-            if not _text(item.get("url")) or not str(item["url"]).startswith(
-                ("https://", "http://")
-            ):
-                errors.append(f"{location}.url must be an HTTP(S) URL")
-            if not _text(item.get("claim")):
-                errors.append(f"{location}.claim must be non-empty")
+            kind = _retained_evidence(review_path, item, location, errors)
+            if kind:
+                evidence_kinds.add(kind)
+    if verdict == "promising":
+        for kind in ("attack_chain", "repair", "operability"):
+            if kind not in evidence_kinds:
+                errors.append(f"{verdict} decision requires {kind} evidence")
     return errors
 
 
@@ -265,6 +333,7 @@ def validate(
     review_version = review.get("schema_version")
     if review_version == 4:
         return _validate_v4(
+            review_path,
             packet_path,
             packet_bytes,
             packet,

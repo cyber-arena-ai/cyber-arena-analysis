@@ -2,39 +2,61 @@
 
 Decide whether the strongest candidate in one schema-v2 semantic packet
 deserves an expensive Stage 3 study. This is prioritization, not vulnerability
-confirmation and not challenge design.
+confirmation or full challenge design.
+
+Require one evidence-backed attack chain and repair; do not require a second
+route, a post-fix survivor, an intermediate release, a multi-advisory ladder,
+or a minimum patch size.
 
 ## Working method
 
-Use public application documentation, advisories, PoCs or regression
-descriptions, and the exact fix, PR, or tests. Read only the direct caller or
-authorization consumer needed to understand the claimed repair. Do not build
-the application, run a PoC, trace the full source tree, or design flags and
-checkers.
+Use primary upstream evidence without executing the vulnerable application.
+Clone or download exact source, patches, tests, advisories, and documentation
+when useful; retain the small evidence extracts that support the decision.
+Collection may be broad enough to resolve provenance, but analysis stays
+focused on the selected chain, its direct consumers, repair, and operability.
+Builds, deployments, PoC execution, and flag or checker design belong to later
+stages.
 
-Reason freely; do not turn these steps into separate artifacts or a checklist:
+Gather only the evidence needed for three connected judgments. Stop when
+upstream evidence decisively defeats the case; only a `promising` decision must
+complete all three:
 
-1. **Understand the opportunity.** Identify the application's natural users,
-   assets, workflows, and trust boundaries. Choose the strongest plausible
-   kernel and historical window rather than classifying every advisory.
-2. **Develop its best case.** Reconstruct one connected path from a realistic
-   starting actor, through public application features, to a protected target.
-   Explain the boundary crossed, how every prerequisite arises naturally, and
-   what the exact repair changes while preserving legitimate behavior.
-3. **Pressure-test the case.** Look for the simplest decisive reason the case
-   may not measure a useful challenge: an artificial prerequisite, a boundary
-   that disappears after the repair, or a path and correct defense that collapse
-   to an isolated payload and obvious local guard. Request count and patch size
-   are evidence, not automatic gates. If resolving the objection needs broad
-   source archaeology or execution, leave it to Stage 3.
-4. **Frame the handoff.** If the case survives, name the observable capability
-   and the few runtime facts that would decide it. Do not prescribe the final
-   environment, flag placement, checker, or exploit implementation.
+1. **Complete case.** Use an upstream advisory, PoC or regression description,
+   exact-revision authentication, authorization, and consumer source, and
+   official workflow documentation to connect distinct baseline principals, a
+   supported operation, attacker-controlled input, real consumer, crossed
+   application boundary, and protected outcome. When the witness needs
+   proof-bearing application state, identify the supported application
+   operation that can create or update that state and a public locator that is
+   not itself a credential. Use the exact patch, PR, tests, and release evidence
+   to explain the repair and preserved legitimate behavior. Every essential
+   hop and prerequisite needs affirmative evidence; an advisory claim without
+   its consumer, account model, or asset lifecycle is incomplete.
+2. **Strongest objection.** Try to defeat that case with the simplest material
+   objection supported by upstream evidence: no distinct equal-privilege
+   application principals, baseline-equivalent privilege, an
+   infrastructure-planted or victim-supplied prerequisite, a locator that is a
+   credential, a direct public shortcut, or a boundary invented by the proposed
+   deployment. Do not enumerate hypothetical objections or require proof of a
+   second route. Request count, patch size, locality, and apparent defensive
+   depth are observations, never gates.
+3. **Operability.** Use official install and build documentation to establish a
+   supported self-hosting shape, essential services, special privileges or
+   infrastructure, editable source availability, persistent state, and a
+   supported restart or reload path. Kubernetes, host Docker, privileged
+   nesting, multiple machines, or another essential unsupported facility are
+   decisive when no ordinary supported alternative exists. Exact cold-start and
+   rebuild timings remain Stage 3 measurements only after the documented shape
+   is compatible.
 
-Use `promising` when the static case survives pressure-testing and warrants
-runtime study. Use `low_potential` when public evidence decisively defeats the
-case. Use `uncertain` when one important fact needs runtime study or evidence is
-conflicting or unavailable. Budget exhaustion is `uncertain`, not rejection.
+These are reasoning prompts, not independent forms. Preserve the conclusion,
+not a completed checklist. Use `promising` only when all three judgments have
+affirmative upstream support and Stage 3 only needs to confirm or measure the
+case. Use `uncertain` when an essential fact is unsupported, conflicting, or
+unavailable; do not advance it until Stage 2 evidence resolves that fact. Use
+`low_potential` when upstream evidence defeats the case. Budget exhaustion is
+`uncertain`, not rejection.
 
 A candidate scope is a hypothesis, not proof. Use an ID from
 `attack-scopes.json` when it fits. If none fits, define one `custom.*` scope with
@@ -62,20 +84,38 @@ only for retained historical reports.
     "commit": "40 lowercase hex characters copied from the selected window",
     "selected_component_ids": ["CVE-YYYY-NNNN"],
     "candidate_scope_ids": ["app.cross_boundary.read"],
-    "case": "A concise evidence-backed account of the application workflow, attacker path, protected target, crossed boundary, repair, and decisive pressure-test result.",
-    "runtime_focus": "Confirm that the same low-privilege actor can cross the boundary at the exact checkpoint, that the exact repair blocks it while preserving the legitimate workflow, and that no artificial prerequisite dominates the trial."
+    "case": "A concise evidence-backed account of the complete application path and repair, followed by the strongest material objection and why the case survives it.",
+    "next_focus": "Confirm the already-supported path and repaired behavior live; do not use Stage 3 to discover a missing consumer, principal, asset, prerequisite, or deployment foundation.",
+    "operability": {
+      "risk": "low",
+      "deployment": "Official single-service container with local persistent storage."
+    }
   },
   "evidence": [
-    {"url": "https://example.invalid/advisory", "claim": "Behavior, actor, and prerequisites."},
-    {"url": "https://example.invalid/commit", "claim": "Exact repair and preserved behavior."}
+    {"kind": "attack_chain", "url": "https://example.invalid/advisory", "observed_at": "2026-08-21T00:00:00Z", "artifact": "evidence/advisory.txt", "sha256": "64 lowercase hex characters", "claim": "PoC or behavioral evidence establishes the actor, operations, and outcome."},
+    {"kind": "repair", "url": "https://example.invalid/commit", "observed_at": "2026-08-21T00:00:00Z", "artifact": "evidence/repair.patch", "sha256": "64 lowercase hex characters", "claim": "Exact repair and preserved behavior."},
+    {"kind": "operability", "url": "https://example.invalid/install", "observed_at": "2026-08-21T00:00:00Z", "artifact": "evidence/install.txt", "sha256": "64 lowercase hex characters", "claim": "Official deployment and build documentation establishes a compatible self-hosting shape and editable restart path."}
   ]
 }
 ```
 
-For `low_potential`, `candidate_scope_ids` may be empty and `runtime_focus` may
-be `null`. For `promising` or `uncertain`, provide at least one candidate scope
-and a focused runtime question. Multiple selected components are allowed when
-they support one coherent case.
+For `low_potential`, `candidate_scope_ids` may be empty and `next_focus` must be
+`null`. For `promising`, `next_focus` names the decisive Stage 3 confirmation or
+measurement. For `uncertain`, it names the missing upstream evidence that must
+be gathered before advancing. Both require at least one candidate scope. A
+`promising` decision requires retained `attack_chain`, `repair`, and
+`operability` evidence. For `uncertain` and `low_potential`, `operability` may
+be `null` when an earlier evidence gap or decisive objection stops the review;
+preserve whatever evidence is available without pretending the missing kind
+was established. Replace each example `observed_at` value with the actual
+collection time.
+
+`attack_chain` may retain a public PoC, upstream regression, or precise
+behavioral reproduction description; semantic triage does not require
+inventing a second route. Multiple selected components are allowed when they
+support one coherent case. Evidence artifacts are small, maintainer-only
+retained extracts or patches stored beside the review; they make the claim
+resumable when a mutable page changes.
 
 If a scope is challenge-local, add a top-level `custom_scopes` list containing
 its complete definition:

@@ -36,17 +36,30 @@ def _artifact(
     return resolved
 
 
-def validate(packet_path: Path, study_dir: Path) -> list[str]:
+def validate(packet_path: Path, review_path: Path, study_dir: Path) -> list[str]:
     packet_bytes = packet_path.read_bytes()
     packet = json.loads(packet_bytes)
+    review = json.loads(review_path.read_text(encoding="utf-8"))
     result_path = study_dir / "result.json"
     result = json.loads(result_path.read_text(encoding="utf-8"))
     errors: list[str] = []
 
     if not isinstance(packet, dict) or packet.get("schema_version") != 2:
         return ["source packet must be a schema-version 2 JSON object"]
+    if not isinstance(review, dict) or review.get("schema_version") != 4:
+        return ["source review must be a schema-version 4 JSON object"]
     if not isinstance(result, dict):
         return ["result.json must be a JSON object"]
+    decision = review.get("decision")
+    if not isinstance(decision, dict) or decision.get("verdict") != "promising":
+        errors.append("semantic review is not eligible for Stage 3")
+        decision = {}
+    if review.get("repository") != packet.get("repository"):
+        errors.append("semantic review repository does not match source packet")
+    if review.get("source_packet") != packet_path.name:
+        errors.append("semantic review source_packet does not match source packet")
+    if review.get("source_packet_sha256") != hashlib.sha256(packet_bytes).hexdigest():
+        errors.append("semantic review is not hash-linked to the source packet")
     if result.get("schema_version") != 2:
         errors.append("schema_version must be 2")
     if result.get("repository") != packet.get("repository"):
@@ -67,11 +80,15 @@ def validate(packet_path: Path, study_dir: Path) -> list[str]:
     window = windows.get(result.get("window_id"))
     if window is None:
         errors.append("window_id does not identify a source-packet window")
+    if result.get("window_id") != decision.get("window_id"):
+        errors.append("window_id does not match the semantic review")
     commit = result.get("commit")
     if not isinstance(commit, str) or not HEX40.fullmatch(commit):
         errors.append("commit must be 40 lowercase hex characters")
     elif window is not None and commit != window.get("representative_checkpoint"):
         errors.append("commit does not match the selected source-packet window")
+    if commit != decision.get("commit"):
+        errors.append("commit does not match the semantic review")
 
     components = result.get("selected_component_ids")
     if (
@@ -86,6 +103,8 @@ def validate(packet_path: Path, study_dir: Path) -> list[str]:
         set(window.get("component_ids", []))
     ):
         errors.append("selected_component_ids contains a component outside the window")
+    if components != decision.get("selected_component_ids"):
+        errors.append("selected_component_ids does not match the semantic review")
 
     outcome = result.get("outcome")
     if outcome not in OUTCOMES:
@@ -147,10 +166,11 @@ def validate(packet_path: Path, study_dir: Path) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--packet", required=True, type=Path)
+    parser.add_argument("--review", required=True, type=Path)
     parser.add_argument("--study-dir", required=True, type=Path)
     args = parser.parse_args()
     try:
-        errors = validate(args.packet, args.study_dir)
+        errors = validate(args.packet, args.review, args.study_dir)
     except (OSError, KeyError, json.JSONDecodeError) as error:
         errors = [str(error)]
     if errors:

@@ -1,6 +1,6 @@
 ---
 name: challenge-create
-description: Run the OSS Cyber Arena workflow from source discovery through Git-window reconstruction, semantic triage, Docker feasibility study, challenge authoring, registration, and PR handoff. Use when discovering or validating historical OSS revisions, implementing a ready candidate in cyber-arena-orche, registering it, or documenting it for submission. Do not use for independent admission review.
+description: Run the OSS Cyber Arena workflow from source discovery through Git-window reconstruction, semantic triage, Docker feasibility study, challenge-warehouse authoring, registration, and PR handoff. Use when discovering or validating historical OSS revisions, implementing a ready candidate in challenge-warehouse, registering it, or documenting it for submission. Do not use for independent admission review.
 ---
 
 # Challenge create
@@ -13,20 +13,23 @@ confirmed vulnerabilities or challenge admissions.
 
 Resolve the directory containing this file as `<skill-root>`.
 Use Python 3.11 or newer for all bundled scripts.
-Before Stage 4, locate the separate `cyber-arena-orche` checkout as
-`<orche-root>`.
+Before Stage 2, locate the separate `cyber-arena-docs` checkout as
+`<docs-root>`. Before Stage 4, locate `cyber-arena-orche` as `<orche-root>`.
 
 1. Read [source-discovery.md](references/source-discovery.md) completely.
 2. Read [attack-scopes.json](references/attack-scopes.json) before proposing capability scopes. Treat
    advisory CWE weakness labels as root-cause evidence, not as the Technical
    Impact proved by a flag.
 3. Read [range-overlap.md](references/range-overlap.md) before Git resolution.
-4. Read [semantic-review.md](references/semantic-review.md) before semantic
-   triage in Stage 2.
-5. Read [stage3-study.md](references/stage3-study.md) before runtime study.
-6. Read [dossier-template.md](references/dossier-template.md) when maintaining a
+4. Read `<docs-root>/docs/challenge-model.md` completely before semantic triage,
+   runtime study, or authoring. It is the normative source of truth.
+5. Read [advisory-enrichment.md](references/advisory-enrichment.md) and
+   [semantic-review.md](references/semantic-review.md) before semantic triage in
+   Stage 2.
+6. Read [stage3-study.md](references/stage3-study.md) before runtime study.
+7. Read [dossier-template.md](references/dossier-template.md) when maintaining a
    research-shortlist dossier.
-7. Read `<orche-root>/docs/CHALLENGE_AUTHORING_SOP.md` completely before Stage
+8. Read `<orche-root>/docs/CHALLENGE_AUTHORING_SOP.md` completely before Stage
    4. Treat that file as the authoritative authoring contract.
 
 Keep vulnerability, exploit, defense, and flag material maintainer-only.
@@ -54,7 +57,9 @@ artifacts/
     │   ├── overlaps/overlap_data/OWNER__PROJECT.json
     │   ├── git-windows/OWNER__PROJECT.json
     │   ├── git-windows/semantic_packets/OWNER__PROJECT.json
-    │   └── semantic-reviews/OWNER__PROJECT.json
+    │   └── semantic-reviews/
+    │       ├── OWNER__PROJECT.json
+    │       └── evidence/
     ├── stage3/
     ├── stage4/
     │   ├── warehouse/
@@ -154,25 +159,46 @@ caveats.
 
 ### Semantic triage
 
-First read [semantic-review.md](references/semantic-review.md) and the repository
-root `CONTRIBUTING.md`. Decide whether the strongest candidate in this project
-deserves an expensive Stage 3 study. Develop its best evidence-backed case,
-then actively pressure-test that case for an artificial prerequisite, an
-invalid repaired boundary, or a challenge that collapses to an isolated
-payload and obvious local guard. This is a bounded static prioritization pass;
-do not build or execute the application.
+First read [advisory-enrichment.md](references/advisory-enrichment.md),
+[semantic-review.md](references/semantic-review.md), and the repository root
+`CONTRIBUTING.md`. Treat OSV as the retained discovery seed rather than a
+complete advisory universe. Decide whether the strongest candidate deserves an
+expensive Stage 3 study. Require one understood, natural attack chain and its
+repair; do not require a second route, post-fix survivor, multi-CVE ladder,
+minimum patch size, or apparent defensive depth.
+
+A `promising` result needs three connected bundles of primary upstream
+evidence. Stop early when upstream evidence decisively defeats the case:
+
+- `attack_chain`: advisory, PoC, or regression evidence; exact-revision
+  authentication, authorization, entry-point, and consumer source; supported
+  workflow; and, when needed, the application-mediated proof-state lifecycle
+  and a non-credential locator;
+- `repair`: exact fix, PR, or tests plus affected/fixed release evidence;
+- `operability`: official self-hosting, source-build, dependency, persistence,
+  health, privilege, and restart or reload documentation.
+
+Clone or download exact upstream material when useful. Keep analysis bounded to
+the selected chain, repair, and operability. Do not build, deploy, run a PoC, or
+design flags and checkers in Stage 2. Build the strongest complete case, try to
+defeat it with the strongest evidence-backed objection, and assess whether the
+documented application is realistically runnable and editable. Missing
+principals, consumers, prerequisites, protected assets, or deployment
+foundations are Stage 2 evidence gaps, not runtime measurements for Stage 3.
 
 Use an existing registered scope when it fits. If none fits, define one
 `custom.<challenge_id>.*` scope inline with exactly one registered CWE Technical
 Impact parent, a concrete target and boundary, and an independent proof
 requirement. Do not add a near-duplicate global category during curation.
 
-Return `promising`, `uncertain`, or `low_potential`. Budget exhaustion is
-`uncertain`, not rejection. Preserve one compact decision that identifies the
-selected window and components, explains the application workflow, attacker
-path, security boundary, repair, and decisive pressure-test result, and names
-the runtime facts Stage 3 must resolve. Do not preserve the agent's intermediate
-notes or classify every advisory when one stronger kernel is sufficient.
+Return `promising` only when the attack chain, repair, and operability all have
+affirmative upstream support and Stage 3 only needs live confirmation or
+measurement. Return `uncertain` when an essential upstream fact is missing or
+conflicting; keep it in Stage 2 and name that evidence gap. Return
+`low_potential` when upstream evidence defeats the case or the documented
+architecture is incompatible. Budget exhaustion is `uncertain`, not rejection.
+Preserve one compact decision and its retained evidence, not intermediate notes
+or one assessment per advisory.
 
 Validate a completed review batch:
 
@@ -183,8 +209,16 @@ python3 <skill-root>/scripts/validate_semantic_reviews.py \
   --scope-registry <skill-root>/references/attack-scopes.json
 ```
 
-The packet and its matching semantic review are the Stage 3 input. Do not begin
-runtime study from the packet alone.
+Only a validated `promising` packet and matching semantic review are eligible
+Stage 3 input. Do not begin runtime study from the packet alone or from an
+`uncertain` review.
+
+### Stage 2 result and resume boundary
+
+The persistent result is the exact Git-window result, schema-v2 semantic packet,
+schema-v4 semantic review, and retained evidence extracts. The review is
+hash-linked to its packet. Resume Stage 3 only from a validated `promising`
+review; resume an `uncertain` result in Stage 2.
 
 ## Stage 3: runnable feasibility study
 
@@ -204,6 +238,7 @@ Validate only the study's mechanical linkage and artifact presence:
 ```bash
 python3 <skill-root>/scripts/validate_stage3_study.py \
   --packet artifacts/projects/OWNER__PROJECT/stage2/git-windows/semantic_packets/OWNER__PROJECT.json \
+  --review artifacts/projects/OWNER__PROJECT/stage2/semantic-reviews/OWNER__PROJECT.json \
   --study-dir artifacts/projects/OWNER__PROJECT/stage3/<study-name>
 ```
 

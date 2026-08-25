@@ -3,15 +3,21 @@ import json
 import subprocess
 import sys
 import zipfile
+from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError
 
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
+import shortlist_candidates  # noqa: E402
 from shortlist_candidates import InputError, generate  # noqa: E402
 from osv_history import CorpusError  # noqa: E402
-from compute_candidate_overlaps import generate as generate_overlaps  # noqa: E402
+from compute_candidate_overlaps import (  # noqa: E402
+    _repository_records,
+    generate as generate_overlaps,
+)
 from resolve_git_windows import (  # noqa: E402
     refresh_repository,
     resolve_project,
@@ -153,13 +159,21 @@ def _refresh_source(manifest_path, archive_path, **source_fields):
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _generate(inputs, cutoff=None, *, fetch_repository=None, duplicate_inventory=None):
+def _generate(
+    inputs,
+    cutoff=None,
+    *,
+    fetch_repository=None,
+    duplicate_inventory=None,
+    metadata_cache=None,
+):
     raw_dir, manifest, _ = inputs
     return generate(
         raw_dir=raw_dir,
         manifest_path=manifest,
         cutoff_value=cutoff,
         duplicate_inventory_path=duplicate_inventory,
+        metadata_cache_path=metadata_cache,
         fetch_repository=fetch_repository or (lambda repository: _project(repository)),
     )
 
@@ -227,6 +241,202 @@ def test_unresolved_project_gate_retains_observed_metadata(tmp_path):
     assert unresolved["project"]["license"] is None
     assert unresolved["project"]["observed_at"] == "2026-05-01T00:00:00Z"
     assert unresolved["project"]["description"] == "Self-hosted network application"
+
+
+def test_service_metadata_heuristics_remain_unresolved(tmp_path):
+    inputs = _inputs(tmp_path)
+    library = _generate(
+        inputs,
+        fetch_repository=lambda repository: _project(
+            repository,
+            description="Dependency management library",
+            topics=[],
+        ),
+    )
+    conflicting = _generate(
+        inputs,
+        fetch_repository=lambda repository: _project(
+            repository,
+            description="Self-hosted server",
+            topics=["library"],
+        ),
+    )
+    client = _generate(
+        inputs,
+        fetch_repository=lambda repository: _project(
+            repository,
+            description="Python client for a database service",
+            topics=[],
+        ),
+    )
+
+    assert library["projects"] == []
+    assert library["unresolved_candidates"][0]["reason"] == (
+        "non_service_shape_indicated"
+    )
+    assert conflicting["projects"] == []
+    assert conflicting["unresolved_candidates"][0]["reason"] == (
+        "conflicting_service_metadata"
+    )
+    assert client["projects"] == []
+    assert client["unresolved_candidates"][0]["reason"] == (
+        "conflicting_service_metadata"
+    )
+    assert "non_service_shape_indicated" not in library["summary"]["exclusions"]
+
+
+def test_github_metadata_cache_resumes_after_a_late_failure(tmp_path):
+    raw_dir, manifest, archive_path = _inputs(tmp_path)
+    second = _record("CVE-2026-4000", "2026-04-20T00:00:00Z", "f" * 40)
+    second["affected"][0]["package"]["name"] = "second"
+    second["affected"][0]["ranges"][0]["repo"] = (
+        "https://github.com/example/second"
+    )
+    for reference in second["references"]:
+        reference["url"] = reference["url"].replace("example/app", "example/second")
+    with zipfile.ZipFile(archive_path, "a") as archive:
+        archive.writestr("second.json", json.dumps(second))
+    _refresh_source(manifest, archive_path)
+    cache = tmp_path / "github_repository_metadata.json"
+    first_calls = []
+
+    def interrupted_fetch(repository):
+        first_calls.append(repository)
+        if repository == "example/second":
+            raise InputError("simulated rate limit")
+        return _project(repository)
+
+    try:
+        _generate(
+            (raw_dir, manifest, archive_path),
+            fetch_repository=interrupted_fetch,
+            metadata_cache=cache,
+        )
+    except InputError as error:
+        assert "simulated rate limit" in str(error)
+    else:
+        raise AssertionError("late metadata failure was accepted")
+
+    assert first_calls == ["example/app", "example/second"]
+    cached = json.loads(cache.read_text(encoding="utf-8"))
+    assert sorted(cached["repositories"]) == ["example/app"]
+
+    resumed_calls = []
+    result = _generate(
+        (raw_dir, manifest, archive_path),
+        fetch_repository=lambda repository: (
+            resumed_calls.append(repository) or _project(repository)
+        ),
+        metadata_cache=cache,
+    )
+
+    assert resumed_calls == ["example/second"]
+    assert [project["repository"] for project in result["projects"]] == [
+        "example/app",
+        "example/second",
+    ]
+    assert result["summary"]["github_repositories_fetched"] == 1
+    assert result["sources"]["github_metadata_cache"]["sha256"] == hashlib.sha256(
+        cache.read_bytes()
+    ).hexdigest()
+
+
+def test_github_metadata_retries_a_short_rate_limit(monkeypatch):
+    payload = {
+        "html_url": "https://github.com/example/app",
+        "full_name": "example/app",
+        "name": "app",
+        "description": "Self-hosted service",
+        "stargazers_count": 1,
+        "forks_count": 1,
+        "license": {"spdx_id": "MIT"},
+        "archived": False,
+        "pushed_at": "2026-04-30T00:00:00Z",
+        "topics": ["self-hosted"],
+        "default_branch": "main",
+    }
+
+    class Response(BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+
+    responses = [
+        HTTPError("https://api.github.com", 429, "rate limited", {"Retry-After": "0"}, None),
+        Response(json.dumps(payload).encode()),
+    ]
+    sleeps = []
+
+    def fake_urlopen(_request, timeout):
+        assert timeout == 30
+        response = responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(shortlist_candidates, "urlopen", fake_urlopen)
+    monkeypatch.setattr(shortlist_candidates.time, "sleep", sleeps.append)
+
+    project = shortlist_candidates._github_repository("example/app")
+
+    assert project["repository"] == "example/app"
+    assert sleeps == [0.0]
+
+
+def test_package_rename_records_expand_to_a_fixed_point():
+    direct = {
+        "source_archive": "test.zip",
+        "source_member": "direct.json",
+        "record": {
+            "affected": [
+                {
+                    "package": {"ecosystem": "PyPI", "name": "old-name"},
+                    "ranges": [
+                        {
+                            "type": "GIT",
+                            "repo": "https://github.com/example/app",
+                            "events": [{"introduced": "0"}, {"fixed": "a" * 40}],
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+    renamed = {
+        "source_archive": "test.zip",
+        "source_member": "renamed.json",
+        "record": {
+            "affected": [
+                {
+                    "package": {"ecosystem": "PyPI", "name": "new-name"},
+                    "versions": ["2.0"],
+                }
+            ]
+        },
+    }
+    bridge = {
+        "source_archive": "test.zip",
+        "source_member": "bridge.json",
+        "record": {
+            "affected": [
+                {"package": {"ecosystem": "PyPI", "name": "old-name"}},
+                {"package": {"ecosystem": "PyPI", "name": "new-name"}},
+            ]
+        },
+    }
+
+    selected = _repository_records(
+        [direct, renamed, bridge], {"example/app"}, strict=True
+    )
+
+    assert [item["source_member"] for item in selected] == [
+        "direct.json",
+        "bridge.json",
+        "renamed.json",
+    ]
+    assert selected[-1]["record"]["affected"][0]["versions"] == ["2.0"]
 
 
 def test_shortlist_rejects_components_without_behavioral_evidence(tmp_path):

@@ -43,18 +43,7 @@ def canonical_github_repo(url: str | None) -> str | None:
     return f"{owner}/{repo}"
 
 def prototype_exclusion_reason(project: dict) -> str | None:
-    """Reject obvious non-service shapes while leaving ambiguous cases for review."""
-    topics = {str(topic).lower() for topic in project.get("topics", [])}
-    service_terms = {
-        "database", "platform", "self-hosted", "server", "service", "web",
-        "webapp", "web-application",
-    }
-    if topics & {"cli", "command-line"} and not topics & service_terms:
-        return "command-line tool, not a deployable service"
-    if topics & {"cni", "ebpf", "kernel", "kubernetes-networking"}:
-        return "kernel/cluster infrastructure likely requires unsafe arena privileges"
-    if topics & {"library", "sdk"} and not topics & service_terms:
-        return "library or SDK, not a deployable service"
+    """Return why metadata alone cannot establish a deployable service."""
     text = " ".join(
         [
             str(project.get("name", "")),
@@ -63,11 +52,45 @@ def prototype_exclusion_reason(project: dict) -> str | None:
         ]
     ).lower()
     words = set(re.findall(r"[a-z0-9-]+", text))
-    deployable_terms = service_terms | {
-        "analytics", "application", "authentication", "ci-cd", "cms",
-        "collaboration", "dashboard", "file-server", "file-sharing", "git-server",
-        "iam", "identity", "management", "monitoring", "observability", "webui",
+    service_terms = {
+        "cms",
+        "database",
+        "file-server",
+        "file-sharing",
+        "git-server",
+        "self-hosted",
+        "selfhosted",
+        "server",
+        "service",
+        "web-application",
+        "webapp",
+        "webui",
     }
-    if not words & deployable_terms:
-        return "no clear deployable network-service signal in repository metadata"
+    non_service_terms = {
+        "cli",
+        "client",
+        "command-line",
+        "cni",
+        "driver",
+        "ebpf",
+        "framework",
+        "kernel",
+        "kubernetes-networking",
+        "library",
+        "sdk",
+        "tool",
+    }
+    has_service_signal = bool(words & service_terms) or (
+        {"self", "hosted"} <= words or {"web", "application"} <= words
+    )
+    has_non_service_signal = bool(words & non_service_terms) or {
+        "command",
+        "line",
+    } <= words
+    if has_service_signal and has_non_service_signal:
+        return "conflicting_service_metadata"
+    if has_non_service_signal:
+        return "non_service_shape_indicated"
+    if not has_service_signal:
+        return "deployable_service_not_established"
     return None

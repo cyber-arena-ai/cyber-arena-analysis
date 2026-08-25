@@ -122,14 +122,33 @@ def _repository_records(
         for package in record_packages(wrapped["record"])
     }
     selected = list(direct)
-    for wrapped in records:
-        repositories = candidate_repositories(wrapped["record"])
-        if (
-            wrapped not in direct
-            and not repositories
-            and packages & record_packages(wrapped["record"])
-        ):
-            selected.append(wrapped)
+    selected_sources = {
+        (wrapped["source_archive"], wrapped["source_member"])
+        for wrapped in selected
+    }
+    while True:
+        added = []
+        for wrapped in records:
+            source = (wrapped["source_archive"], wrapped["source_member"])
+            record = wrapped["record"]
+            if (
+                source not in selected_sources
+                and not candidate_repositories(record)
+                and packages & record_packages(record)
+            ):
+                added.append(wrapped)
+        if not added:
+            break
+        selected.extend(added)
+        selected_sources.update(
+            (wrapped["source_archive"], wrapped["source_member"])
+            for wrapped in added
+        )
+        packages.update(
+            package
+            for wrapped in added
+            for package in record_packages(wrapped["record"])
+        )
     return selected
 
 

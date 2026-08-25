@@ -66,6 +66,7 @@ python3 <skill-root>/scripts/shortlist_candidates.py \
   --raw-dir artifacts/sources/osv/raw \
   --manifest artifacts/sources/osv/osv_manifest.json \
   --duplicate-inventory artifacts/sources/challenge-inventory.json \
+  --metadata-cache artifacts/sources/github_repository_metadata.json \
   --output artifacts/candidates.json
 ```
 
@@ -89,11 +90,15 @@ The command deliberately works in this order:
    whose every phase has an exact fixed commit; otherwise retain the component
    as unresolved before spending a GitHub metadata request.
 5. Fetch current GitHub metadata once for each surviving application
-   repository. Consolidate redirects under the current canonical slug while
-   retaining every advisory slug as a repository alias for Stage 2 matching.
-6. Exclude archived, inactive, and obvious non-service repositories. Keep
-   missing license, activity, or deployable-service evidence unresolved rather
-   than guessing.
+   repository. Checkpoint each completed response in
+   `github_repository_metadata.json`; bounded rate-limit retries may continue
+   immediately, while a later failure can resume from the cache. Consolidate
+   redirects under the current canonical slug while retaining every advisory
+   slug as a repository alias for Stage 2 matching.
+6. Exclude repositories only when archived or inactive status establishes the
+   result. Accept only clear deployable-service metadata. Keep missing license
+   or activity, apparent non-service shapes, and sparse or contradictory
+   service evidence unresolved rather than guessing.
 
 Do not filter by CWE, CVSS, attack-vector labels, summary keywords, advisory
 count, or a popularity threshold. `stars` and `forks` are preserved only as
@@ -109,6 +114,12 @@ late tie-breakers after advisory evidence and project gates.
   bounded evidence gathering;
 - `summary.exclusions`: deterministic rejection counts;
 - `sources`: hashes for the advisory manifest and optional inventory.
+
+The generated metadata cache uses schema version 1 and maps each requested
+`owner/repository` to its completed GitHub response (or `null` for a completed
+not-found response). It is a resumable Stage 1 input, and its hash is recorded
+under `candidates.json.sources`. Remove or replace it when intentionally
+refreshing mutable GitHub metadata.
 
 Resume Stage 1 by refreshing or correcting a source, updating its manifest
 entry, and rebuilding `candidates.json`. Continue to Stage 2 only with entries

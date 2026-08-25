@@ -88,6 +88,7 @@ python3 <skill-root>/scripts/shortlist_candidates.py \
   --raw-dir artifacts/sources/osv/raw \
   --manifest artifacts/sources/osv/osv_manifest.json \
   --duplicate-inventory artifacts/sources/challenge-inventory.json \
+  --metadata-cache artifacts/sources/github_repository_metadata.json \
   --output artifacts/candidates.json
 ```
 
@@ -111,7 +112,12 @@ Git range for that application, with an exact fixed boundary in every phase.
 Only then does it fetch current GitHub metadata and apply the archived,
 activity, OSS-license, and deployable-service gates. Missing license, service,
 repository, Git-range, or Git-repair evidence remains explicit in
-`unresolved_candidates`.
+`unresolved_candidates`. Metadata-only service contradictions and apparent
+non-service shapes also remain unresolved; only archived or inactive status is
+a hard project-metadata exclusion. The metadata cache checkpoints each
+completed GitHub lookup so a rate limit or transient failure can resume without
+repeating earlier requests. Delete or replace the cache only when intentionally
+refreshing mutable repository metadata.
 
 `candidates.json` is the persistent Stage 1 result. It retains accepted
 `projects`, unresolved mappings or project gates, exclusion counts, mutable

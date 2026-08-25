@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,8 @@ PROJECT_METADATA_FIELDS = (
     "default_branch",
     "observed_at",
 )
+METADATA_CACHE_SCHEMA_VERSION = 1
+MAX_RATE_LIMIT_WAIT_SECONDS = 60
 
 
 class InputError(ValueError):
@@ -293,6 +296,25 @@ def _load_duplicate_inventory(path: Path | None) -> tuple[set[str], set[str]]:
     return repositories, advisory_ids
 
 
+def _rate_limit_delay(error: HTTPError) -> float | None:
+    if error.code not in {403, 429}:
+        return None
+    headers = error.headers or {}
+    retry_after = headers.get("Retry-After")
+    if retry_after is not None:
+        try:
+            return max(0.0, float(retry_after))
+        except ValueError:
+            return None
+    reset = headers.get("X-RateLimit-Reset")
+    if reset is not None:
+        try:
+            return max(0.0, float(reset) - time.time())
+        except ValueError:
+            return None
+    return None
+
+
 def _github_repository(repository: str) -> dict | None:
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     headers = {
@@ -302,19 +324,29 @@ def _github_repository(repository: str) -> dict | None:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = Request(f"https://api.github.com/repos/{repository}", headers=headers)
-    try:
-        with urlopen(request, timeout=30) as response:
-            payload = json.load(response)
-    except HTTPError as error:
-        if error.code == 404:
-            return None
-        raise InputError(
-            f"GitHub metadata request failed for {repository}: HTTP {error.code}"
-        ) from error
-    except URLError as error:
-        raise InputError(
-            f"GitHub metadata request failed for {repository}: {error.reason}"
-        ) from error
+    for attempt in range(2):
+        try:
+            with urlopen(request, timeout=30) as response:
+                payload = json.load(response)
+            break
+        except HTTPError as error:
+            if error.code == 404:
+                return None
+            delay = _rate_limit_delay(error)
+            if attempt == 0 and delay is not None and delay <= MAX_RATE_LIMIT_WAIT_SECONDS:
+                time.sleep(delay)
+                continue
+            detail = ""
+            if delay is not None:
+                detail = f"; retry after approximately {int(delay)} seconds"
+            raise InputError(
+                f"GitHub metadata request failed for {repository}: "
+                f"HTTP {error.code}{detail}"
+            ) from error
+        except URLError as error:
+            raise InputError(
+                f"GitHub metadata request failed for {repository}: {error.reason}"
+            ) from error
     canonical = canonical_github_repo(payload.get("html_url") or payload.get("full_name"))
     if not canonical:
         raise InputError(f"GitHub returned an invalid repository identity for {repository}")
@@ -349,11 +381,46 @@ def _project_disposition(project: dict) -> tuple[str, str | None]:
     if project.get("license") in NON_LICENSES:
         return "unresolved", "acceptable_oss_license_not_established"
     service_reason = prototype_exclusion_reason(project)
-    if service_reason == "no clear deployable network-service signal in repository metadata":
-        return "unresolved", "deployable_service_not_established"
     if service_reason:
-        return "excluded", service_reason
+        return "unresolved", service_reason
     return "accepted", None
+
+
+def _load_metadata_cache(path: Path | None) -> dict[str, dict | None]:
+    if path is None or not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != METADATA_CACHE_SCHEMA_VERSION:
+        raise InputError("GitHub metadata cache must use schema_version 1")
+    repositories = payload.get("repositories")
+    if not isinstance(repositories, dict):
+        raise InputError("GitHub metadata cache repositories must be an object")
+    for repository, project in repositories.items():
+        if _canonical_repository(repository) != repository:
+            raise InputError(f"invalid GitHub metadata cache key: {repository!r}")
+        if project is not None and not isinstance(project, dict):
+            raise InputError(
+                f"invalid GitHub metadata cache entry for {repository!r}"
+            )
+    return repositories
+
+
+def _write_metadata_cache(path: Path, repositories: dict[str, dict | None]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(
+            {
+                "schema_version": METADATA_CACHE_SCHEMA_VERSION,
+                "repositories": repositories,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 
 
 def _project_metadata(project: dict, canonical: str) -> dict:
@@ -416,6 +483,7 @@ def generate(
     manifest_path: Path,
     cutoff_value: str | None,
     duplicate_inventory_path: Path | None = None,
+    metadata_cache_path: Path | None = None,
     fetch_repository=None,
 ) -> dict:
     cutoff = _timestamp(cutoff_value)
@@ -424,6 +492,7 @@ def generate(
         duplicate_inventory_path
     )
     fetch_repository = fetch_repository or _github_repository
+    metadata_cache = _load_metadata_cache(metadata_cache_path)
 
     aliases = Aliases()
     metadata = []
@@ -579,8 +648,14 @@ def generate(
     fetched = 0
     accepted_rows: dict[str, dict] = {}
     for requested_repository, component_rows in sorted(rows_by_repository.items()):
-        project = fetch_repository(requested_repository)
-        fetched += 1
+        if requested_repository in metadata_cache:
+            project = metadata_cache[requested_repository]
+        else:
+            project = fetch_repository(requested_repository)
+            fetched += 1
+            metadata_cache[requested_repository] = project
+            if metadata_cache_path is not None:
+                _write_metadata_cache(metadata_cache_path, metadata_cache)
         if project is None:
             unresolved.append(
                 {
@@ -627,6 +702,9 @@ def generate(
         )
         result["components"].extend(component_rows)
 
+    if metadata_cache_path is not None and not metadata_cache_path.exists():
+        _write_metadata_cache(metadata_cache_path, metadata_cache)
+
     output_projects = list(accepted_rows.values())
     for project in output_projects:
         project["repository_aliases"] = sorted(
@@ -658,6 +736,11 @@ def generate(
         sources["duplicate_inventory"] = {
             "path": str(duplicate_inventory_path),
             "sha256": _sha256(duplicate_inventory_path),
+        }
+    if metadata_cache_path:
+        sources["github_metadata_cache"] = {
+            "path": str(metadata_cache_path),
+            "sha256": _sha256(metadata_cache_path),
         }
     return {
         "schema_version": 2,
@@ -706,17 +789,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--duplicate-inventory", type=Path)
     parser.add_argument(
+        "--metadata-cache",
+        type=Path,
+        help=(
+            "checkpoint completed GitHub lookups; defaults to "
+            "<output-dir>/sources/github_repository_metadata.json"
+        ),
+    )
+    parser.add_argument(
         "--published-after",
         help="enable the optional cutoff with a timezone-qualified ISO-8601 timestamp",
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    metadata_cache = args.metadata_cache or (
+        args.output.parent / "sources" / "github_repository_metadata.json"
+    )
     try:
         payload = generate(
             raw_dir=args.raw_dir,
             manifest_path=args.manifest,
             cutoff_value=args.published_after,
             duplicate_inventory_path=args.duplicate_inventory,
+            metadata_cache_path=metadata_cache,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(

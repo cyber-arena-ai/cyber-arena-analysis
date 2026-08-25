@@ -1,6 +1,4 @@
-import json
 import sys
-import zipfile
 from pathlib import Path
 
 
@@ -10,7 +8,6 @@ sys.path.insert(0, str(SCRIPTS))
 from osv_history import (  # noqa: E402
     analyze_overlap,
     build_components,
-    select_project_records,
 )
 
 
@@ -32,11 +29,15 @@ def _record(identifier, *, aliases=(), package=None, versions=(), ranges=(), ref
     }
 
 
-def _write_archive(raw_dir, records):
-    raw_dir.mkdir()
-    with zipfile.ZipFile(raw_dir / "PyPI.zip", "w") as archive:
-        for index, record in enumerate(records):
-            archive.writestr(f"{index}.json", json.dumps(record))
+def _wrapped(records):
+    return [
+        {
+            "source_archive": "test.zip",
+            "source_member": f"{index}.json",
+            "record": record,
+        }
+        for index, record in enumerate(records)
+    ]
 
 
 def test_project_history_recovers_package_only_records_and_deduplicates_aliases(tmp_path):
@@ -73,19 +74,9 @@ def test_project_history_recovers_package_only_records_and_deduplicates_aliases(
                 }
             ],
         ),
-        _record(
-            "GHSA-jjjj-kkkk-llll",
-            package="PyPI:unrelated",
-            versions=["1.1"],
-        ),
     ]
-    raw_dir = tmp_path / "raw"
-    _write_archive(raw_dir, records)
-
-    selected, packages, stats = select_project_records(
-        raw_dir, "example/service"
-    )
-    components = build_components(selected)
+    packages = {"PyPI:demo"}
+    components = build_components(_wrapped(records))
     overlap = analyze_overlap(
         components,
         packages,
@@ -93,7 +84,6 @@ def test_project_history_recovers_package_only_records_and_deduplicates_aliases(
     )
 
     assert packages == {"PyPI:demo"}
-    assert stats["selected_record_count"] == 4
     assert len(components) == 3
     assert overlap["selection"] == {
         "metric": "maximum reported_present advisory-component count",
@@ -125,14 +115,8 @@ def test_overlap_keeps_monorepo_packages_separate(tmp_path):
             references=[reference],
         ),
     ]
-    raw_dir = tmp_path / "raw"
-    _write_archive(raw_dir, records)
-
-    selected, _, _ = select_project_records(
-        raw_dir, "example/mono", {"PyPI:core"}
-    )
     overlap = analyze_overlap(
-        build_components(selected),
+        build_components(_wrapped(records)),
         {"PyPI:core"},
         [("3.0", "3.0")],
     )
@@ -155,17 +139,10 @@ def test_multi_repository_git_versions_are_not_attributed_to_one_repo(tmp_path):
             "events": [{"introduced": "c" * 40}, {"fixed": "d" * 40}],
         },
     ]
-    raw_dir = tmp_path / "raw"
-    _write_archive(
-        raw_dir,
-        [_record("CVE-2026-3000", versions=["v1.0"], ranges=ranges)],
-    )
-
-    selected, _, _ = select_project_records(
-        raw_dir, "example/service", {"GIT:example/service"}
-    )
     overlap = analyze_overlap(
-        build_components(selected),
+        build_components(
+            _wrapped([_record("CVE-2026-3000", versions=["v1.0"], ranges=ranges)])
+        ),
         {"GIT:example/service"},
         [("v1.0", "v1.0")],
     )

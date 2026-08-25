@@ -13,6 +13,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from osv_history import parse_git_phases
+
 
 HEX40 = re.compile(r"[0-9a-f]{40}")
 UNSTABLE_TAG = re.compile(
@@ -166,44 +168,6 @@ def _commit_info(repository: Path, commit: str) -> dict:
                     int(match.group(1)), tz=timezone.utc
                 ).isoformat()
     return {"commit": commit, "parents": parents, "committed_at": committed_at}
-
-
-def _parse_phases(events: list[dict]) -> tuple[list[dict], list[str]]:
-    phases = []
-    blockers = []
-    current = {"introduced": [], "fixed": [], "last_affected": []}
-    seen_terminal = False
-    for event in events:
-        if not isinstance(event, dict) or len(event) != 1:
-            blockers.append("invalid_event_shape")
-            continue
-        kind, raw_value = next(iter(event.items()))
-        value = str(raw_value).lower()
-        if kind not in {"introduced", "fixed", "last_affected"}:
-            blockers.append(f"unsupported_event:{kind}")
-            continue
-        if kind == "introduced" and value != "0" and not HEX40.fullmatch(value):
-            blockers.append("invalid_introduced_commit")
-            continue
-        if kind != "introduced" and not HEX40.fullmatch(value):
-            blockers.append(f"invalid_{kind}_commit")
-            continue
-        if kind == "introduced":
-            if seen_terminal:
-                phases.append(current)
-                current = {"introduced": [], "fixed": [], "last_affected": []}
-                seen_terminal = False
-            current["introduced"].append(value)
-        else:
-            if not current["introduced"]:
-                blockers.append(f"{kind}_without_introduction")
-            current[kind].append(value)
-            seen_terminal = True
-    if any(current.values()):
-        phases.append(current)
-    if not phases:
-        blockers.append("empty_git_range")
-    return phases, sorted(set(blockers))
 
 
 def _range_affected(phases: list[dict], checkpoint: str, is_ancestor) -> bool:
@@ -463,7 +427,7 @@ def resolve_project(
         component_sources: dict[str, list[dict]] = defaultdict(list)
         fixed_boundaries = set()
         for affected_range in component.get("project_git_ranges", []):
-            phases, range_blockers = _parse_phases(affected_range.get("events", []))
+            phases, range_blockers = parse_git_phases(affected_range.get("events", []))
             range_reasons.extend(range_blockers)
             for phase in phases:
                 if not phase["fixed"]:
@@ -594,9 +558,12 @@ def resolve_project(
     return {
         "schema_version": 3,
         "repository": project["repository"],
+        "repository_aliases": project.get(
+            "repository_aliases", [project["repository"]]
+        ),
         "method": "osv_git_event_ancestry",
         "project": project.get("project", {}),
-        "popularity_score": project.get("popularity_score"),
+        "duplicate_matches": project.get("duplicate_matches", []),
         "source_provenance": project.get("source_provenance", {}),
         "head_commit": head,
         "head_reference": head_reference,
@@ -693,6 +660,10 @@ def _packet_component(component: dict) -> dict:
         "fixes",
         "behavioral_evidence",
         "repair_evidence",
+        "application_repository",
+        "application_mapping",
+        "application_git_ranges",
+        "duplicate_matches",
         "affected_units",
         "project_git_ranges",
         "verified_fix_boundaries",
@@ -793,8 +764,9 @@ def write_outputs(results: list[dict], output_dir: Path) -> None:
         packet = {
             "schema_version": 2,
             "repository": result["repository"],
+            "repository_aliases": result["repository_aliases"],
             "project": result["project"],
-            "popularity_score": result["popularity_score"],
+            "duplicate_matches": result["duplicate_matches"],
             "source_provenance": result["source_provenance"],
             "source_result": {
                 "path": result_path.name,

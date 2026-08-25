@@ -4,16 +4,20 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from collections import defaultdict
 from pathlib import Path
 
 from osv_history import (
+    CorpusError,
     affected_keys,
     analyze_overlap,
+    candidate_repositories,
     iter_raw_records,
     record_ids,
+    record_packages,
 )
 from _lib import canonical_github_repo
 
@@ -25,13 +29,13 @@ def _report_name(repository: str) -> str:
     )
 
 
-def _relevant_units(component: dict, repository: str) -> set[str]:
+def _relevant_units(component: dict, repositories: set[str]) -> set[str]:
     units = set()
-    git_unit = f"GIT:{repository}"
+    git_units = {f"GIT:{repository}" for repository in repositories}
     for wrapped in component["records"]:
         for affected in wrapped["record"].get("affected", []):
             for unit in affected_keys(affected)[0]:
-                if not unit.startswith("GIT:") or unit == git_unit:
+                if not unit.startswith("GIT:") or unit in git_units:
                     units.add(unit)
     return units
 
@@ -53,25 +57,25 @@ def _compact_component(
         "cwes": seed.get("cwes", []),
         "behavioral_evidence": seed.get("behavioral_evidence", []),
         "repair_evidence": seed.get("repair_evidence", []),
+        "application_repository": seed.get("application_repository"),
+        "application_mapping": seed.get("application_mapping", {}),
+        "application_git_ranges": seed.get("application_git_ranges", []),
+        "duplicate_matches": seed.get("duplicate_matches", []),
         "fixes": seed["fixes"],
-        "priority_context_only": seed.get("priority", False),
-        "priority_exclusion_reason_context_only": seed.get(
-            "priority_exclusion_reason"
-        ),
         "raw_record_count": record_count,
         "affected_units": sorted(units),
         "project_git_ranges": git_ranges,
     }
 
 
-def _project_git_ranges(component: dict, repository: str) -> list[dict]:
+def _project_git_ranges(component: dict, repositories: set[str]) -> list[dict]:
     ranges: dict[str, dict] = {}
     for wrapped in component["records"]:
         for affected in wrapped["record"].get("affected", []):
             for affected_range in affected.get("ranges", []):
                 if affected_range.get("type") != "GIT":
                     continue
-                if canonical_github_repo(affected_range.get("repo")) != repository:
+                if canonical_github_repo(affected_range.get("repo")) not in repositories:
                     continue
                 compact = {
                     "repo": affected_range.get("repo"),
@@ -94,10 +98,58 @@ def _components_with_ranges(components: list[dict], unit: str) -> list[str]:
     )
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _repository_records(
+    records: list[dict], repositories: set[str], *, strict: bool
+) -> list[dict]:
+    if not strict:
+        return records
+    direct = [
+        wrapped
+        for wrapped in records
+        if repositories & candidate_repositories(wrapped["record"])
+    ]
+    packages = {
+        package
+        for wrapped in direct
+        for package in record_packages(wrapped["record"])
+    }
+    selected = list(direct)
+    for wrapped in records:
+        repositories = candidate_repositories(wrapped["record"])
+        if (
+            wrapped not in direct
+            and not repositories
+            and packages & record_packages(wrapped["record"])
+        ):
+            selected.append(wrapped)
+    return selected
+
+
 def generate(
-    *, candidates_path: Path, raw_dir: Path, repository: str | None = None
+    *,
+    candidates_path: Path,
+    raw_dir: Path,
+    repository: str | None = None,
+    manifest_path: Path | None = None,
 ) -> dict:
     payload = json.loads(candidates_path.read_text(encoding="utf-8"))
+    schema_version = payload.get("schema_version", 1)
+    if schema_version not in {1, 2}:
+        raise ValueError(f"unsupported candidate schema version: {schema_version!r}")
+    if schema_version == 2:
+        if manifest_path is None:
+            raise ValueError("candidate schema version 2 requires --manifest")
+        recorded_manifest = payload.get("sources", {}).get("advisory_manifest", {})
+        if recorded_manifest.get("sha256") != _sha256(manifest_path):
+            raise ValueError("candidate advisory-manifest hash does not match --manifest")
     available_repositories = [
         item["repository"].lower() for item in payload.get("projects", [])
     ]
@@ -125,7 +177,7 @@ def generate(
 
     matched_records: dict[tuple[str, str], dict[tuple[str, str], dict]] = defaultdict(dict)
     scanned = 0
-    for wrapped in iter_raw_records(raw_dir):
+    for wrapped in iter_raw_records(raw_dir, manifest_path):
         scanned += 1
         record = wrapped["record"]
         if record.get("withdrawn"):
@@ -142,13 +194,21 @@ def generate(
     projects = []
     for repository in selected_repositories:
         project = project_rows[repository]
+        repository_aliases = {
+            str(value).lower()
+            for value in project.get("repository_aliases", [repository])
+        } | {repository}
         components = []
         compact_components = []
         no_raw_records = []
         for key, seed in seeds.items():
             if key[0] != repository:
                 continue
-            records = list(matched_records[key].values())
+            records = _repository_records(
+                list(matched_records[key].values()),
+                repository_aliases,
+                strict=schema_version == 2,
+            )
             if not records:
                 no_raw_records.append(seed["component_id"])
             component = {
@@ -157,14 +217,14 @@ def generate(
                 "summary": seed["summaries"][0] if seed["summaries"] else "",
                 "records": records,
             }
-            units = _relevant_units(component, repository)
+            units = _relevant_units(component, repository_aliases)
             components.append(component)
             compact_components.append(
                 _compact_component(
                     seed,
                     len(records),
                     units,
-                    _project_git_ranges(component, repository),
+                    _project_git_ranges(component, repository_aliases),
                 )
             )
 
@@ -172,7 +232,7 @@ def generate(
             {
                 unit
                 for component in components
-                for unit in _relevant_units(component, repository)
+                for unit in _relevant_units(component, repository_aliases)
             }
         )
         lanes = []
@@ -234,17 +294,9 @@ def generate(
         projects.append(
             {
                 "repository": repository,
+                "repository_aliases": sorted(repository_aliases),
                 "project": project.get("project", {}),
-                "popularity_score": project.get("popularity_score"),
-                "popularity_score_components": project.get(
-                    "popularity_score_components", {}
-                ),
-                "application_review_required": project.get(
-                    "application_review_required", True
-                ),
-                "license_review_required": project.get(
-                    "license_review_required", True
-                ),
+                "duplicate_matches": project.get("duplicate_matches", []),
                 "source_provenance": {
                     "candidate_sources": payload.get("sources", {}),
                     "date_cutoff": payload.get("date_cutoff"),
@@ -267,13 +319,13 @@ def generate(
         "schema_version": 2,
         "method": "pre_semantic_exact_version_overlap",
         "evidence_semantics": (
-            "Maxima use exact positive OSV affected.versions matches only. "
+            "Maxima use exact positive advisory affected.versions matches only. "
             "Native ecosystem and Git ranges remain explicit blockers and may change them."
         ),
         "candidate_source": str(candidates_path),
         "candidate_sources": payload.get("sources", {}),
         "date_cutoff": payload.get("date_cutoff"),
-        "scanned_osv_records": scanned,
+        "scanned_advisory_records": scanned,
         "project_count": len(projects),
         "component_count": sum(item["component_count"] for item in projects),
         "projects": projects,
@@ -446,7 +498,7 @@ def write_reports(payload: dict, output_dir: Path) -> None:
         f"- Distinct lane-specific maximal groups: {maximal_groups}",
         f"- Components in at least one maximal group: {len(top_group_components)}",
         f"- Components with range gaps at a reported maximum: {len(range_gaps)}",
-        f"- OSV records scanned once: {payload['scanned_osv_records']}",
+        f"- Manifested advisory records scanned once: {payload['scanned_advisory_records']}",
         "",
         "| Project | Components | Lanes | Maximal groups | Top-group components | Range gaps at maxima | Components with ranges |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -462,6 +514,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidates", type=Path, required=True)
     parser.add_argument("--raw-dir", type=Path, required=True)
+    parser.add_argument("--manifest", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
         "--repository",
@@ -473,9 +526,10 @@ def main() -> int:
             candidates_path=args.candidates,
             raw_dir=args.raw_dir,
             repository=args.repository,
+            manifest_path=args.manifest,
         )
         write_reports(payload, args.output_dir)
-    except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
+    except (CorpusError, OSError, ValueError, KeyError, json.JSONDecodeError) as error:
         parser.error(str(error))
     print(
         f"wrote overlap reports for {payload['project_count']} projects and "

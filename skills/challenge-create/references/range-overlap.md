@@ -66,6 +66,7 @@ Build the exact-version audit context, then resolve Git ranges:
 python3 <skill-root>/scripts/compute_candidate_overlaps.py \
   --candidates artifacts/candidates.json \
   --raw-dir artifacts/sources/osv/raw \
+  --manifest artifacts/sources/osv/osv_manifest.json \
   --repository OWNER/PROJECT \
   --output-dir artifacts/projects/OWNER__PROJECT/stage2/overlaps
 

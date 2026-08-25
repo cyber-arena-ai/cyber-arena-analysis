@@ -5,9 +5,9 @@ description: Run the OSS Cyber Arena workflow from source discovery through Git-
 
 # Challenge create
 
-Discover popular self-hosted network applications and historical Git windows
-that may support Cyber Arena challenges. Treat early results as hypotheses, not
-confirmed vulnerabilities or challenge admissions.
+Discover advisory-linked self-hosted network applications and historical Git
+windows that may support Cyber Arena challenges. Treat early results as
+hypotheses, not confirmed vulnerabilities or challenge admissions.
 
 ## Read first
 
@@ -47,10 +47,10 @@ Keep this layout:
 ```text
 artifacts/
 ├── sources/
-│   ├── projects.json
+│   ├── challenge-inventory.json      # optional duplicate context
 │   └── osv/
-│       ├── osv_manifest.json
-│       └── raw/
+│       ├── osv_manifest.json         # every archive consumed downstream
+│       └── raw/                      # OSV plus normalized complements
 ├── candidates.json
 └── projects/OWNER__PROJECT/
     ├── stage2/
@@ -79,15 +79,20 @@ authoritative.
 
 ## Stage 1: refresh sources and shortlist
 
-Use a retained project catalog, OSV archives, and hash manifest:
+Start with the retained advisory corpus. Filter and join aliases before making
+any GitHub request; then fetch current metadata only for the surviving
+application repositories:
 
 ```bash
 python3 <skill-root>/scripts/shortlist_candidates.py \
-  --projects artifacts/sources/projects.json \
   --raw-dir artifacts/sources/osv/raw \
   --manifest artifacts/sources/osv/osv_manifest.json \
+  --duplicate-inventory artifacts/sources/challenge-inventory.json \
   --output artifacts/candidates.json
 ```
+
+Omit `--duplicate-inventory` when no retained inventory is available. Its
+schema is defined in [source-discovery.md](references/source-discovery.md).
 
 Optionally add a timezone-qualified cutoff:
 
@@ -95,26 +100,36 @@ Optionally add a timezone-qualified cutoff:
   --published-after 2026-02-16T23:59:59Z
 ```
 
-The command verifies source hashes, joins transitive aliases, drops withdrawn
-records, requires behavioral and exact repair evidence, and applies project
-license, activity, application-signal, and popularity gates. It preserves
-descriptions, references, severity context, package identities, CWEs, source
-databases, fix commits, and exclusion context.
+The command verifies every manifest-listed archive, joins transitive aliases,
+drops withdrawn and malicious-package records, and requires behavioral and
+repair evidence. A release-only repair is retained but stays unresolved until
+an exact Git repair is established for Stage 2. The command resolves the
+application repository from affected Git ranges, package references, or
+upstream repository security advisories; a fix-only repository also stays
+unresolved. Promotion to `projects` also requires a structurally usable affected
+Git range for that application, with an exact fixed boundary in every phase.
+Only then does it fetch current GitHub metadata and apply the archived,
+activity, OSS-license, and deployable-service gates. Missing license, service,
+repository, Git-range, or Git-repair evidence remains explicit in
+`unresolved_candidates`.
 
-`projects` is the production discovery universe. `priority_projects` is only a
-cheap review-order hint; never use it as an allowlist. Never reject a retained
-component solely for class, CWE, CVSS, `AV:N`, apparent simplicity, advisory
-count, or lack of particular keywords.
+`candidates.json` is the persistent Stage 1 result. It retains accepted
+`projects`, unresolved mappings or project gates, exclusion counts, mutable
+metadata with its observation time, repository-role evidence, and full repair
+provenance. Stars and forks are raw metadata and final tie-breakers only. There
+is no popularity score, project catalog, or `priority_projects` allowlist.
+Never reject a retained component solely for class, CWE, CVSS, `AV:N`, apparent
+simplicity, advisory count, or lack of particular keywords.
 
 The cutoff compares the earliest active OSV publication strictly after the
 supplied timestamp. It is an experimental model-knowledge control, not an
 authoritative disclosure-date claim.
 
-If fresh data is required, use `<skill-root>/scripts/discover_projects.py` and
-`<skill-root>/scripts/snapshot_osv.py` to refresh the stable source corpus.
-Publish the updated sources and derived artifacts together to the designated
-Hugging Face dataset so its history preserves provenance. Never commit them to
-this repository.
+Use `<skill-root>/scripts/snapshot_osv.py` to refresh the OSV seed. Add any
+normalized complementary advisory archives to the same hash manifest before
+shortlisting; Stage 2 consumes that exact manifest too. Publish the updated
+sources and derived artifacts together to the designated Hugging Face dataset
+so its history preserves provenance. Never commit them to this repository.
 
 ## Stage 2: reconstruct and triage candidate windows
 
@@ -124,6 +139,7 @@ First retain the exact-version audit context for every hard-gated project:
 python3 <skill-root>/scripts/compute_candidate_overlaps.py \
   --candidates artifacts/candidates.json \
   --raw-dir artifacts/sources/osv/raw \
+  --manifest artifacts/sources/osv/osv_manifest.json \
   --repository OWNER/PROJECT \
   --output-dir artifacts/projects/OWNER__PROJECT/stage2/overlaps
 ```

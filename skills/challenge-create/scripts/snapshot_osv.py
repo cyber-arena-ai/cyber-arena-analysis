@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download selected OSV ecosystem snapshots and extract repository-linked evidence."""
+"""Download selected OSV ecosystem snapshots and record an exact manifest."""
 
 from __future__ import annotations
 
@@ -8,14 +8,8 @@ import hashlib
 import json
 import sys
 import urllib.request
-import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-
-try:
-    from ._lib import extract_osv_record
-except ImportError:  # direct execution from this skill's scripts directory
-    from _lib import extract_osv_record
 
 
 DEFAULT_ECOSYSTEMS = (
@@ -29,21 +23,6 @@ DEFAULT_ECOSYSTEMS = (
     "npm",
 )
 BASE_URL = "https://storage.googleapis.com/osv-vulnerabilities"
-
-
-def write_advisory_jsonl(path: Path, records: list[dict]) -> None:
-    """Write normalized advisory evidence as deterministic one-object-per-line JSON."""
-    with path.open("w", encoding="utf-8") as stream:
-        for record in records:
-            stream.write(
-                json.dumps(
-                    record,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                )
-                + "\n"
-            )
 
 
 def _download(url: str, destination: Path) -> dict:
@@ -92,32 +71,6 @@ def _existing_file(url: str, path: Path, previous: dict | None = None) -> dict:
     return source
 
 
-def _extract(path: Path, ecosystem: str) -> tuple[list[dict], dict]:
-    evidence: list[dict] = []
-    stats = {
-        "record_count": 0,
-        "withdrawn_count": 0,
-        "repository_linked_record_count": 0,
-        "evidence_count": 0,
-    }
-    with zipfile.ZipFile(path) as archive:
-        for member in archive.infolist():
-            if member.is_dir() or not member.filename.endswith(".json"):
-                continue
-            stats["record_count"] += 1
-            with archive.open(member) as stream:
-                record = json.load(stream)
-            if record.get("withdrawn"):
-                stats["withdrawn_count"] += 1
-                continue
-            extracted = extract_osv_record(record, source_ecosystem=ecosystem)
-            if extracted:
-                stats["repository_linked_record_count"] += 1
-                evidence.extend(extracted)
-    stats["evidence_count"] = len(evidence)
-    return evidence, stats
-
-
 def snapshot(*, output_dir: Path, ecosystems: list[str], refresh: bool) -> dict:
     raw_dir = output_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -132,8 +85,7 @@ def snapshot(*, output_dir: Path, ecosystems: list[str], refresh: bool) -> dict:
             if source.get("path")
         }
     sources = []
-    all_evidence = []
-    stats = {}
+    osv_paths = set()
     for ecosystem in ecosystems:
         url = f"{BASE_URL}/{ecosystem}/all.zip"
         filename = ecosystem.replace(".", "_").replace("/", "_") + ".zip"
@@ -145,9 +97,25 @@ def snapshot(*, output_dir: Path, ecosystems: list[str], refresh: bool) -> dict:
         )
         source["ecosystem"] = ecosystem
         sources.append(source)
-        evidence, ecosystem_stats = _extract(path, ecosystem)
-        all_evidence.extend(evidence)
-        stats[ecosystem] = ecosystem_stats
+        osv_paths.add(filename)
+
+    for name, previous in sorted(previous_sources.items()):
+        if name in osv_paths:
+            continue
+        if previous.get("ecosystem") or str(previous.get("url", "")).startswith(
+            BASE_URL + "/"
+        ):
+            continue
+        if Path(name).name != name:
+            raise ValueError(f"invalid complementary archive path: {name!r}")
+        path = raw_dir / name
+        if not path.is_file():
+            raise FileNotFoundError(f"manifested complementary archive is missing: {path}")
+        retained = {
+            **previous,
+            **_existing_file(str(previous.get("url") or ""), path, previous),
+        }
+        sources.append(retained)
 
     payload = {
         "schema_version": 1,
@@ -155,32 +123,9 @@ def snapshot(*, output_dir: Path, ecosystems: list[str], refresh: bool) -> dict:
         "source": "OSV ecosystem bulk snapshots",
         "sources": sources,
         "coverage_note": f"Selected OSV ecosystems: {', '.join(ecosystems)}.",
-        "stats": stats,
-        "evidence_count": len(all_evidence),
-        "advisories": sorted(
-            all_evidence,
-            key=lambda item: (item["repository"], item["advisory_id"]),
-        ),
     }
-    (output_dir / "osv_advisories.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    )
-    write_advisory_jsonl(
-        output_dir / "osv_advisories.jsonl",
-        payload["advisories"],
-    )
     (output_dir / "osv_manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "generated_at": payload["generated_at"],
-                "sources": sources,
-                "stats": stats,
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
+        json.dumps(payload, indent=2, sort_keys=True) + "\n"
     )
     return payload
 
@@ -197,9 +142,8 @@ def main(argv: list[str] | None = None) -> int:
         refresh=args.refresh,
     )
     print(
-        f"wrote {payload['evidence_count']} repository-linked advisory records "
-        f"to {args.output_dir / 'osv_advisories.json'} and "
-        f"{args.output_dir / 'osv_advisories.jsonl'}"
+        f"wrote {len(payload['sources'])} manifested advisory archives to "
+        f"{args.output_dir / 'osv_manifest.json'}"
     )
     return 0
 

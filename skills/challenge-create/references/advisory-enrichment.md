@@ -37,9 +37,11 @@ Retain the primary URL for every claim used in the review.
    precise claim. Do not add a new component id to `selected_component_ids`
    unless the packet contains it.
 6. If a new component changes the selected affected set or historical window,
-   integrate it into the retained source corpus and rerun Stage 1 and the
-   mechanical Stage 2 resolver. Until then, return `uncertain`; do not maintain
-   a parallel hand-built Git chronology.
+   normalize its complete OSV-shaped record into a hash-listed advisory archive
+   as specified by [source-discovery.md](source-discovery.md), then rerun Stage
+   1 and the mechanical Stage 2 resolver against that same manifest. Until
+   then, return `uncertain`; do not maintain a parallel hand-built Git
+   chronology.
 
 ## Duplicate screening
 

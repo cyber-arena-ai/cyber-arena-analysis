@@ -10,6 +10,7 @@ SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from shortlist_candidates import InputError, generate  # noqa: E402
+from osv_history import CorpusError  # noqa: E402
 from compute_candidate_overlaps import generate as generate_overlaps  # noqa: E402
 from resolve_git_windows import (  # noqa: E402
     refresh_repository,
@@ -25,9 +26,22 @@ def _record(identifier, published, commit, *, aliases=(), withdrawn=None):
         "published": published,
         "summary": "Authorization bypass exposes protected application data",
         "affected": [
-            {"package": {"ecosystem": "PyPI", "name": "example-app"}}
+            {
+                "package": {"ecosystem": "PyPI", "name": "example-app"},
+                "ranges": [
+                    {
+                        "type": "GIT",
+                        "repo": "https://github.com/example/app",
+                        "events": [{"introduced": "0"}, {"fixed": commit}],
+                    }
+                ],
+            }
         ],
         "references": [
+            {
+                "type": "PACKAGE",
+                "url": "https://github.com/example/app",
+            },
             {
                 "type": "FIX",
                 "url": f"https://github.com/example/app/commit/{commit}",
@@ -98,39 +112,55 @@ def _inputs(tmp_path):
         encoding="utf-8",
     )
 
-    projects_path = tmp_path / "projects.json"
-    projects_path.write_text(
-        json.dumps(
-            {
-                "generated_at": "2026-05-01T00:00:00Z",
-                "projects": [
-                    {
-                        "repository": "example/app",
-                        "url": "https://github.com/example/app",
-                        "description": "Self-hosted network application",
-                        "stars": 100_000,
-                        "forks": 10_000,
-                        "license": "MIT",
-                        "archived": False,
-                        "created_at": "2015-01-01T00:00:00Z",
-                        "pushed_at": "2026-04-30T00:00:00Z",
-                        "topics": ["self-hosted"],
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
+    return raw_dir, manifest_path, archive_path
+
+
+def _project(repository="example/app", **overrides):
+    project = {
+        "repository": repository,
+        "url": f"https://github.com/{repository}",
+        "name": repository.split("/", 1)[1],
+        "description": "Self-hosted network application",
+        "stars": 100_000,
+        "forks": 10_000,
+        "license": "MIT",
+        "archived": False,
+        "pushed_at": "2026-04-30T00:00:00Z",
+        "topics": ["self-hosted"],
+        "default_branch": "main",
+        "observed_at": "2026-05-01T00:00:00Z",
+    }
+    project.update(overrides)
+    return project
+
+
+def _refresh_source(manifest_path, archive_path, **source_fields):
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    source = next(
+        (item for item in payload["sources"] if item["path"] == archive_path.name),
+        None,
     )
-    return projects_path, raw_dir, manifest_path, archive_path
+    if source is None:
+        source = {"path": archive_path.name}
+        payload["sources"].append(source)
+    source.update(
+        {
+            "bytes": archive_path.stat().st_size,
+            "sha256": hashlib.sha256(archive_path.read_bytes()).hexdigest(),
+            **source_fields,
+        }
+    )
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _generate(inputs, cutoff=None):
-    projects, raw_dir, manifest, _ = inputs
+def _generate(inputs, cutoff=None, *, fetch_repository=None, duplicate_inventory=None):
+    raw_dir, manifest, _ = inputs
     return generate(
-        projects_path=projects,
         raw_dir=raw_dir,
         manifest_path=manifest,
         cutoff_value=cutoff,
+        duplicate_inventory_path=duplicate_inventory,
+        fetch_repository=fetch_repository or (lambda repository: _project(repository)),
     )
 
 
@@ -145,48 +175,63 @@ def test_date_cutoff_is_optional_and_aliases_do_not_double_count(tmp_path):
     assert filtered["date_cutoff"] == {
         "enabled": True,
         "published_after": "2026-02-16T23:59:59+00:00",
-        "comparison": "earliest active OSV publication is strictly later",
+        "comparison": "earliest active advisory publication is strictly later",
     }
     assert [
         component["component_id"]
         for component in filtered["projects"][0]["components"]
     ] == ["CVE-2026-0001", "CVE-2026-0002"]
-    assert filtered["summary"]["withdrawn_osv_records"] == 1
-    assert filtered["summary"]["priority_projects"] == 1
+    assert filtered["summary"]["withdrawn_advisory_records"] == 1
+    assert filtered["summary"]["github_repositories_fetched"] == 1
+    assert "priority_projects" not in filtered
+    assert "popularity_score" not in filtered["projects"][0]
+    assert filtered["projects"][0]["project"]["name"] == "app"
+    assert filtered["projects"][0]["project"]["archived"] is False
 
 
 def test_manifest_hash_mismatch_fails_closed(tmp_path):
     inputs = _inputs(tmp_path)
-    inputs[3].write_bytes(inputs[3].read_bytes() + b"tampered")
+    inputs[2].write_bytes(inputs[2].read_bytes() + b"tampered")
 
     try:
         _generate(inputs)
-    except InputError as error:
+    except (InputError, CorpusError) as error:
         assert "size mismatch" in str(error)
     else:
         raise AssertionError("tampered input was accepted")
 
 
 def test_shortlist_rejects_inactive_projects(tmp_path):
-    projects, raw_dir, manifest, _ = _inputs(tmp_path)
-    payload = json.loads(projects.read_text(encoding="utf-8"))
-    payload["projects"][0]["pushed_at"] = "2020-01-01T00:00:00Z"
-    projects.write_text(json.dumps(payload), encoding="utf-8")
-
-    result = generate(
-        projects_path=projects,
-        raw_dir=raw_dir,
-        manifest_path=manifest,
-        cutoff_value=None,
+    inputs = _inputs(tmp_path)
+    result = _generate(
+        inputs,
+        fetch_repository=lambda repository: _project(
+            repository, pushed_at="2020-01-01T00:00:00Z"
+        ),
     )
 
     assert result["projects"] == []
-    assert result["summary"]["hard_gate_exclusions"]["inactive_project"] == 3
+    assert result["summary"]["exclusions"]["inactive_project"] == 3
+
+
+def test_unresolved_project_gate_retains_observed_metadata(tmp_path):
+    inputs = _inputs(tmp_path)
+    result = _generate(
+        inputs,
+        fetch_repository=lambda repository: _project(repository, license=None),
+    )
+
+    assert result["projects"] == []
+    unresolved = result["unresolved_candidates"][0]
+    assert unresolved["reason"] == "acceptable_oss_license_not_established"
+    assert unresolved["project"]["license"] is None
+    assert unresolved["project"]["observed_at"] == "2026-05-01T00:00:00Z"
+    assert unresolved["project"]["description"] == "Self-hosted network application"
 
 
 def test_shortlist_rejects_components_without_behavioral_evidence(tmp_path):
     inputs = _inputs(tmp_path)
-    projects, raw_dir, manifest, archive_path = inputs
+    raw_dir, manifest, archive_path = inputs
     sparse = _record(
         "CVE-2026-0999",
         "2026-04-10T00:00:00Z",
@@ -204,15 +249,11 @@ def test_shortlist_rejects_components_without_behavioral_evidence(tmp_path):
     )
     manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
 
-    result = generate(
-        projects_path=projects,
-        raw_dir=raw_dir,
-        manifest_path=manifest,
-        cutoff_value=None,
-    )
+    result = _generate(inputs)
 
-    assert result["summary"]["hard_gate_exclusions"] == {
-        "no_behavioral_evidence": 1
+    assert result["summary"]["exclusions"] == {
+        "no_behavioral_evidence": 1,
+        "no_repair_evidence": 1,
     }
     assert "CVE-2026-0999" not in {
         item["component_id"] for item in result["projects"][0]["components"]
@@ -220,7 +261,7 @@ def test_shortlist_rejects_components_without_behavioral_evidence(tmp_path):
 
 
 def test_withdrawn_record_can_bridge_active_aliases_without_being_retained(tmp_path):
-    projects, raw_dir, manifest, archive_path = _inputs(tmp_path)
+    raw_dir, manifest, archive_path = _inputs(tmp_path)
     records = [
         _record(
             "CVE-2026-0101",
@@ -253,11 +294,8 @@ def test_withdrawn_record_can_bridge_active_aliases_without_being_retained(tmp_p
     )
     manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
 
-    result = generate(
-        projects_path=projects,
-        raw_dir=raw_dir,
-        manifest_path=manifest,
-        cutoff_value="2026-02-16T23:59:59Z",
+    result = _generate(
+        (raw_dir, manifest, archive_path), "2026-02-16T23:59:59Z"
     )
     bridged = [
         item
@@ -267,7 +305,456 @@ def test_withdrawn_record_can_bridge_active_aliases_without_being_retained(tmp_p
 
     assert len(bridged) == 1
     assert {"CVE-2026-0101", "CVE-2026-0102"}.issubset(bridged[0]["ids"])
-    assert result["summary"]["withdrawn_osv_records"] == 2
+    assert result["summary"]["withdrawn_advisory_records"] == 2
+
+
+def test_application_repository_is_not_inferred_from_foreign_fix(tmp_path):
+    raw_dir, manifest, archive_path = _inputs(tmp_path)
+    record = {
+        "id": "CVE-2026-2001",
+        "published": "2026-04-15T00:00:00Z",
+        "summary": "Authorization bypass exposes protected application data",
+        "affected": [
+            {
+                "package": {"ecosystem": "PyPI", "name": "example-app"},
+                "ranges": [
+                    {
+                        "type": "GIT",
+                        "repo": "https://github.com/example/app",
+                        "events": [{"introduced": "0"}, {"fixed": "a" * 40}],
+                    }
+                ],
+            }
+        ],
+        "references": [
+            {
+                "type": "FIX",
+                "url": "https://github.com/example/plugin/commit/" + "b" * 40,
+            }
+        ],
+    }
+    with zipfile.ZipFile(archive_path, "a") as archive:
+        archive.writestr("foreign-fix.json", json.dumps(record))
+    _refresh_source(manifest, archive_path)
+    requests = []
+
+    result = _generate(
+        (raw_dir, manifest, archive_path),
+        fetch_repository=lambda repository: (
+            requests.append(repository) or _project(repository)
+        ),
+    )
+
+    component = next(
+        item
+        for item in result["projects"][0]["components"]
+        if item["component_id"] == "CVE-2026-2001"
+    )
+    assert requests == ["example/app"]
+    assert component["application_repository"] == "example/app"
+    assert component["fix_repositories"] == ["example/app", "example/plugin"]
+    assert {item.get("repository") for item in component["repair_evidence"]} == {
+        "example/app",
+        "example/plugin",
+    }
+
+
+def test_fix_only_record_stays_unresolved_and_is_not_fetched(tmp_path):
+    raw_dir, manifest, archive_path = _inputs(tmp_path)
+    record = {
+        "id": "CVE-2026-2002",
+        "published": "2026-04-16T00:00:00Z",
+        "summary": "Authentication bypass",
+        "affected": [
+            {"package": {"ecosystem": "PyPI", "name": "unknown-app"}}
+        ],
+        "references": [
+            {
+                "type": "FIX",
+                "url": "https://github.com/example/repair/commit/" + "c" * 40,
+            }
+        ],
+    }
+    with zipfile.ZipFile(archive_path, "a") as archive:
+        archive.writestr("fix-only.json", json.dumps(record))
+    _refresh_source(manifest, archive_path)
+    requests = []
+
+    result = _generate(
+        (raw_dir, manifest, archive_path),
+        fetch_repository=lambda repository: (
+            requests.append(repository) or _project(repository)
+        ),
+    )
+
+    unresolved = next(
+        item
+        for item in result["unresolved_candidates"]
+        if item.get("component_id") == "CVE-2026-2002"
+    )
+    assert unresolved["reason"] == "application_repository_not_established"
+    assert unresolved["candidate_repositories"] == ["example/repair"]
+    assert requests == ["example/app"]
+
+
+def test_manifested_complementary_record_survives_stage_two(tmp_path):
+    raw_dir, manifest, archive_path = _inputs(tmp_path)
+    complement_path = raw_dir / "vendor.zip"
+    record = {
+        "id": "CVE-2026-2003",
+        "published": "2026-04-17T00:00:00Z",
+        "summary": "Protected workflow can be modified without authorization",
+        "affected": [
+            {
+                "package": {"ecosystem": "Vendor", "name": "example-app"},
+                "versions": ["2.0"],
+                "ranges": [
+                    {
+                        "type": "ECOSYSTEM",
+                        "events": [{"introduced": "2.0"}, {"fixed": "2.1"}],
+                    },
+                    {
+                        "type": "GIT",
+                        "repo": "https://github.com/example/app",
+                        "events": [{"introduced": "0"}, {"fixed": "e" * 40}],
+                    },
+                ],
+            }
+        ],
+        "references": [
+            {"type": "PACKAGE", "url": "https://github.com/example/app"}
+        ],
+    }
+    with zipfile.ZipFile(complement_path, "w") as archive:
+        archive.writestr("vendor-record.json", json.dumps(record))
+    _refresh_source(manifest, complement_path, source="vendor-advisory")
+
+    candidates = _generate((raw_dir, manifest, archive_path))
+    candidates_path = tmp_path / "candidates.json"
+    candidates_path.write_text(json.dumps(candidates), encoding="utf-8")
+    overlap = generate_overlaps(
+        candidates_path=candidates_path,
+        raw_dir=raw_dir,
+        manifest_path=manifest,
+    )
+
+    component = next(
+        item
+        for item in overlap["projects"][0]["components"]
+        if item["component_id"] == "CVE-2026-2003"
+    )
+    assert component["raw_record_count"] == 1
+    assert component["affected_units"] == ["Vendor:example-app"]
+    assert "CVE-2026-2003" not in overlap["projects"][0][
+        "components_without_raw_records"
+    ]
+
+
+def test_release_only_repair_stays_unresolved_before_git_reconstruction(tmp_path):
+    raw_dir, manifest, archive_path = _inputs(tmp_path)
+    record = {
+        "id": "CVE-2026-2004",
+        "published": "2026-04-18T00:00:00Z",
+        "summary": "Authorization bypass",
+        "affected": [
+            {
+                "package": {"ecosystem": "Vendor", "name": "example-app"},
+                "ranges": [
+                    {
+                        "type": "ECOSYSTEM",
+                        "events": [{"introduced": "2.0"}, {"fixed": "2.1"}],
+                    }
+                ],
+            }
+        ],
+        "references": [
+            {"type": "PACKAGE", "url": "https://github.com/example/release-only"}
+        ],
+    }
+    with zipfile.ZipFile(archive_path, "a") as archive:
+        archive.writestr("release-only.json", json.dumps(record))
+    _refresh_source(manifest, archive_path)
+
+    result = _generate((raw_dir, manifest, archive_path))
+
+    unresolved = next(
+        item
+        for item in result["unresolved_candidates"]
+        if item.get("component_id") == "CVE-2026-2004"
+    )
+    assert unresolved["reason"] == "exact_git_repair_not_established"
+    assert unresolved["repair_evidence"] == [
+        {"range_type": "ECOSYSTEM", "package": "Vendor:example-app", "fixed": "2.1"}
+    ]
+
+
+def test_unmanifested_archive_is_ignored(tmp_path):
+    raw_dir, manifest, archive_path = _inputs(tmp_path)
+    unmanifested = raw_dir / "unmanifested.zip"
+    with zipfile.ZipFile(unmanifested, "w") as archive:
+        archive.writestr(
+            "record.json",
+            json.dumps(
+                _record("CVE-2026-2999", "2026-04-18T00:00:00Z", "d" * 40)
+            ),
+        )
+
+    result = _generate((raw_dir, manifest, archive_path))
+
+    assert "CVE-2026-2999" not in {
+        component["component_id"]
+        for project in result["projects"]
+        for component in project["components"]
+    }
+
+
+def test_duplicate_inventory_is_review_context_not_a_popularity_gate(tmp_path):
+    inputs = _inputs(tmp_path)
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "repositories": ["example/app"],
+                "advisory_ids": ["CVE-2026-0002"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _generate(inputs, duplicate_inventory=inventory)
+
+    assert result["projects"][0]["duplicate_matches"] == ["example/app"]
+    component = next(
+        item
+        for item in result["projects"][0]["components"]
+        if item["component_id"] == "CVE-2026-0002"
+    )
+    assert component["duplicate_matches"] == ["CVE-2026-0002"]
+
+
+def test_stage_two_excludes_foreign_package_only_alias_records(tmp_path):
+    raw_dir, manifest, archive_path = _inputs(tmp_path)
+    foreign = {
+        "id": "VENDOR-FOREIGN",
+        "aliases": ["CVE-2026-0002"],
+        "published": "2026-04-18T00:00:00Z",
+        "summary": "Foreign package context",
+        "affected": [
+            {
+                "package": {"ecosystem": "PyPI", "name": "foreign-package"},
+                "versions": ["9.9"],
+            }
+        ],
+    }
+    with zipfile.ZipFile(archive_path, "a") as archive:
+        archive.writestr("foreign-alias.json", json.dumps(foreign))
+    _refresh_source(manifest, archive_path)
+    candidates = _generate((raw_dir, manifest, archive_path))
+    candidates_path = tmp_path / "candidates.json"
+    candidates_path.write_text(json.dumps(candidates), encoding="utf-8")
+
+    overlap = generate_overlaps(
+        candidates_path=candidates_path,
+        raw_dir=raw_dir,
+        manifest_path=manifest,
+    )
+
+    component = next(
+        item
+        for item in overlap["projects"][0]["components"]
+        if item["component_id"] == "CVE-2026-0002"
+    )
+    assert component["affected_units"] == ["PyPI:example-app"]
+    assert component["raw_record_count"] == 1
+
+
+def test_repository_redirect_preserves_advisory_identity(tmp_path):
+    raw_dir, manifest, archive_path = _inputs(tmp_path)
+    with zipfile.ZipFile(archive_path, "a") as archive:
+        archive.writestr(
+            "renamed.json",
+            json.dumps(
+                {
+                    "id": "CVE-2026-3001",
+                    "published": "2026-04-19T00:00:00Z",
+                    "summary": "Authorization bypass",
+                    "affected": [
+                        {
+                            "package": {
+                                "ecosystem": "PyPI",
+                                "name": "renamed-app",
+                            },
+                            "ranges": [
+                                {
+                                    "type": "GIT",
+                                    "repo": "https://github.com/example/renamed",
+                                    "events": [
+                                        {"introduced": "0"},
+                                        {"fixed": "f" * 40},
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                    "references": [
+                        {
+                            "type": "PACKAGE",
+                            "url": "https://github.com/example/renamed",
+                        },
+                        {
+                            "type": "FIX",
+                            "url": "https://github.com/example/renamed/commit/"
+                            + "f" * 40,
+                        },
+                    ],
+                }
+            ),
+        )
+    _refresh_source(manifest, archive_path)
+
+    result = _generate(
+        (raw_dir, manifest, archive_path),
+        fetch_repository=lambda repository: _project("example/renamed"),
+    )
+
+    assert len(result["projects"]) == 1
+    assert result["projects"][0]["repository"] == "example/renamed"
+    assert result["projects"][0]["repository_aliases"] == [
+        "example/app",
+        "example/renamed",
+    ]
+    assert result["projects"][0]["project"]["canonical_repository"] == (
+        "example/renamed"
+    )
+    candidates_path = tmp_path / "candidates.json"
+    candidates_path.write_text(json.dumps(result), encoding="utf-8")
+    overlap = generate_overlaps(
+        candidates_path=candidates_path,
+        raw_dir=raw_dir,
+        manifest_path=manifest,
+    )
+    assert overlap["projects"][0]["repository_aliases"] == [
+        "example/app",
+        "example/renamed",
+    ]
+    assert overlap["projects"][0]["components_without_raw_records"] == []
+
+
+def test_stage_two_rejects_a_different_manifest(tmp_path):
+    raw_dir, manifest, archive_path = _inputs(tmp_path)
+    candidates = _generate((raw_dir, manifest, archive_path))
+    candidates_path = tmp_path / "candidates.json"
+    candidates_path.write_text(json.dumps(candidates), encoding="utf-8")
+    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest_payload["generated_at"] = "2026-05-02T00:00:00Z"
+    manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+    try:
+        generate_overlaps(
+            candidates_path=candidates_path,
+            raw_dir=raw_dir,
+            manifest_path=manifest,
+        )
+    except ValueError as error:
+        assert "manifest hash" in str(error)
+    else:
+        raise AssertionError("Stage 2 accepted a manifest different from Stage 1")
+
+
+def test_generated_candidate_reaches_the_git_resolver(tmp_path):
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.name", "Test"],
+        check=True,
+    )
+    commits = []
+    for value in ("vulnerable", "fixed", "after"):
+        (repository / "state.txt").write_text(value, encoding="utf-8")
+        subprocess.run(["git", "-C", str(repository), "add", "state.txt"], check=True)
+        subprocess.run(
+            ["git", "-C", str(repository), "commit", "-qm", value], check=True
+        )
+        commits.append(
+            subprocess.run(
+                ["git", "-C", str(repository), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        )
+
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    archive_path = raw_dir / "GIT.zip"
+    record = {
+        "id": "CVE-2026-4001",
+        "published": "2026-04-20T00:00:00Z",
+        "summary": "Authorization bypass",
+        "affected": [
+            {
+                "package": {"ecosystem": "GIT", "name": "example/app"},
+                "ranges": [
+                    {
+                        "type": "GIT",
+                        "repo": "https://github.com/example/app",
+                        "events": [{"introduced": "0"}, {"fixed": commits[1]}],
+                    }
+                ],
+            }
+        ],
+        "references": [
+            {"type": "PACKAGE", "url": "https://github.com/example/app"},
+            {
+                "type": "FIX",
+                "url": f"https://github.com/example/app/commit/{commits[1]}",
+            },
+        ],
+    }
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("record.json", json.dumps(record))
+    manifest = tmp_path / "osv_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generated_at": "2026-05-01T00:00:00Z",
+                "sources": [
+                    {
+                        "path": archive_path.name,
+                        "bytes": archive_path.stat().st_size,
+                        "sha256": hashlib.sha256(archive_path.read_bytes()).hexdigest(),
+                        "ecosystem": "GIT",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    candidates = generate(
+        raw_dir=raw_dir,
+        manifest_path=manifest,
+        cutoff_value=None,
+        fetch_repository=lambda requested: _project(requested),
+    )
+    candidates_path = tmp_path / "candidates.json"
+    candidates_path.write_text(json.dumps(candidates), encoding="utf-8")
+    overlap = generate_overlaps(
+        candidates_path=candidates_path,
+        raw_dir=raw_dir,
+        manifest_path=manifest,
+    )
+
+    result = resolve_project(overlap["projects"][0], repository)
+
+    assert result["component_count"] == 1
+    assert result["rejected_component_count"] == 0
+    assert result["candidate_window_count"] == 1
 
 
 def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):

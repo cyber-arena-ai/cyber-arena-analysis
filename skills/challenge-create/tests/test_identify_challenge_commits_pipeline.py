@@ -161,7 +161,6 @@ def _refresh_source(manifest_path, archive_path, **source_fields):
 
 def _generate(
     inputs,
-    cutoff=None,
     *,
     fetch_repository=None,
     duplicate_inventory=None,
@@ -171,36 +170,32 @@ def _generate(
     return generate(
         raw_dir=raw_dir,
         manifest_path=manifest,
-        cutoff_value=cutoff,
         duplicate_inventory_path=duplicate_inventory,
         metadata_cache_path=metadata_cache,
         fetch_repository=fetch_repository or (lambda repository: _project(repository)),
     )
 
 
-def test_date_cutoff_is_optional_and_aliases_do_not_double_count(tmp_path):
+def test_canonical_index_preserves_all_dates_and_aliases_do_not_double_count(tmp_path):
     inputs = _inputs(tmp_path)
 
-    unfiltered = _generate(inputs)
-    filtered = _generate(inputs, "2026-02-16T23:59:59Z")
+    result = _generate(inputs)
 
-    assert unfiltered["date_cutoff"]["enabled"] is False
-    assert len(unfiltered["projects"][0]["components"]) == 3
-    assert filtered["date_cutoff"] == {
-        "enabled": True,
-        "published_after": "2026-02-16T23:59:59+00:00",
-        "comparison": "earliest active advisory publication is strictly later",
-    }
+    assert result["schema_version"] == 3
+    assert "date_cutoff" not in result
     assert [
         component["component_id"]
-        for component in filtered["projects"][0]["components"]
-    ] == ["CVE-2026-0001", "CVE-2026-0002"]
-    assert filtered["summary"]["withdrawn_advisory_records"] == 1
-    assert filtered["summary"]["github_repositories_fetched"] == 1
-    assert "priority_projects" not in filtered
-    assert "popularity_score" not in filtered["projects"][0]
-    assert filtered["projects"][0]["project"]["name"] == "app"
-    assert filtered["projects"][0]["project"]["archived"] is False
+        for component in result["projects"][0]["components"]
+    ] == ["CVE-2025-0001", "CVE-2026-0001", "CVE-2026-0002"]
+    assert result["projects"][0]["components"][0][
+        "earliest_manifested_publication"
+    ] == "2025-12-01T00:00:00+00:00"
+    assert result["summary"]["withdrawn_advisory_records"] == 1
+    assert result["summary"]["github_repositories_fetched"] == 1
+    assert "priority_projects" not in result
+    assert "popularity_score" not in result["projects"][0]
+    assert result["projects"][0]["project"]["name"] == "app"
+    assert result["projects"][0]["project"]["archived"] is False
 
 
 def test_manifest_hash_mismatch_fails_closed(tmp_path):
@@ -241,6 +236,7 @@ def test_unresolved_project_gate_retains_observed_metadata(tmp_path):
     assert unresolved["project"]["license"] is None
     assert unresolved["project"]["observed_at"] == "2026-05-01T00:00:00Z"
     assert unresolved["project"]["description"] == "Self-hosted network application"
+    assert len(unresolved["component_publications"]) == 3
 
 
 def test_service_metadata_heuristics_remain_unresolved(tmp_path):
@@ -504,9 +500,7 @@ def test_withdrawn_record_can_bridge_active_aliases_without_being_retained(tmp_p
     )
     manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
 
-    result = _generate(
-        (raw_dir, manifest, archive_path), "2026-02-16T23:59:59Z"
-    )
+    result = _generate((raw_dir, manifest, archive_path))
     bridged = [
         item
         for item in result["projects"][0]["components"]
@@ -697,9 +691,7 @@ def test_fast_lane_selects_seeded_alias_closure_and_retains_seed_only_gaps(tmp_p
         priority=1,
     )
 
-    result = _generate(
-        (raw_dir, manifest, archive_path), "2026-02-16T23:59:59Z"
-    )
+    result = _generate((raw_dir, manifest, archive_path))
 
     assert result["selection"] == {
         "mode": "fast_lane",
@@ -712,7 +704,7 @@ def test_fast_lane_selects_seeded_alias_closure_and_retains_seed_only_gaps(tmp_p
         ],
         "seeded_components": 2,
         "coverage_components": 3,
-        "selected_components_after_cutoff": 2,
+        "selected_components": 2,
     }
     components = result["projects"][0]["components"]
     assert [component["component_id"] for component in components] == [
@@ -733,6 +725,9 @@ def test_fast_lane_selects_seeded_alias_closure_and_retains_seed_only_gaps(tmp_p
     )
     assert unresolved["reason"] == "exact_git_repair_not_established"
     assert unresolved["application_repository"] == "example/seed-only"
+    assert unresolved["earliest_manifested_publication"] == (
+        "2026-04-06T00:00:00+00:00"
+    )
     assert unresolved["fast_lane_memberships"] == components[0][
         "fast_lane_memberships"
     ]
@@ -1029,7 +1024,6 @@ def test_generated_candidate_reaches_the_git_resolver(tmp_path):
     candidates = generate(
         raw_dir=raw_dir,
         manifest_path=manifest,
-        cutoff_value=None,
         fetch_repository=lambda requested: _project(requested),
     )
     candidates_path = tmp_path / "candidates.json"

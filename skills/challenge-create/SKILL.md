@@ -54,6 +54,7 @@ artifacts/
 │       ├── osv_manifest.json         # every archive consumed downstream
 │       └── raw/                      # OSV plus normalized complements
 ├── candidates.json
+├── candidate-views/                  # optional hash-linked queue views
 └── projects/OWNER__PROJECT/
     ├── stage2/
     │   ├── overlaps/overlap_data/OWNER__PROJECT.json
@@ -104,11 +105,23 @@ python3 <skill-root>/scripts/shortlist_candidates.py \
 Omit `--duplicate-inventory` when no retained inventory is available. Its
 schema is defined in [source-discovery.md](references/source-discovery.md).
 
-Optionally add a timezone-qualified cutoff:
+`candidates.json` is canonical after the ordinary Stage 1 gates and complete
+with respect to publication date: no candidate is removed because it is old or
+has an unknown date. When a particular experiment needs a model-knowledge
+boundary, create a separate hash-linked view:
 
 ```bash
-  --published-after 2026-02-16T23:59:59Z
+python3 <skill-root>/scripts/filter_candidates_by_date.py \
+  --candidates artifacts/candidates.json \
+  --published-after 2026-02-16T23:59:59Z \
+  --output artifacts/candidate-views/published-after-2026-02-16.json
 ```
+
+The view records `after`, `at_or_before`, and `unknown` component buckets. It
+contains references rather than copied evidence and is not a replacement
+candidate index. Use it to choose work, then run Stage 2 from the canonical
+`candidates.json`. Never change the cutoff merely to force a desired queue
+size.
 
 The command verifies every manifest-listed archive, joins transitive aliases,
 drops withdrawn and malicious-package records, and requires behavioral and
@@ -131,14 +144,11 @@ refreshing mutable repository metadata.
 `candidates.json` is the persistent Stage 1 result. It retains accepted
 `projects`, unresolved mappings or project gates, exclusion counts, mutable
 metadata with its observation time, repository-role evidence, and full repair
-provenance. Stars and forks are raw metadata and final tie-breakers only. There
-is no popularity score, project catalog, or `priority_projects` allowlist.
-Never reject a retained component solely for class, CWE, CVSS, `AV:N`, apparent
-simplicity, advisory count, or lack of particular keywords.
-
-The cutoff compares the earliest active manifested-record publication strictly
-after the supplied timestamp. It is an experimental model-knowledge control,
-not an authoritative disclosure-date claim.
+provenance, including retained components whose publication date is unknown.
+Stars and forks are raw metadata and final tie-breakers only. There is no
+popularity score, project catalog, or `priority_projects` allowlist. Never
+reject a retained component solely for class, CWE, CVSS, `AV:N`, apparent
+simplicity, advisory count, publication date, or lack of particular keywords.
 
 Use `<skill-root>/scripts/snapshot_osv.py` to refresh the OSV base corpus. Add
 normalized complementary advisory archives to the same hash manifest before

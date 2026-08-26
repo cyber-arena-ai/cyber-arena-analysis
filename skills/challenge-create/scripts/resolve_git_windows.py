@@ -650,7 +650,7 @@ def _packet_component(component: dict) -> dict:
     fields = (
         "component_id",
         "ids",
-        "earliest_osv_publication",
+        "earliest_manifested_publication",
         "summaries",
         "packages",
         "references",

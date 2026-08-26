@@ -30,6 +30,9 @@ source, require a plain OSV intersection, or send the unrestricted union through
 the fast lane. A complementary record absent from OSV remains eligible when it
 is complete enough to establish its identity and aliases.
 
+Publication-date views are derived after this complete selection is retained;
+they never change lane membership or remove evidence from the canonical index.
+
 ## Base corpus
 
 | Source | Role | Contribution |

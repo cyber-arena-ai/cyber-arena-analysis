@@ -458,7 +458,9 @@ def _component_row(
     return {
         "component_id": _component_id(component["ids"]),
         "ids": sorted(component["ids"]),
-        "earliest_osv_publication": min(dates[root]).isoformat() if dates[root] else None,
+        "earliest_manifested_publication": (
+            min(dates[root]).isoformat() if dates[root] else None
+        ),
         "summaries": sorted(component["summaries"]),
         "details": sorted(component["details"]),
         "packages": sorted(component["packages"]),
@@ -516,16 +518,26 @@ def _combined_fast_lane_memberships(rows: list[dict]) -> list[dict]:
     ]
 
 
+def _component_publications(rows: list[dict]) -> list[dict]:
+    return [
+        {
+            "component_id": row["component_id"],
+            "earliest_manifested_publication": row[
+                "earliest_manifested_publication"
+            ],
+        }
+        for row in sorted(rows, key=lambda item: item["component_id"])
+    ]
+
+
 def generate(
     *,
     raw_dir: Path,
     manifest_path: Path,
-    cutoff_value: str | None,
     duplicate_inventory_path: Path | None = None,
     metadata_cache_path: Path | None = None,
     fetch_repository=None,
 ) -> dict:
-    cutoff = _timestamp(cutoff_value)
     manifest, archives = manifest_archives(raw_dir, manifest_path)
     duplicate_repositories, duplicate_ids = _load_duplicate_inventory(
         duplicate_inventory_path
@@ -580,7 +592,7 @@ def generate(
     repair_roots = {
         root for root in set(fixes) | set(releases) if fixes[root] or releases[root]
     }
-    date_exclusions = Counter()
+    exclusions = Counter()
     active_roots = {aliases.find(item["identifier"]) for item in metadata}
     active_lanes = sorted(
         {
@@ -602,15 +614,8 @@ def generate(
         set(fast_lane_memberships) if fast_lane_mode else set(repair_roots)
     )
     if not fast_lane_mode and (missing_repairs := len(active_roots - repair_roots)):
-        date_exclusions["no_repair_evidence"] = missing_repairs
-    candidate_roots = set()
-    for root in selected_roots:
-        if cutoff is not None and not dates[root]:
-            date_exclusions["missing_publication_date"] += 1
-        elif cutoff is not None and min(dates[root]) <= cutoff:
-            date_exclusions["pre_cutoff_publication"] += 1
-        else:
-            candidate_roots.add(root)
+        exclusions["no_repair_evidence"] = missing_repairs
+    candidate_roots = selected_roots
 
     components: dict[str, dict] = {}
     for wrapped in iter_archive_records(archives):
@@ -661,7 +666,6 @@ def generate(
             component["repository_roles"][role].update(repositories)
         component["git_ranges"].update(_git_range_evidence(record))
 
-    exclusions = Counter(date_exclusions)
     unresolved = []
     rows_by_repository: dict[str, list[dict]] = defaultdict(list)
     for root, component in components.items():
@@ -685,6 +689,9 @@ def generate(
                     "ids": row["ids"],
                     "reason": "exact_git_repair_not_established",
                     "repair_evidence": row["repair_evidence"],
+                    "earliest_manifested_publication": row[
+                        "earliest_manifested_publication"
+                    ],
                     "application_repository": row["application_repository"],
                     "application_mapping": row["application_mapping"],
                     "duplicate_matches": _component_duplicate_matches(
@@ -700,6 +707,9 @@ def generate(
                 {
                     "component_id": row["component_id"],
                     "ids": row["ids"],
+                    "earliest_manifested_publication": row[
+                        "earliest_manifested_publication"
+                    ],
                     "duplicate_matches": _component_duplicate_matches(
                         row, duplicate_repositories
                     ),
@@ -720,6 +730,9 @@ def generate(
                     "application_mapping": row["application_mapping"],
                     "application_git_ranges": row["application_git_ranges"],
                     "repair_evidence": row["repair_evidence"],
+                    "earliest_manifested_publication": row[
+                        "earliest_manifested_publication"
+                    ],
                     "duplicate_matches": _component_duplicate_matches(
                         row, duplicate_repositories
                     ),
@@ -749,6 +762,9 @@ def generate(
                     "fast_lane_memberships": _combined_fast_lane_memberships(
                         component_rows
                     ),
+                    "component_publications": _component_publications(
+                        component_rows
+                    ),
                     "duplicate_matches": sorted(
                         {requested_repository} & duplicate_repositories
                     ),
@@ -769,6 +785,7 @@ def generate(
                 "fast_lane_memberships": _combined_fast_lane_memberships(
                     component_rows
                 ),
+                "component_publications": _component_publications(component_rows),
                 "duplicate_matches": sorted(
                     {requested_repository, canonical} & duplicate_repositories
                 ),
@@ -808,7 +825,7 @@ def generate(
         )
         project["components"].sort(
             key=lambda item: (
-                item["earliest_osv_publication"] or "",
+                item["earliest_manifested_publication"] or "",
                 item["component_id"],
             )
         )
@@ -857,13 +874,8 @@ def generate(
     if fast_lane_mode:
         ordering.insert(0, "fast-lane priority")
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "method": "advisory_first_candidate_shortlist",
-        "date_cutoff": {
-            "enabled": cutoff is not None,
-            "published_after": cutoff.isoformat() if cutoff else None,
-            "comparison": "earliest active advisory publication is strictly later",
-        },
         "project_gates": {
             "maximum_inactivity_days": MAX_INACTIVITY_DAYS,
             "acceptable_oss_license_required": True,
@@ -878,7 +890,7 @@ def generate(
             ],
             "seeded_components": len(fast_lane_memberships),
             "coverage_components": len(active_roots - set(fast_lane_memberships)),
-            "selected_components_after_cutoff": len(candidate_roots),
+            "selected_components": len(candidate_roots),
         },
         "sources": sources,
         "summary": {
@@ -923,10 +935,6 @@ def main(argv: list[str] | None = None) -> int:
             "<output-dir>/sources/github_repository_metadata.json"
         ),
     )
-    parser.add_argument(
-        "--published-after",
-        help="enable the optional cutoff with a timezone-qualified ISO-8601 timestamp",
-    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     metadata_cache = args.metadata_cache or (
@@ -936,7 +944,6 @@ def main(argv: list[str] | None = None) -> int:
         payload = generate(
             raw_dir=args.raw_dir,
             manifest_path=args.manifest,
-            cutoff_value=args.published_after,
             duplicate_inventory_path=args.duplicate_inventory,
             metadata_cache_path=metadata_cache,
         )

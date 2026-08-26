@@ -46,7 +46,10 @@ def _compact_component(
     return {
         "component_id": seed["component_id"],
         "ids": seed["ids"],
-        "earliest_osv_publication": seed["earliest_osv_publication"],
+        "earliest_manifested_publication": seed.get(
+            "earliest_manifested_publication",
+            seed.get("earliest_osv_publication"),
+        ),
         "summaries": seed["summaries"],
         "details": seed.get("details", []),
         "packages": seed.get("packages", []),
@@ -162,11 +165,11 @@ def generate(
 ) -> dict:
     payload = json.loads(candidates_path.read_text(encoding="utf-8"))
     schema_version = payload.get("schema_version", 1)
-    if schema_version not in {1, 2}:
+    if schema_version not in {1, 2, 3}:
         raise ValueError(f"unsupported candidate schema version: {schema_version!r}")
-    if schema_version == 2:
+    if schema_version >= 2:
         if manifest_path is None:
-            raise ValueError("candidate schema version 2 requires --manifest")
+            raise ValueError("candidate schema version 2 or later requires --manifest")
         recorded_manifest = payload.get("sources", {}).get("advisory_manifest", {})
         if recorded_manifest.get("sha256") != _sha256(manifest_path):
             raise ValueError("candidate advisory-manifest hash does not match --manifest")
@@ -227,7 +230,7 @@ def generate(
             records = _repository_records(
                 list(matched_records[key].values()),
                 repository_aliases,
-                strict=schema_version == 2,
+                strict=schema_version >= 2,
             )
             if not records:
                 no_raw_records.append(seed["component_id"])
@@ -319,7 +322,6 @@ def generate(
                 "duplicate_matches": project.get("duplicate_matches", []),
                 "source_provenance": {
                     "candidate_sources": payload.get("sources", {}),
-                    "date_cutoff": payload.get("date_cutoff"),
                 },
                 "component_count": len(components),
                 "affected_unit_count": len(units),
@@ -344,7 +346,6 @@ def generate(
         ),
         "candidate_source": str(candidates_path),
         "candidate_sources": payload.get("sources", {}),
-        "date_cutoff": payload.get("date_cutoff"),
         "scanned_advisory_records": scanned,
         "project_count": len(projects),
         "component_count": sum(item["component_count"] for item in projects),
@@ -368,7 +369,6 @@ def _project_markdown(project: dict, payload: dict) -> str:
         "",
         f"- Hard-gated components: {project['component_count']}",
         f"- Exact affected-unit lanes: {project['affected_unit_count']}",
-        f"- Date cutoff: `{payload.get('date_cutoff', {}).get('published_after')}`",
         "- Evidence: exact OSV `affected.versions` matches; unresolved ranges are not treated as absence.",
         "",
         "## Affected-unit overlap",

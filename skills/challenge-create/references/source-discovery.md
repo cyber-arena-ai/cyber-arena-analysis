@@ -100,9 +100,10 @@ python3 <skill-root>/scripts/shortlist_candidates.py \
   --output artifacts/candidates.json
 ```
 
-Omit `--duplicate-inventory` if the inventory was not gathered. Add
-`--published-after <timezone-qualified timestamp>` only when the experiment
-requires a model-knowledge cutoff.
+Omit `--duplicate-inventory` if the inventory was not gathered. This command
+does not accept a publication cutoff: publication date must not remove a
+component before the ordinary Stage 1 gates run. The manifested source corpus
+continues to preserve evidence for hard-gated components.
 
 The command deliberately works in this order:
 
@@ -136,10 +137,30 @@ Do not filter by CWE, CVSS, attack-vector labels, summary keywords, advisory
 count, or a popularity threshold. `stars` and `forks` are preserved only as
 late tie-breakers after advisory evidence and project gates.
 
+## 4. Optionally derive a date view
+
+Apply a model-knowledge boundary only after the complete index is persistent:
+
+```bash
+python3 <skill-root>/scripts/filter_candidates_by_date.py \
+  --candidates artifacts/candidates.json \
+  --published-after 2026-02-16T23:59:59Z \
+  --output artifacts/candidate-views/published-after-2026-02-16.json
+```
+
+The view is hash-linked to `candidates.json` and retains component references
+in `after`, `at_or_before`, and `unknown` buckets. It does not copy advisory
+evidence or replace the canonical index. Select repositories and component IDs
+from the view, then use `candidates.json` for Stage 2. Treat the cutoff as an
+experimental model-knowledge boundary, not a tunable queue-size control or an
+authoritative disclosure-date claim.
+
 ## Persistent result and resume boundary
 
 `artifacts/candidates.json` ends Stage 1. It contains:
 
+- schema version 3, whose `earliest_manifested_publication` field may be a
+  timestamp or `null` and is never itself an admission gate;
 - `projects[]`: accepted application repositories, observed GitHub metadata,
   duplicate context, and advisory components;
 - `unresolved_candidates[]`: application mappings or project facts requiring
@@ -148,6 +169,9 @@ late tie-breakers after advisory evidence and project gates.
 - `selection`: active fast lanes plus seeded, coverage, and selected-component
   counts;
 - `sources`: hashes for the advisory manifest and optional inventory.
+
+Optional files under `artifacts/candidate-views/` are derived queue views. Their
+source hash must match the current canonical index before use.
 
 The generated metadata cache uses schema version 1 and maps each requested
 `owner/repository` to its completed GitHub response (or `null` for a completed

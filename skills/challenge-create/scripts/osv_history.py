@@ -20,6 +20,7 @@ class CorpusError(ValueError):
 
 
 HEX40 = re.compile(r"[0-9a-f]{40}")
+SOURCE_ROLES = {"base", "fast_lane", "enrichment"}
 
 
 def _sha256(path: Path) -> str:
@@ -35,6 +36,16 @@ def manifest_archives(raw_dir: Path, manifest_path: Path) -> tuple[dict, list[di
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     archives = []
     for source in manifest.get("sources", []):
+        role = str(source.get("role") or "base")
+        if role not in SOURCE_ROLES:
+            raise CorpusError(f"invalid advisory source role: {role!r}")
+        if role == "fast_lane":
+            lane = source.get("lane")
+            priority = source.get("priority")
+            if not isinstance(lane, str) or not lane.strip():
+                raise CorpusError("fast-lane advisory source requires lane")
+            if not isinstance(priority, int) or isinstance(priority, bool) or priority < 1:
+                raise CorpusError("fast-lane advisory source requires positive priority")
         name = str(source.get("path", ""))
         if not name or Path(name).name != name:
             raise CorpusError(f"invalid manifest archive path: {name!r}")
@@ -52,7 +63,7 @@ def manifest_archives(raw_dir: Path, manifest_path: Path) -> tuple[dict, list[di
             raise CorpusError(f"invalid ZIP archive: {path}") from error
         if bad_member:
             raise CorpusError(f"corrupt ZIP member {bad_member!r} in {path}")
-        archives.append({"path": path, "source": source})
+        archives.append({"path": path, "source": {**source, "role": role}})
     if not archives:
         raise CorpusError("manifest contains no archives")
     return manifest, archives
@@ -195,6 +206,9 @@ def iter_archive_records(archives: list[dict]):
                             or source.get("ecosystem")
                             or archive_path.stem
                         ),
+                        "source_role": source.get("role", "base"),
+                        "source_lane": source.get("lane"),
+                        "source_priority": source.get("priority"),
                         "record": json.load(stream),
                     }
 

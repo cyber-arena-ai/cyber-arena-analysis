@@ -40,8 +40,26 @@ packages, versions and ranges, and typed references. Add the ZIP to
   "bytes": 1234,
   "sha256": "...",
   "source": "upstream vendor advisories",
+  "role": "enrichment",
   "fetched_at": "2026-08-25T00:00:00+00:00"
 }
+```
+
+Normalize a downloaded CISA KEV feed and register the priority-1 fast lane with:
+
+```bash
+python3 <skill-root>/scripts/snapshot_cisa_kev.py \
+  --input /tmp/known_exploited_vulnerabilities.json \
+  --output-dir artifacts/sources/osv
+```
+
+Normalize an official local Metasploit checkout and register the priority-2
+fast lane with:
+
+```bash
+python3 <skill-root>/scripts/snapshot_metasploit.py \
+  --repository /tmp/metasploit-framework \
+  --output-dir artifacts/sources/osv
 ```
 
 The snapshot step does not build a second normalized project or advisory
@@ -68,10 +86,10 @@ CVE exercise. Asset and boundary duplication remains a semantic judgment.
 
 ## 3. Build the persistent candidate index
 
-The source-role policy is defined, but the current script still evaluates the
-whole manifested union. Until seed selection is implemented, this command does
-not produce the fast-lane queue described in
-[advisory-source-roles.md](advisory-source-roles.md).
+If one or more manifest sources have `role: fast_lane`, the command evaluates
+only their active seed components after transitive alias closure and draws
+enrichment from every manifested archive. Without a fast-lane source it retains
+the legacy full-corpus behavior.
 
 ```bash
 python3 <skill-root>/scripts/shortlist_candidates.py \
@@ -90,7 +108,9 @@ The command deliberately works in this order:
 
 1. Verify the manifest and every listed archive.
 2. Join transitive IDs and aliases. Withdrawn records may bridge aliases but
-   never contribute active evidence.
+   never contribute active evidence. When fast lanes are present, select alias
+   components containing an active fast-lane record and retain the rest as the
+   deferred coverage count.
 3. Drop malicious-package records and candidates without behavioral or repair
    evidence. Repair may be an exact Git fix or an authoritative fixed release,
    but keep release-only candidates unresolved until an exact Git repair is
@@ -125,6 +145,8 @@ late tie-breakers after advisory evidence and project gates.
 - `unresolved_candidates[]`: application mappings or project facts requiring
   bounded evidence gathering;
 - `summary.exclusions`: deterministic rejection counts;
+- `selection`: active fast lanes plus seeded, coverage, and selected-component
+  counts;
 - `sources`: hashes for the advisory manifest and optional inventory.
 
 The generated metadata cache uses schema version 1 and maps each requested

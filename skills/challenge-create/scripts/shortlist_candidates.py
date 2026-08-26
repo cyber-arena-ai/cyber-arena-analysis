@@ -430,7 +430,14 @@ def _project_metadata(project: dict, canonical: str) -> dict:
     }
 
 
-def _component_row(root: str, component: dict, dates: dict, fixes: dict, releases: dict) -> dict:
+def _component_row(
+    root: str,
+    component: dict,
+    dates: dict,
+    fixes: dict,
+    releases: dict,
+    fast_lane_memberships: dict,
+) -> dict:
     component["repository_roles"]["fix_repository"].update(
         fix_repository for fix_repository, _, _, _ in fixes[root]
     )
@@ -474,7 +481,39 @@ def _component_row(root: str, component: dict, dates: dict, fixes: dict, release
         "application_repository": repository,
         "application_mapping": mapping,
         "application_git_ranges": application_git_ranges,
+        "fast_lane_memberships": [
+            {"priority": priority, "lane": lane, "source": source}
+            for priority, lane, source in sorted(fast_lane_memberships[root])
+        ],
     }
+
+
+def _fast_lane_fields(row: dict) -> dict:
+    return {"fast_lane_memberships": row["fast_lane_memberships"]}
+
+
+def _component_duplicate_matches(row: dict, duplicate_repositories: set[str]) -> list[str]:
+    repositories = set(row["application_mapping"].get("candidate_repositories", []))
+    if row["application_repository"]:
+        repositories.add(row["application_repository"])
+    return sorted(set(row["duplicate_matches"]) | (repositories & duplicate_repositories))
+
+
+def _combined_fast_lane_memberships(rows: list[dict]) -> list[dict]:
+    return [
+        {"priority": priority, "lane": lane, "source": source}
+        for priority, lane, source in sorted(
+            {
+                (
+                    membership["priority"],
+                    membership["lane"],
+                    membership["source"],
+                )
+                for row in rows
+                for membership in row["fast_lane_memberships"]
+            }
+        )
+    ]
 
 
 def generate(
@@ -513,28 +552,59 @@ def generate(
                     "published": _timestamp(record.get("published")),
                     "fixes": _fix_boundaries(record),
                     "releases": _release_boundaries(record),
+                    "fast_lane_membership": (
+                        (
+                            wrapped["source_priority"],
+                            wrapped["source_lane"],
+                            wrapped["source_database"],
+                        )
+                        if wrapped["source_role"] == "fast_lane"
+                        else None
+                    ),
                 }
             )
 
     dates: dict[str, list[datetime]] = defaultdict(list)
     fixes: dict[str, set[tuple[str, str, str, str]]] = defaultdict(set)
     releases: dict[str, set[tuple[str, str, str]]] = defaultdict(set)
+    fast_lane_memberships: dict[str, set[tuple[int, str, str]]] = defaultdict(set)
     for item in metadata:
         root = aliases.find(item["identifier"])
         if item["published"]:
             dates[root].append(item["published"])
         fixes[root].update(item["fixes"])
         releases[root].update(item["releases"])
+        if item["fast_lane_membership"]:
+            fast_lane_memberships[root].add(item["fast_lane_membership"])
 
     repair_roots = {
         root for root in set(fixes) | set(releases) if fixes[root] or releases[root]
     }
     date_exclusions = Counter()
     active_roots = {aliases.find(item["identifier"]) for item in metadata}
-    if missing_repairs := len(active_roots - repair_roots):
+    active_lanes = sorted(
+        {
+            (
+                int(item["source"]["priority"]),
+                str(item["source"]["lane"]),
+                str(
+                    item["source"].get("source")
+                    or item["source"].get("ecosystem")
+                    or item["path"].stem
+                ),
+            )
+            for item in archives
+            if item["source"]["role"] == "fast_lane"
+        }
+    )
+    fast_lane_mode = bool(active_lanes)
+    selected_roots = (
+        set(fast_lane_memberships) if fast_lane_mode else set(repair_roots)
+    )
+    if not fast_lane_mode and (missing_repairs := len(active_roots - repair_roots)):
         date_exclusions["no_repair_evidence"] = missing_repairs
     candidate_roots = set()
-    for root in repair_roots:
+    for root in selected_roots:
         if cutoff is not None and not dates[root]:
             date_exclusions["missing_publication_date"] += 1
         elif cutoff is not None and min(dates[root]) <= cutoff:
@@ -595,7 +665,9 @@ def generate(
     unresolved = []
     rows_by_repository: dict[str, list[dict]] = defaultdict(list)
     for root, component in components.items():
-        row = _component_row(root, component, dates, fixes, releases)
+        row = _component_row(
+            root, component, dates, fixes, releases, fast_lane_memberships
+        )
         summaries = row["summaries"]
         if row["component_id"].startswith(("MAL-", "OSV-")) or any(
             "malicious code in " in summary.lower() for summary in summaries
@@ -615,6 +687,10 @@ def generate(
                     "repair_evidence": row["repair_evidence"],
                     "application_repository": row["application_repository"],
                     "application_mapping": row["application_mapping"],
+                    "duplicate_matches": _component_duplicate_matches(
+                        row, duplicate_repositories
+                    ),
+                    **_fast_lane_fields(row),
                 }
             )
             continue
@@ -624,7 +700,11 @@ def generate(
                 {
                     "component_id": row["component_id"],
                     "ids": row["ids"],
+                    "duplicate_matches": _component_duplicate_matches(
+                        row, duplicate_repositories
+                    ),
                     **row["application_mapping"],
+                    **_fast_lane_fields(row),
                 }
             )
             continue
@@ -640,6 +720,10 @@ def generate(
                     "application_mapping": row["application_mapping"],
                     "application_git_ranges": row["application_git_ranges"],
                     "repair_evidence": row["repair_evidence"],
+                    "duplicate_matches": _component_duplicate_matches(
+                        row, duplicate_repositories
+                    ),
+                    **_fast_lane_fields(row),
                 }
             )
             continue
@@ -662,6 +746,12 @@ def generate(
                     "repository": requested_repository,
                     "component_ids": sorted(row["component_id"] for row in component_rows),
                     "reason": "repository_metadata_not_found",
+                    "fast_lane_memberships": _combined_fast_lane_memberships(
+                        component_rows
+                    ),
+                    "duplicate_matches": sorted(
+                        {requested_repository} & duplicate_repositories
+                    ),
                 }
             )
             continue
@@ -676,6 +766,12 @@ def generate(
                 "component_ids": sorted(row["component_id"] for row in component_rows),
                 "reason": reason,
                 "project": _project_metadata(project, canonical),
+                "fast_lane_memberships": _combined_fast_lane_memberships(
+                    component_rows
+                ),
+                "duplicate_matches": sorted(
+                    {requested_repository, canonical} & duplicate_repositories
+                ),
             }
             if disposition == "unresolved":
                 unresolved.append(item)
@@ -716,8 +812,18 @@ def generate(
                 item["component_id"],
             )
         )
+        project["fast_lane_memberships"] = _combined_fast_lane_memberships(
+            project["components"]
+        )
     output_projects.sort(
         key=lambda item: (
+            min(
+                (
+                    membership["priority"]
+                    for membership in item["fast_lane_memberships"]
+                ),
+                default=10**9,
+            ),
             -len({db for row in item["components"] for db in row["source_databases"]}),
             -int(item["project"].get("stars") or 0),
             -int(item["project"].get("forks") or 0),
@@ -742,6 +848,14 @@ def generate(
             "path": str(metadata_cache_path),
             "sha256": _sha256(metadata_cache_path),
         }
+    ordering = [
+        "advisory source diversity",
+        "stars (tie-breaker only)",
+        "forks (tie-breaker only)",
+        "repository",
+    ]
+    if fast_lane_mode:
+        ordering.insert(0, "fast-lane priority")
     return {
         "schema_version": 2,
         "method": "advisory_first_candidate_shortlist",
@@ -755,12 +869,17 @@ def generate(
             "acceptable_oss_license_required": True,
             "deployable_service_signal_required": True,
         },
-        "ordering": [
-            "advisory source diversity",
-            "stars (tie-breaker only)",
-            "forks (tie-breaker only)",
-            "repository",
-        ],
+        "ordering": ordering,
+        "selection": {
+            "mode": "fast_lane" if fast_lane_mode else "full_corpus",
+            "active_lanes": [
+                {"priority": priority, "lane": lane, "source": source}
+                for priority, lane, source in active_lanes
+            ],
+            "seeded_components": len(fast_lane_memberships),
+            "coverage_components": len(active_roots - set(fast_lane_memberships)),
+            "selected_components_after_cutoff": len(candidate_roots),
+        },
         "sources": sources,
         "summary": {
             "scanned_advisory_records": scanned,
@@ -769,12 +888,20 @@ def generate(
             "candidate_projects": len(output_projects),
             "candidate_components": sum(len(item["components"]) for item in output_projects),
             "unresolved_candidates": len(unresolved),
+            "review_entries": len(output_projects) + len(unresolved),
             "exclusions": dict(sorted(exclusions.items())),
         },
         "unresolved_candidates": sorted(
             unresolved,
             key=lambda item: (
-                item.get("repository", ""),
+                min(
+                    (
+                        membership["priority"]
+                        for membership in item.get("fast_lane_memberships", [])
+                    ),
+                    default=10**9,
+                ),
+                item.get("repository") or item.get("application_repository") or "",
                 item.get("component_id", ""),
                 item.get("reason", ""),
             ),

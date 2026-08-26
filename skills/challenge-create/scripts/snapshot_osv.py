@@ -96,6 +96,7 @@ def snapshot(*, output_dir: Path, ecosystems: list[str], refresh: bool) -> dict:
             else _existing_file(url, path, previous_sources.get(path.name))
         )
         source["ecosystem"] = ecosystem
+        source["role"] = "base"
         sources.append(source)
         osv_paths.add(filename)
 

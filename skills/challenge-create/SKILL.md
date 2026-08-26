@@ -85,11 +85,12 @@ Use the base corpus, fast lanes, and enrichment sources defined in
 [advisory-source-roles.md](references/advisory-source-roles.md). Keep their
 definitions there so adding or changing a lane does not expand this entrypoint.
 
-The current command below consumes the complete manifested union and does not
-yet enforce fast-lane selection. Do not describe its output as a fast-lane
-shortlist until that selection is implemented. It filters and joins aliases
-before making any GitHub request, then fetches current metadata only for the
-surviving application repositories:
+When the manifest contains a `fast_lane` source, the command below selects only
+alias components seeded by an active record from such a source, then enriches
+them from the complete manifested union. With no fast-lane source it preserves
+the legacy full-corpus behavior. It filters and joins aliases before making any
+GitHub request, then fetches current metadata only for surviving application
+repositories:
 
 ```bash
 python3 <skill-root>/scripts/shortlist_candidates.py \
@@ -135,9 +136,9 @@ is no popularity score, project catalog, or `priority_projects` allowlist.
 Never reject a retained component solely for class, CWE, CVSS, `AV:N`, apparent
 simplicity, advisory count, or lack of particular keywords.
 
-The cutoff compares the earliest active OSV publication strictly after the
-supplied timestamp. It is an experimental model-knowledge control, not an
-authoritative disclosure-date claim.
+The cutoff compares the earliest active manifested-record publication strictly
+after the supplied timestamp. It is an experimental model-knowledge control,
+not an authoritative disclosure-date claim.
 
 Use `<skill-root>/scripts/snapshot_osv.py` to refresh the OSV base corpus. Add
 normalized complementary advisory archives to the same hash manifest before

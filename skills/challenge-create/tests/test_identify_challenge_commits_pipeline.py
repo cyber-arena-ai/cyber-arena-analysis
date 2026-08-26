@@ -660,6 +660,86 @@ def test_manifested_complementary_record_survives_stage_two(tmp_path):
     ]
 
 
+def test_fast_lane_selects_seeded_alias_closure_and_retains_seed_only_gaps(tmp_path):
+    raw_dir, manifest, archive_path = _inputs(tmp_path)
+    fast_lane = raw_dir / "cisa-kev.zip"
+    records = [
+        {
+            "id": "CISA-KEV-CVE-2026-0002",
+            "aliases": ["CVE-2026-0002"],
+            "published": "2026-04-05T00:00:00Z",
+            "summary": "Known exploited authorization bypass",
+        },
+        {
+            "id": "CVE-2026-9000",
+            "published": "2026-04-06T00:00:00Z",
+            "summary": "Known exploited code injection",
+            "references": [
+                {
+                    "type": "ADVISORY",
+                    "url": (
+                        "https://github.com/example/seed-only/security/advisories/"
+                        "GHSA-1111-2222-3333"
+                    ),
+                }
+            ],
+        },
+    ]
+    with zipfile.ZipFile(fast_lane, "w") as archive:
+        for index, record in enumerate(records):
+            archive.writestr(f"seed-{index}.json", json.dumps(record))
+    _refresh_source(
+        manifest,
+        fast_lane,
+        source="CISA Known Exploited Vulnerabilities",
+        role="fast_lane",
+        lane="known_exploited",
+        priority=1,
+    )
+
+    result = _generate(
+        (raw_dir, manifest, archive_path), "2026-02-16T23:59:59Z"
+    )
+
+    assert result["selection"] == {
+        "mode": "fast_lane",
+        "active_lanes": [
+            {
+                "lane": "known_exploited",
+                "priority": 1,
+                "source": "CISA Known Exploited Vulnerabilities",
+            }
+        ],
+        "seeded_components": 2,
+        "coverage_components": 3,
+        "selected_components_after_cutoff": 2,
+    }
+    components = result["projects"][0]["components"]
+    assert [component["component_id"] for component in components] == [
+        "CVE-2026-0002"
+    ]
+    assert components[0]["fast_lane_memberships"] == [
+        {
+            "lane": "known_exploited",
+            "priority": 1,
+            "source": "CISA Known Exploited Vulnerabilities",
+        }
+    ]
+    assert len(components[0]["sources"]) == 2
+    unresolved = next(
+        item
+        for item in result["unresolved_candidates"]
+        if item.get("component_id") == "CVE-2026-9000"
+    )
+    assert unresolved["reason"] == "exact_git_repair_not_established"
+    assert unresolved["application_repository"] == "example/seed-only"
+    assert unresolved["fast_lane_memberships"] == components[0][
+        "fast_lane_memberships"
+    ]
+    assert result["summary"]["candidate_projects"] == 1
+    assert result["summary"]["unresolved_candidates"] == 1
+
+
 def test_release_only_repair_stays_unresolved_before_git_reconstruction(tmp_path):
     raw_dir, manifest, archive_path = _inputs(tmp_path)
     record = {

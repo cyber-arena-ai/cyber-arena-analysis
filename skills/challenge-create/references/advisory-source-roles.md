@@ -8,6 +8,10 @@ Source role is not a claim that a challenge is promising. It controls which
 advisory components receive early work and which sources may add evidence to
 those components.
 
+Record roles on each `osv_manifest.json` source as `base`, `fast_lane`, or
+`enrichment`. A fast-lane entry also requires its registry `lane` and positive
+integer `priority`. Legacy entries without a role are treated as `base`.
+
 ## Selection model
 
 Keep one normalized, hash-manifested evidence corpus:

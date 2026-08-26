@@ -54,6 +54,7 @@ def _compact_component(
         "severities": seed.get("severities", []),
         "sources": seed.get("sources", []),
         "source_databases": seed.get("source_databases", []),
+        "fast_lane_memberships": seed.get("fast_lane_memberships", []),
         "cwes": seed.get("cwes", []),
         "behavioral_evidence": seed.get("behavioral_evidence", []),
         "repair_evidence": seed.get("repair_evidence", []),

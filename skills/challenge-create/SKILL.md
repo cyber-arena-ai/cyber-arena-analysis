@@ -16,7 +16,9 @@ Use Python 3.11 or newer for all bundled scripts.
 Before Stage 2, locate the separate `cyber-arena-docs` checkout as
 `<docs-root>`. Before Stage 4, locate `cyber-arena-orche` as `<orche-root>`.
 
-1. Read [source-discovery.md](references/source-discovery.md) completely.
+1. Read [source-discovery.md](references/source-discovery.md) and
+   [advisory-source-roles.md](references/advisory-source-roles.md) completely
+   before Stage 1.
 2. Read [attack-scopes.json](references/attack-scopes.json) before proposing capability scopes. Treat
    advisory CWE weakness labels as root-cause evidence, not as the Technical
    Impact proved by a flag.
@@ -79,9 +81,15 @@ authoritative.
 
 ## Stage 1: refresh sources and shortlist
 
-Start with the retained advisory corpus. Filter and join aliases before making
-any GitHub request; then fetch current metadata only for the surviving
-application repositories:
+Use the base corpus, fast lanes, and enrichment sources defined in
+[advisory-source-roles.md](references/advisory-source-roles.md). Keep their
+definitions there so adding or changing a lane does not expand this entrypoint.
+
+The current command below consumes the complete manifested union and does not
+yet enforce fast-lane selection. Do not describe its output as a fast-lane
+shortlist until that selection is implemented. It filters and joins aliases
+before making any GitHub request, then fetches current metadata only for the
+surviving application repositories:
 
 ```bash
 python3 <skill-root>/scripts/shortlist_candidates.py \
@@ -131,11 +139,13 @@ The cutoff compares the earliest active OSV publication strictly after the
 supplied timestamp. It is an experimental model-knowledge control, not an
 authoritative disclosure-date claim.
 
-Use `<skill-root>/scripts/snapshot_osv.py` to refresh the OSV seed. Add any
+Use `<skill-root>/scripts/snapshot_osv.py` to refresh the OSV base corpus. Add
 normalized complementary advisory archives to the same hash manifest before
-shortlisting; Stage 2 consumes that exact manifest too. Publish the updated
-sources and derived artifacts together to the designated Hugging Face dataset
-so its history preserves provenance. Never commit them to this repository.
+shortlisting; Stage 2 consumes that exact manifested union too. Source roles
+select work and determine enrichment behavior; they do not create a parallel
+advisory corpus. Publish the updated sources and derived artifacts together to
+the designated Hugging Face dataset so its history preserves provenance. Never
+commit them to this repository.
 
 ## Stage 2: reconstruct and triage candidate windows
 
@@ -183,11 +193,11 @@ caveats.
 
 First read [advisory-enrichment.md](references/advisory-enrichment.md),
 [semantic-review.md](references/semantic-review.md), and the repository root
-`CONTRIBUTING.md`. Treat OSV as the retained discovery seed rather than a
-complete advisory universe. Decide whether the strongest candidate deserves an
-expensive Stage 3 study. Require one understood, natural attack chain and its
-repair; do not require a second route, post-fix survivor, multi-CVE ladder,
-minimum patch size, or apparent defensive depth.
+`CONTRIBUTING.md`. Treat the manifested advisory union as retained evidence
+rather than a complete advisory universe. Decide whether the strongest
+candidate deserves an expensive Stage 3 study. Require one understood, natural
+attack chain and its repair; do not require a second route, post-fix survivor,
+multi-CVE ladder, minimum patch size, or apparent defensive depth.
 
 A `promising` result needs three connected bundles of primary upstream
 evidence. Stop early when upstream evidence decisively defeats the case:

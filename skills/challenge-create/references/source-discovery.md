@@ -9,6 +9,11 @@ Stage 1 answers a narrow question: which advisory-linked applications justify
 the more expensive Git reconstruction and semantic work in Stage 2? It does
 not prove exploitability or challenge suitability.
 
+Read [advisory-source-roles.md](advisory-source-roles.md) for the maintained
+division between the OSV base corpus, fast-lane selectors, and enrichment
+sources. This document defines normalization and persistence; the role registry
+defines which sources select work.
+
 ## 1. Refresh the advisory corpus
 
 ```bash
@@ -17,9 +22,10 @@ python3 <skill-root>/scripts/snapshot_osv.py \
   --refresh
 ```
 
-The default OSV seed is `GIT`, `Go`, `Maven`, `Packagist`, `PyPI`, `RubyGems`,
-`crates.io`, and `npm`. The first run can be large. Without `--refresh`, the
-command reuses existing ZIPs and preserves matching fetch provenance.
+The default OSV base corpus is `GIT`, `Go`, `Maven`, `Packagist`, `PyPI`,
+`RubyGems`, `crates.io`, and `npm`. The first run can be large. Without
+`--refresh`, the command reuses existing ZIPs and preserves matching fetch
+provenance.
 
 Complementary advisories may be added when they are already available or when
 a later review finds missing upstream evidence. Normalize them as complete
@@ -39,8 +45,9 @@ packages, versions and ranges, and typed references. Add the ZIP to
 ```
 
 The snapshot step does not build a second normalized project or advisory
-catalog. Stage 1 and Stage 2 read only complete manifest-listed archives;
-unlisted ZIPs are ignored.
+catalog. Fast-lane and enrichment records join the same union corpus. Stage 1
+and Stage 2 read only complete manifest-listed archives; unlisted ZIPs are
+ignored.
 
 ## 2. Optionally retain duplicate context
 
@@ -60,6 +67,11 @@ not automatic rejection because a challenge is an application boundary, not a
 CVE exercise. Asset and boundary duplication remains a semantic judgment.
 
 ## 3. Build the persistent candidate index
+
+The source-role policy is defined, but the current script still evaluates the
+whole manifested union. Until seed selection is implemented, this command does
+not produce the fast-lane queue described in
+[advisory-source-roles.md](advisory-source-roles.md).
 
 ```bash
 python3 <skill-root>/scripts/shortlist_candidates.py \

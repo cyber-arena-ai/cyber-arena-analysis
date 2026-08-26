@@ -1,7 +1,9 @@
 # Complementary advisory review
 
-Use the retained OSV snapshot as the discovery seed, not as a claim that every
-relevant advisory or repository relationship is present. Perform this bounded
+Use the retained manifested union as the evidence corpus, not as a claim that
+every relevant advisory or repository relationship is present. Source roles
+and fast lanes are maintained in
+[advisory-source-roles.md](advisory-source-roles.md). Perform this bounded
 review after a project is shortlisted and before semantic triage.
 
 This process improves evidence coverage but does not permit an agent to

@@ -63,69 +63,43 @@ def _materialize(bucket: dict) -> dict:
 def generate(*, candidates_path: Path, cutoff_value: str) -> dict:
     cutoff = _timestamp(cutoff_value)
     payload = json.loads(candidates_path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") != 3:
-        raise InputError("candidate date views require candidate schema version 3")
+    if payload.get("schema_version") != 4:
+        raise InputError("candidate date views require candidate schema version 4")
     if payload.get("date_cutoff", {}).get("enabled"):
         raise InputError("candidate date views require an unfiltered candidate index")
 
     buckets = {name: _empty_bucket() for name in ("after", "at_or_before", "unknown")}
     seen = set()
-    for project in payload.get("projects", []):
-        repository = project.get("repository")
-        if not isinstance(repository, str) or not repository:
-            raise InputError("candidate project requires repository")
-        for component in project.get("components", []):
-            component_id = component.get("component_id")
-            if not isinstance(component_id, str) or not component_id:
-                raise InputError("candidate project component requires component_id")
-            if component_id in seen:
-                raise InputError(f"duplicate retained component: {component_id}")
-            seen.add(component_id)
-            name = _bucket(component.get("earliest_manifested_publication"), cutoff)
-            buckets[name]["projects"][repository].add(component_id)
-
-    for item in payload.get("unresolved_candidates", []):
-        if component_id := item.get("component_id"):
-            publications = [
-                {
-                    "component_id": component_id,
-                    "earliest_manifested_publication": item.get(
-                        "earliest_manifested_publication"
-                    ),
-                }
-            ]
-        else:
-            component_ids = item.get("component_ids")
-            publications = item.get("component_publications")
-            if not isinstance(component_ids, list) or not isinstance(
-                publications, list
-            ):
-                raise InputError(
-                    "repository-level unresolved candidate requires component publications"
-                )
-            publication_ids = [
-                publication.get("component_id")
-                if isinstance(publication, dict)
-                else None
-                for publication in publications
-            ]
-            if any(
-                not isinstance(component_id, str) or not component_id
-                for component_id in [*component_ids, *publication_ids]
-            ) or sorted(component_ids) != sorted(publication_ids):
-                raise InputError(
-                    "unresolved component publications do not match component_ids"
-                )
-        for publication in publications:
-            component_id = publication.get("component_id")
-            if not isinstance(component_id, str) or not component_id:
-                raise InputError("unresolved candidate requires component_id")
-            if component_id in seen:
-                raise InputError(f"duplicate retained component: {component_id}")
-            seen.add(component_id)
-            name = _bucket(
-                publication.get("earliest_manifested_publication"), cutoff
+    retained = set()
+    matrix = payload.get("evidence_matrix")
+    if not isinstance(matrix, dict) or not isinstance(matrix.get("rows"), list):
+        raise InputError("candidate index requires evidence_matrix rows")
+    for row in matrix["rows"]:
+        if not isinstance(row, dict):
+            raise InputError("candidate evidence-matrix row must be an object")
+        component_id = row.get("component_id")
+        if not isinstance(component_id, str) or not component_id:
+            raise InputError("candidate evidence-matrix row requires component_id")
+        if component_id in seen:
+            raise InputError(f"duplicate candidate component: {component_id}")
+        seen.add(component_id)
+        disposition = row.get("disposition")
+        if disposition == "rejected":
+            continue
+        if disposition not in {"resolved", "unresolved"}:
+            raise InputError(
+                f"invalid candidate disposition for {component_id}: {disposition!r}"
             )
+        retained.add(component_id)
+        name = _bucket(row.get("earliest_manifested_publication"), cutoff)
+        if disposition == "resolved":
+            repository = row.get("repository")
+            if not isinstance(repository, str) or not repository:
+                raise InputError(
+                    f"resolved candidate {component_id} requires repository"
+                )
+            buckets[name]["projects"][repository].add(component_id)
+        else:
             buckets[name]["unresolved_component_ids"].add(component_id)
 
     materialized = {name: _materialize(bucket) for name, bucket in buckets.items()}
@@ -145,7 +119,7 @@ def generate(*, candidates_path: Path, cutoff_value: str) -> dict:
             "unknown_dates": "retained in a separate bucket",
         },
         "summary": {
-            "retained_components": len(seen),
+            "retained_components": len(retained),
             "bucket_component_counts": {
                 name: bucket["component_count"]
                 for name, bucket in materialized.items()

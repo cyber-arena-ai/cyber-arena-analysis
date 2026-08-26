@@ -164,15 +164,13 @@ def generate(
     manifest_path: Path | None = None,
 ) -> dict:
     payload = json.loads(candidates_path.read_text(encoding="utf-8"))
-    schema_version = payload.get("schema_version", 1)
-    if schema_version not in {1, 2, 3}:
-        raise ValueError(f"unsupported candidate schema version: {schema_version!r}")
-    if schema_version >= 2:
-        if manifest_path is None:
-            raise ValueError("candidate schema version 2 or later requires --manifest")
-        recorded_manifest = payload.get("sources", {}).get("advisory_manifest", {})
-        if recorded_manifest.get("sha256") != _sha256(manifest_path):
-            raise ValueError("candidate advisory-manifest hash does not match --manifest")
+    if payload.get("schema_version") != 4:
+        raise ValueError("Stage 2 requires candidate schema version 4")
+    if manifest_path is None:
+        raise ValueError("candidate schema version 4 requires --manifest")
+    recorded_manifest = payload.get("sources", {}).get("advisory_manifest", {})
+    if recorded_manifest.get("sha256") != _sha256(manifest_path):
+        raise ValueError("candidate advisory-manifest hash does not match --manifest")
     available_repositories = [
         item["repository"].lower() for item in payload.get("projects", [])
     ]
@@ -230,7 +228,7 @@ def generate(
             records = _repository_records(
                 list(matched_records[key].values()),
                 repository_aliases,
-                strict=schema_version >= 2,
+                strict=True,
             )
             if not records:
                 no_raw_records.append(seed["component_id"])
@@ -534,7 +532,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidates", type=Path, required=True)
     parser.add_argument("--raw-dir", type=Path, required=True)
-    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
         "--repository",

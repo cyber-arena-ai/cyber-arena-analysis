@@ -112,10 +112,12 @@ The command deliberately works in this order:
    never contribute active evidence. When fast lanes are present, select alias
    components containing an active fast-lane record and retain the rest as the
    deferred coverage count.
-3. Drop malicious-package records and candidates without behavioral or repair
-   evidence. Repair may be an exact Git fix or an authoritative fixed release,
-   but keep release-only candidates unresolved until an exact Git repair is
-   established for the current Stage 2 resolver.
+3. Hard-reject malicious-package records and candidates without behavioral
+   evidence. In fast-lane mode, retain a seed that lacks repair evidence as
+   unresolved; the fast-lane signal is itself useful lookup context. Repair may
+   be an exact Git fix or an authoritative fixed release, but keep seed-only and
+   release-only candidates unresolved until an exact Git repair is established
+   for the current Stage 2 resolver.
 4. Resolve the application repository independently from repair repositories:
    affected Git range, then typed `PACKAGE` reference, then repository-local
    security advisory. Keep ambiguous and fix-only mappings unresolved. Require
@@ -153,14 +155,19 @@ in `after`, `at_or_before`, and `unknown` buckets. It does not copy advisory
 evidence or replace the canonical index. Select repositories and component IDs
 from the view, then use `candidates.json` for Stage 2. Treat the cutoff as an
 experimental model-knowledge boundary, not a tunable queue-size control or an
-authoritative disclosure-date claim.
+authoritative disclosure-date claim. Rejected matrix rows remain in the
+canonical index for audit and do not enter a work-queue view.
 
 ## Persistent result and resume boundary
 
 `artifacts/candidates.json` ends Stage 1. It contains:
 
-- schema version 3, whose `earliest_manifested_publication` field may be a
+- schema version 4, whose `earliest_manifested_publication` field may be a
   timestamp or `null` and is never itself an admission gate;
+- `evidence_matrix.rows[]`: one compact row per selected component with its
+  `resolved`, `unresolved`, or `rejected` disposition, reason, repository, and
+  observed-asset bitmap. A false asset bit means the asset is absent from the
+  manifested Stage 1 evidence, not proven absent upstream;
 - `projects[]`: accepted application repositories, observed GitHub metadata,
   duplicate context, and advisory components;
 - `unresolved_candidates[]`: application mappings or project facts requiring

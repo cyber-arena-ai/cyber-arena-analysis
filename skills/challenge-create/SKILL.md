@@ -124,13 +124,14 @@ candidate index. Use it to choose work, then run Stage 2 from the canonical
 size.
 
 The command verifies every manifest-listed archive, joins transitive aliases,
-drops withdrawn and malicious-package records, and requires behavioral and
-repair evidence. A release-only repair is retained but stays unresolved until
-an exact Git repair is established for Stage 2. The command resolves the
-application repository from affected Git ranges, package references, or
-upstream repository security advisories; a fix-only repository also stays
-unresolved. Promotion to `projects` also requires a structurally usable affected
-Git range for that application, with an exact fixed boundary in every phase.
+drops withdrawn and malicious-package records, and requires behavioral
+evidence. A fast-lane seed without repair and a release-only repair both stay
+unresolved until an exact Git repair is established for Stage 2. The command
+resolves the application repository from affected Git ranges, package
+references, or upstream repository security advisories; a fix-only repository
+also stays unresolved. Promotion to `projects` also requires a structurally
+usable affected Git range for that application, with an exact fixed boundary in
+every phase.
 Only then does it fetch current GitHub metadata and apply the archived,
 activity, OSS-license, and deployable-service gates. Missing license, service,
 repository, Git-range, or Git-repair evidence remains explicit in
@@ -141,10 +142,12 @@ completed GitHub lookup so a rate limit or transient failure can resume without
 repeating earlier requests. Delete or replace the cache only when intentionally
 refreshing mutable repository metadata.
 
-`candidates.json` is the persistent Stage 1 result. It retains accepted
-`projects`, unresolved mappings or project gates, exclusion counts, mutable
-metadata with its observation time, repository-role evidence, and full repair
-provenance, including retained components whose publication date is unknown.
+`candidates.json` is the persistent Stage 1 result. Its evidence matrix records
+every selected component's resolved, unresolved, or rejected disposition and
+which Stage 1 assets were observed. It also retains accepted `projects`,
+unresolved mappings or project gates, exclusion counts, mutable metadata with
+its observation time, repository-role evidence, and full repair provenance,
+including retained components whose publication date is unknown.
 Stars and forks are raw metadata and final tie-breakers only. There is no
 popularity score, project catalog, or `priority_projects` allowlist. Never
 reject a retained component solely for class, CWE, CVSS, `AV:N`, apparent

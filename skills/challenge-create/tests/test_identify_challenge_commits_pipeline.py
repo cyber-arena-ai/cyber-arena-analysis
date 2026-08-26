@@ -181,7 +181,7 @@ def test_canonical_index_preserves_all_dates_and_aliases_do_not_double_count(tmp
 
     result = _generate(inputs)
 
-    assert result["schema_version"] == 3
+    assert result["schema_version"] == 4
     assert "date_cutoff" not in result
     assert [
         component["component_id"]
@@ -196,6 +196,37 @@ def test_canonical_index_preserves_all_dates_and_aliases_do_not_double_count(tmp
     assert "popularity_score" not in result["projects"][0]
     assert result["projects"][0]["project"]["name"] == "app"
     assert result["projects"][0]["project"]["archived"] is False
+    assert result["summary"]["component_dispositions"] == {
+        "resolved": 3,
+        "unresolved": 0,
+        "rejected": 0,
+    }
+    matrix = {
+        row["component_id"]: row for row in result["evidence_matrix"]["rows"]
+    }
+    assert result["evidence_matrix"]["asset_fields"] == [
+        "advisory_text",
+        "exploit_evidence",
+        "cwe",
+        "affected_package",
+        "exact_git_repair",
+        "fixed_release",
+        "application_repository",
+        "usable_application_git_range",
+        "repository_metadata",
+    ]
+    assert matrix["CVE-2026-0001"]["disposition"] == "resolved"
+    assert matrix["CVE-2026-0001"]["assets"] == {
+        "advisory_text": True,
+        "exploit_evidence": False,
+        "cwe": False,
+        "affected_package": True,
+        "exact_git_repair": True,
+        "fixed_release": False,
+        "application_repository": True,
+        "usable_application_git_range": True,
+        "repository_metadata": True,
+    }
 
 
 def test_manifest_hash_mismatch_fails_closed(tmp_path):
@@ -221,6 +252,16 @@ def test_shortlist_rejects_inactive_projects(tmp_path):
 
     assert result["projects"] == []
     assert result["summary"]["exclusions"]["inactive_project"] == 3
+    assert {
+        row["disposition"] for row in result["evidence_matrix"]["rows"]
+    } == {"rejected"}
+    assert {
+        row["reason"] for row in result["evidence_matrix"]["rows"]
+    } == {"inactive_project"}
+    assert all(
+        row["assets"]["repository_metadata"]
+        for row in result["evidence_matrix"]["rows"]
+    )
 
 
 def test_unresolved_project_gate_retains_observed_metadata(tmp_path):
@@ -464,6 +505,15 @@ def test_shortlist_rejects_components_without_behavioral_evidence(tmp_path):
     assert "CVE-2026-0999" not in {
         item["component_id"] for item in result["projects"][0]["components"]
     }
+    rejected = next(
+        row
+        for row in result["evidence_matrix"]["rows"]
+        if row["component_id"] == "CVE-2026-0999"
+    )
+    assert rejected["disposition"] == "rejected"
+    assert rejected["reason"] == "no_behavioral_evidence"
+    assert rejected["assets"]["advisory_text"] is False
+    assert rejected["assets"]["exact_git_repair"] is True
 
 
 def test_withdrawn_record_can_bridge_active_aliases_without_being_retained(tmp_path):
@@ -731,6 +781,17 @@ def test_fast_lane_selects_seeded_alias_closure_and_retains_seed_only_gaps(tmp_p
     assert unresolved["fast_lane_memberships"] == components[0][
         "fast_lane_memberships"
     ]
+    matrix = next(
+        row
+        for row in result["evidence_matrix"]["rows"]
+        if row["component_id"] == "CVE-2026-9000"
+    )
+    assert matrix["disposition"] == "unresolved"
+    assert matrix["reason"] == "exact_git_repair_not_established"
+    assert matrix["assets"]["advisory_text"] is True
+    assert matrix["assets"]["exact_git_repair"] is False
+    assert matrix["assets"]["application_repository"] is True
+    assert matrix["assets"]["repository_metadata"] is False
     assert result["summary"]["candidate_projects"] == 1
     assert result["summary"]["unresolved_candidates"] == 1
 
@@ -771,6 +832,13 @@ def test_release_only_repair_stays_unresolved_before_git_reconstruction(tmp_path
     assert unresolved["repair_evidence"] == [
         {"range_type": "ECOSYSTEM", "package": "Vendor:example-app", "fixed": "2.1"}
     ]
+    matrix = next(
+        row
+        for row in result["evidence_matrix"]["rows"]
+        if row["component_id"] == "CVE-2026-2004"
+    )
+    assert matrix["assets"]["exact_git_repair"] is False
+    assert matrix["assets"]["fixed_release"] is True
 
 
 def test_unmanifested_archive_is_ignored(tmp_path):
@@ -1078,19 +1146,46 @@ def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
                 {
                     "package": {"ecosystem": "PyPI", "name": "example-app"},
                     "versions": ["1.1"],
+                    "ranges": [
+                        {
+                            "type": "GIT",
+                            "repo": "https://github.com/example/app",
+                            "events": [
+                                {"introduced": "a" * 40},
+                                {"fixed": "c" * 40},
+                            ],
+                        }
+                    ],
                 }
             ],
         },
     ]
-    with zipfile.ZipFile(raw_dir / "PyPI.zip", "w") as archive:
+    archive_path = raw_dir / "PyPI.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
         for index, record in enumerate(records):
             archive.writestr(f"record-{index}.json", json.dumps(record))
+    manifest = tmp_path / "osv_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "sources": [
+                    {
+                        "path": archive_path.name,
+                        "bytes": archive_path.stat().st_size,
+                        "sha256": hashlib.sha256(archive_path.read_bytes()).hexdigest(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     def component(identifier, priority):
         return {
             "component_id": identifier,
             "ids": [identifier],
-            "earliest_osv_publication": "2026-03-01T00:00:00+00:00",
+            "earliest_manifested_publication": "2026-03-01T00:00:00+00:00",
             "summaries": [identifier],
             "fixes": [
                 {
@@ -1106,11 +1201,12 @@ def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
     candidates_path.write_text(
         json.dumps(
             {
-                "date_cutoff": {
-                    "enabled": True,
-                    "published_after": "2026-02-16T23:59:59+00:00",
+                "schema_version": 4,
+                "sources": {
+                    "advisory_manifest": {
+                        "sha256": hashlib.sha256(manifest.read_bytes()).hexdigest()
+                    }
                 },
-                "priority_projects": [],
                 "projects": [
                     {
                         "repository": "example/app",
@@ -1121,12 +1217,17 @@ def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
                         ],
                     }
                 ],
+                "evidence_matrix": {"rows": []},
             }
         ),
         encoding="utf-8",
     )
 
-    result = generate_overlaps(candidates_path=candidates_path, raw_dir=raw_dir)
+    result = generate_overlaps(
+        candidates_path=candidates_path,
+        raw_dir=raw_dir,
+        manifest_path=manifest,
+    )
     project = result["projects"][0]
     lane = project["lanes"][0]
 
@@ -1140,7 +1241,10 @@ def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
         "CVE-2026-1002",
     ]
     assert lane["range_evaluation_required_at_maxima"] == []
-    assert lane["components_with_unevaluated_ranges"] == ["CVE-2026-1001"]
+    assert lane["components_with_unevaluated_ranges"] == [
+        "CVE-2026-1001",
+        "CVE-2026-1002",
+    ]
     assert project["components"][0]["project_git_ranges"] == [
         {
             "repo": "https://github.com/example/app",
@@ -1164,9 +1268,22 @@ def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
     scoped = generate_overlaps(
         candidates_path=candidates_path,
         raw_dir=raw_dir,
+        manifest_path=manifest,
         repository="example/app",
     )
     assert [item["repository"] for item in scoped["projects"]] == ["example/app"]
+
+
+def test_stage_two_rejects_legacy_candidate_schema(tmp_path):
+    candidates_path = tmp_path / "candidates.json"
+    candidates_path.write_text(json.dumps({"schema_version": 3}), encoding="utf-8")
+
+    try:
+        generate_overlaps(candidates_path=candidates_path, raw_dir=tmp_path)
+    except ValueError as error:
+        assert "requires candidate schema version 4" in str(error)
+    else:
+        raise AssertionError("Stage 2 accepted a legacy candidate schema")
 
 
 def test_git_range_resolution_finds_immutable_maximum(tmp_path):

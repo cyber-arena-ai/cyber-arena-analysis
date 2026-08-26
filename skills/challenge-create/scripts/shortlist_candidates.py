@@ -30,6 +30,17 @@ HEX40 = re.compile(r"[0-9a-fA-F]{40}")
 MAX_INACTIVITY_DAYS = 730
 NON_LICENSES = {None, "", "NOASSERTION", "OTHER"}
 BEHAVIOR_REFERENCE_TYPES = {"EVIDENCE"}
+EVIDENCE_ASSET_FIELDS = (
+    "advisory_text",
+    "exploit_evidence",
+    "cwe",
+    "affected_package",
+    "exact_git_repair",
+    "fixed_release",
+    "application_repository",
+    "usable_application_git_range",
+    "repository_metadata",
+)
 PROJECT_METADATA_FIELDS = (
     "url",
     "name",
@@ -494,6 +505,45 @@ def _fast_lane_fields(row: dict) -> dict:
     return {"fast_lane_memberships": row["fast_lane_memberships"]}
 
 
+def _evidence_matrix_row(
+    row: dict,
+    *,
+    disposition: str,
+    reason: str | None,
+    repository_metadata: bool,
+    repository: str | None = None,
+) -> dict:
+    assets = {
+        "advisory_text": bool(row["summaries"] or row["details"]),
+        "exploit_evidence": any(
+            reference["type"] in BEHAVIOR_REFERENCE_TYPES
+            for reference in row["references"]
+        ),
+        "cwe": bool(row["cwes"]),
+        "affected_package": bool(row["packages"]),
+        "exact_git_repair": any(
+            repair.get("sha") for repair in row["repair_evidence"]
+        ),
+        "fixed_release": any(
+            repair.get("fixed") for repair in row["repair_evidence"]
+        ),
+        "application_repository": bool(row["application_repository"]),
+        "usable_application_git_range": bool(row["application_git_ranges"])
+        and not any(item["blockers"] for item in row["application_git_ranges"]),
+        "repository_metadata": repository_metadata,
+    }
+    return {
+        "component_id": row["component_id"],
+        "disposition": disposition,
+        "reason": reason,
+        "repository": repository or row["application_repository"],
+        "earliest_manifested_publication": row[
+            "earliest_manifested_publication"
+        ],
+        "assets": assets,
+    }
+
+
 def _component_duplicate_matches(row: dict, duplicate_repositories: set[str]) -> list[str]:
     repositories = set(row["application_mapping"].get("candidate_repositories", []))
     if row["application_repository"]:
@@ -666,6 +716,7 @@ def generate(
             component["repository_roles"][role].update(repositories)
         component["git_ranges"].update(_git_range_evidence(record))
 
+    evidence_matrix_rows = {}
     unresolved = []
     rows_by_repository: dict[str, list[dict]] = defaultdict(list)
     for root, component in components.items():
@@ -676,13 +727,31 @@ def generate(
         if row["component_id"].startswith(("MAL-", "OSV-")) or any(
             "malicious code in " in summary.lower() for summary in summaries
         ):
+            evidence_matrix_rows[row["component_id"]] = _evidence_matrix_row(
+                row,
+                disposition="rejected",
+                reason="malicious_package_record",
+                repository_metadata=False,
+            )
             exclusions["malicious_package_record"] += 1
             continue
         if not row["behavioral_evidence"]:
+            evidence_matrix_rows[row["component_id"]] = _evidence_matrix_row(
+                row,
+                disposition="rejected",
+                reason="no_behavioral_evidence",
+                repository_metadata=False,
+            )
             exclusions["no_behavioral_evidence"] += 1
             continue
         row["duplicate_matches"] = sorted(duplicate_ids & set(row["ids"]))
         if not fixes[root]:
+            evidence_matrix_rows[row["component_id"]] = _evidence_matrix_row(
+                row,
+                disposition="unresolved",
+                reason="exact_git_repair_not_established",
+                repository_metadata=False,
+            )
             unresolved.append(
                 {
                     "component_id": row["component_id"],
@@ -703,6 +772,13 @@ def generate(
             continue
         repository = row["application_repository"]
         if not repository:
+            reason = row["application_mapping"]["reason"]
+            evidence_matrix_rows[row["component_id"]] = _evidence_matrix_row(
+                row,
+                disposition="unresolved",
+                reason=reason,
+                repository_metadata=False,
+            )
             unresolved.append(
                 {
                     "component_id": row["component_id"],
@@ -721,6 +797,12 @@ def generate(
         if not row["application_git_ranges"] or any(
             item["blockers"] for item in row["application_git_ranges"]
         ):
+            evidence_matrix_rows[row["component_id"]] = _evidence_matrix_row(
+                row,
+                disposition="unresolved",
+                reason="usable_application_git_range_not_established",
+                repository_metadata=False,
+            )
             unresolved.append(
                 {
                     "component_id": row["component_id"],
@@ -754,6 +836,13 @@ def generate(
             if metadata_cache_path is not None:
                 _write_metadata_cache(metadata_cache_path, metadata_cache)
         if project is None:
+            for row in component_rows:
+                evidence_matrix_rows[row["component_id"]] = _evidence_matrix_row(
+                    row,
+                    disposition="unresolved",
+                    reason="repository_metadata_not_found",
+                    repository_metadata=False,
+                )
             unresolved.append(
                 {
                     "repository": requested_repository,
@@ -776,6 +865,16 @@ def generate(
             raise InputError(f"invalid fetched repository identity for {requested_repository}")
         disposition, reason = _project_disposition(project)
         if disposition != "accepted":
+            for row in component_rows:
+                evidence_matrix_rows[row["component_id"]] = _evidence_matrix_row(
+                    row,
+                    disposition=(
+                        "unresolved" if disposition == "unresolved" else "rejected"
+                    ),
+                    reason=reason,
+                    repository_metadata=True,
+                    repository=canonical,
+                )
             item = {
                 "repository": canonical,
                 "requested_repository": requested_repository,
@@ -795,6 +894,14 @@ def generate(
             else:
                 exclusions[reason] += len(component_rows)
             continue
+        for row in component_rows:
+            evidence_matrix_rows[row["component_id"]] = _evidence_matrix_row(
+                row,
+                disposition="resolved",
+                reason=None,
+                repository_metadata=True,
+                repository=canonical,
+            )
         result = accepted_rows.setdefault(
             canonical,
             {
@@ -873,8 +980,11 @@ def generate(
     ]
     if fast_lane_mode:
         ordering.insert(0, "fast-lane priority")
+    disposition_counts = Counter(
+        row["disposition"] for row in evidence_matrix_rows.values()
+    )
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "method": "advisory_first_candidate_shortlist",
         "project_gates": {
             "maximum_inactivity_days": MAX_INACTIVITY_DAYS,
@@ -901,7 +1011,22 @@ def generate(
             "candidate_components": sum(len(item["components"]) for item in output_projects),
             "unresolved_candidates": len(unresolved),
             "review_entries": len(output_projects) + len(unresolved),
+            "component_dispositions": {
+                disposition: disposition_counts[disposition]
+                for disposition in ("resolved", "unresolved", "rejected")
+            },
             "exclusions": dict(sorted(exclusions.items())),
+        },
+        "evidence_matrix": {
+            "asset_fields": list(EVIDENCE_ASSET_FIELDS),
+            "asset_semantics": (
+                "true means the asset is present in the manifested Stage 1 "
+                "evidence; false does not prove it is absent upstream"
+            ),
+            "rows": [
+                evidence_matrix_rows[component_id]
+                for component_id in sorted(evidence_matrix_rows)
+            ],
         },
         "unresolved_candidates": sorted(
             unresolved,

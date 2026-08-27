@@ -19,19 +19,21 @@ Before Stage 2, locate the separate `cyber-arena-docs` checkout as
 1. Read [source-discovery.md](references/source-discovery.md) and
    [advisory-source-roles.md](references/advisory-source-roles.md) completely
    before Stage 1.
-2. Read [attack-scopes.json](references/attack-scopes.json) before proposing capability scopes. Treat
+2. Read [stage1-5-resolution.md](references/stage1-5-resolution.md) only when a
+   maintainer requests the optional Stage 1.5 evidence-resolution pass.
+3. Read [attack-scopes.json](references/attack-scopes.json) before proposing capability scopes. Treat
    advisory CWE weakness labels as root-cause evidence, not as the Technical
    Impact proved by a flag.
-3. Read [range-overlap.md](references/range-overlap.md) before Git resolution.
-4. Read `<docs-root>/docs/challenge-model.md` completely before semantic triage,
+4. Read [range-overlap.md](references/range-overlap.md) before Git resolution.
+5. Read `<docs-root>/docs/challenge-model.md` completely before semantic triage,
    runtime study, or authoring. It is the normative source of truth.
-5. Read [advisory-enrichment.md](references/advisory-enrichment.md) and
+6. Read [advisory-enrichment.md](references/advisory-enrichment.md) and
    [semantic-review.md](references/semantic-review.md) before semantic triage in
    Stage 2.
-6. Read [stage3-study.md](references/stage3-study.md) before runtime study.
-7. Read [dossier-template.md](references/dossier-template.md) when maintaining a
+7. Read [stage3-study.md](references/stage3-study.md) before runtime study.
+8. Read [dossier-template.md](references/dossier-template.md) when maintaining a
    research-shortlist dossier.
-8. Read `<orche-root>/docs/CHALLENGE_AUTHORING_SOP.md` completely before Stage
+9. Read `<orche-root>/docs/CHALLENGE_AUTHORING_SOP.md` completely before Stage
    4. Treat that file as the authoritative authoring contract.
 
 Keep vulnerability, exploit, defense, and flag material maintainer-only.
@@ -161,7 +163,31 @@ advisory corpus. Publish the updated sources and derived artifacts together to
 the designated Hugging Face dataset so its history preserves provenance. Never
 commit them to this repository.
 
+## Stage 1.5: optionally resolve ranked evidence gaps
+
+Skip this stage by default. Run it only when a maintainer asks to spend
+additional agent effort to increase Stage 2 coverage. Read
+[stage1-5-resolution.md](references/stage1-5-resolution.md) before delegating.
+
+Before spawning any subagent, tell the maintainer the exact unresolved rank
+interval and candidate IDs in scope, total candidate count, total number of
+subagents including nested agents, non-overlapping allocation, and stopping
+condition. Never expand those bounds implicitly. If the maintainer did not
+supply either the candidate range or agent count, propose both and obtain
+confirmation before spawning.
+
+Agents gather primary upstream evidence for the missing matrix assets, add it
+through supported Stage 1 source or metadata inputs, and rebuild
+`candidates.json`. They never hand-edit the candidate index or promote a row by
+judgment. End Stage 1.5 with the refreshed manifested source union, regenerated
+candidate index, and reranked view. Candidates that still lack required
+mechanical evidence remain outside Stage 2 with their exact gap stated.
+
 ## Stage 2: reconstruct and triage candidate windows
+
+Stage 2 accepts only repositories materialized under `candidates.json`'s
+`projects[]` after Stage 1 or optional Stage 1.5. Never send an unresolved or
+hard-rejected matrix row to Stage 2.
 
 First retain the exact-version audit context for every hard-gated project:
 

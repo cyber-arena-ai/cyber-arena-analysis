@@ -179,7 +179,22 @@ that a manifested `EVIDENCE` reference was observed; it is a PoC lead rather
 than proof of a runnable exploit. Resolved candidates precede unresolved
 candidates, and the score orders work within each disposition. It never
 promotes an unresolved component or changes a semantic verdict. Equal scores
-are ordered by component ID only for deterministic output.
+are ordered by component ID only for deterministic output. Use resolved rows
+for the ordinary Stage 2 queue. On maintainer request, Stage 1.5 instead uses
+an unresolved-only ranking as the bounded evidence-resolution queue:
+
+```bash
+python3 <skill-root>/scripts/rank_candidates.py \
+  --candidates artifacts/candidates.json \
+  --view artifacts/candidate-views/published-after-2026-02-16.json \
+  --bucket after \
+  --disposition unresolved \
+  --output artifacts/candidate-views/published-after-2026-02-16-unresolved-ranked.json
+```
+
+Read [stage1-5-resolution.md](stage1-5-resolution.md) before delegating that
+optional pass. It requires a maintainer-visible, bounded allocation before any
+subagent is spawned.
 
 ## Persistent result and resume boundary
 
@@ -194,7 +209,9 @@ are ordered by component ID only for deterministic output.
 - `projects[]`: accepted application repositories, observed GitHub metadata,
   duplicate context, and advisory components;
 - `unresolved_candidates[]`: application mappings or project facts requiring
-  bounded evidence gathering;
+  bounded evidence gathering. This is a detail projection for resume; Stage
+  1.5 selection comes from the hash-linked ranked matrix view, not from list
+  order here;
 - `summary.exclusions`: deterministic rejection counts;
 - `selection`: active fast lanes plus seeded, coverage, and selected-component
   counts;
@@ -210,5 +227,7 @@ under `candidates.json.sources`. Remove or replace it when intentionally
 refreshing mutable GitHub metadata.
 
 Resume Stage 1 by refreshing or correcting a source, updating its manifest
-entry, and rebuilding `candidates.json`. Continue to Stage 2 only with entries
-under `projects[]`; never silently promote an unresolved candidate.
+entry, and rebuilding `candidates.json`. Optionally run bounded Stage 1.5 on a
+maintainer-approved unresolved rank interval, then rebuild and rerank the same
+canonical result. Continue to Stage 2 only with entries under `projects[]`;
+never silently promote an unresolved candidate.

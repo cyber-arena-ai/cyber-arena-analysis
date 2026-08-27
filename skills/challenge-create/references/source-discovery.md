@@ -158,6 +158,29 @@ experimental model-knowledge boundary, not a tunable queue-size control or an
 authoritative disclosure-date claim. Rejected matrix rows remain in the
 canonical index for audit and do not enter a work-queue view.
 
+## 5. Rank a work queue
+
+Rank retained components by how much observed evidence is expected to reduce
+later-stage work. To rank every retained component in one date-view bucket:
+
+```bash
+python3 <skill-root>/scripts/rank_candidates.py \
+  --candidates artifacts/candidates.json \
+  --view artifacts/candidate-views/published-after-2026-02-16.json \
+  --bucket after \
+  --output artifacts/candidate-views/published-after-2026-02-16-ranked.json
+```
+
+The score gives the application repository 51 points, exploit evidence 20,
+an exact Git repair 14, a fixed release without an exact repair 7, a usable
+application Git range 5, and repository metadata 3. A component without an
+application repository scores zero. The existing `exploit_evidence` bit means
+that a manifested `EVIDENCE` reference was observed; it is a PoC lead rather
+than proof of a runnable exploit. Resolved candidates precede unresolved
+candidates, and the score orders work within each disposition. It never
+promotes an unresolved component or changes a semantic verdict. Equal scores
+are ordered by component ID only for deterministic output.
+
 ## Persistent result and resume boundary
 
 `artifacts/candidates.json` ends Stage 1. It contains:

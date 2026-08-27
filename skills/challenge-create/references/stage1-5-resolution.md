@@ -53,15 +53,63 @@ Add established evidence through a supported Stage 1 input: correct or add a
 complete normalized complementary record, update its manifest entry, or
 intentionally refresh the GitHub metadata cache. Do not edit
 `candidates.json`, a date view, or a ranked view by hand. If affirmative
-upstream evidence exists but the current Stage 1 schema cannot express or
-consume it, report a plumbing gap; do not manufacture readiness.
+upstream evidence cannot be represented by those sources, record only the
+maintainer-approved candidates in
+`artifacts/sources/stage1_5_evidence.json`. This hash-linked input carries two
+facts that ordinary sources cannot express reliably: immutable official service
+documentation and, when necessary, a direct repair with replacement application
+Git events. Keep each entry component-scoped so a bounded pass cannot promote
+other advisories from the same repository. Use schema version 1:
+
+```json
+{
+  "schema_version": 1,
+  "resolutions": [
+    {
+      "component_id": "CVE-2026-0001",
+      "repository": "owner/project",
+      "service_evidence": "https://github.com/owner/project/blob/0123456789abcdef0123456789abcdef01234567/README.md",
+      "repair": {
+        "commits": [{
+          "sha": "123456789abcdef0123456789abcdef012345678",
+          "affected_parent": "0123456789abcdef0123456789abcdef01234567",
+          "url": "https://github.com/owner/project/commit/123456789abcdef0123456789abcdef012345678"
+        }],
+        "events": [
+          {"introduced": "0"},
+          {"fixed": "123456789abcdef0123456789abcdef012345678"}
+        ]
+      }
+    }
+  ]
+}
+```
+
+Service evidence must be an immutable official GitHub blob URL. Repair URLs,
+commits, affected parents, and every range boundary must be exact. The fixed
+boundaries must equal the listed direct repairs. Omit `repair` when the
+manifested direct repair and Git range are already correct. This file has no
+verdict or promotion field: the shortlist validates the evidence and applies
+the ordinary mechanical gates.
 
 ## Recompute and stop
 
 After integrating the bounded evidence pass, rerun Stage 1 from the manifested
-union, recreate any requested date view, and rerank it. The persistent Stage
-1.5 result is the refreshed source provenance, regenerated `candidates.json`,
-and hash-linked ranked view.
+union with the additional input:
+
+```bash
+python3 <skill-root>/scripts/shortlist_candidates.py \
+  --raw-dir artifacts/sources/osv/raw \
+  --manifest artifacts/sources/osv/osv_manifest.json \
+  --duplicate-inventory artifacts/sources/challenge-inventory.json \
+  --metadata-cache artifacts/sources/github_repository_metadata.json \
+  --stage1-5-evidence artifacts/sources/stage1_5_evidence.json \
+  --output artifacts/candidates.json
+```
+
+Recreate any requested date view and rerank it. The persistent Stage 1.5 result
+is the hash-linked evidence input, refreshed source provenance, regenerated
+`candidates.json`, and ranked view.
 
 Report, within the declared candidate range:
 

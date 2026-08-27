@@ -194,7 +194,8 @@ python3 <skill-root>/scripts/rank_candidates.py \
 
 Read [stage1-5-resolution.md](stage1-5-resolution.md) before delegating that
 optional pass. It requires a maintainer-visible, bounded allocation before any
-subagent is spawned.
+subagent is spawned. After the pass, supply its validated evidence file with
+`--stage1-5-evidence`; do not use that option during ordinary Stage 1.
 
 ## Persistent result and resume boundary
 
@@ -216,6 +217,7 @@ subagent is spawned.
 - `selection`: active fast lanes plus seeded, coverage, and selected-component
   counts;
 - `sources`: hashes for the advisory manifest and optional inventory.
+  A Stage 1.5 rebuild also records the evidence-file path and hash.
 
 Optional files under `artifacts/candidate-views/` are derived queue views. Their
 source hash must match the current canonical index before use.

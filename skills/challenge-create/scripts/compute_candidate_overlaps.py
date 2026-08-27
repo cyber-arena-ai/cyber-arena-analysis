@@ -43,7 +43,7 @@ def _relevant_units(component: dict, repositories: set[str]) -> set[str]:
 def _compact_component(
     seed: dict, record_count: int, units: set[str], git_ranges: list[dict]
 ) -> dict:
-    return {
+    result = {
         "component_id": seed["component_id"],
         "ids": seed["ids"],
         "earliest_manifested_publication": seed.get(
@@ -70,6 +70,9 @@ def _compact_component(
         "affected_units": sorted(units),
         "project_git_ranges": git_ranges,
     }
+    if resolution := seed.get("stage1_5_resolution"):
+        result["stage1_5_resolution"] = resolution
+    return result
 
 
 def _project_git_ranges(component: dict, repositories: set[str]) -> list[dict]:
@@ -88,6 +91,16 @@ def _project_git_ranges(component: dict, repositories: set[str]) -> list[dict]:
                 key = json.dumps(compact, sort_keys=True)
                 ranges[key] = compact
     return [ranges[key] for key in sorted(ranges)]
+
+
+def _candidate_project_git_ranges(seed: dict) -> list[dict]:
+    return [
+        {
+            "repo": f"https://github.com/{item['repository']}",
+            "events": item["events"],
+        }
+        for item in seed.get("application_git_ranges", [])
+    ]
 
 
 def _components_with_ranges(components: list[dict], unit: str) -> list[str]:
@@ -240,12 +253,19 @@ def generate(
             }
             units = _relevant_units(component, repository_aliases)
             components.append(component)
+            repair_corrected = bool(
+                seed.get("stage1_5_resolution", {}).get("repair")
+            )
             compact_components.append(
                 _compact_component(
                     seed,
                     len(records),
                     units,
-                    _project_git_ranges(component, repository_aliases),
+                    (
+                        _candidate_project_git_ranges(seed)
+                        if repair_corrected
+                        else _project_git_ranges(component, repository_aliases)
+                    ),
                 )
             )
 

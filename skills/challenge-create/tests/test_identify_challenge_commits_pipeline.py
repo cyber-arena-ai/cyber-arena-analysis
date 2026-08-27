@@ -165,6 +165,7 @@ def _generate(
     fetch_repository=None,
     duplicate_inventory=None,
     metadata_cache=None,
+    stage1_5_evidence=None,
 ):
     raw_dir, manifest, _ = inputs
     return generate(
@@ -172,6 +173,7 @@ def _generate(
         manifest_path=manifest,
         duplicate_inventory_path=duplicate_inventory,
         metadata_cache_path=metadata_cache,
+        stage1_5_evidence_path=stage1_5_evidence,
         fetch_repository=fetch_repository or (lambda repository: _project(repository)),
     )
 
@@ -320,6 +322,149 @@ def test_service_metadata_heuristics_remain_unresolved(tmp_path):
         "conflicting_service_metadata"
     )
     assert "non_service_shape_indicated" not in library["summary"]["exclusions"]
+
+
+def test_stage1_5_evidence_promotes_only_scoped_components(tmp_path):
+    inputs = _inputs(tmp_path)
+    corrected = "7" * 40
+    evidence_path = tmp_path / "stage1_5_evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "resolutions": [
+                    {
+                        "component_id": "CVE-2026-0001",
+                        "repository": "example/app",
+                        "service_evidence": (
+                            f"https://github.com/example/app/blob/{corrected}/README.md"
+                        ),
+                        "repair": {
+                            "commits": [
+                                {
+                                    "sha": corrected,
+                                    "affected_parent": "6" * 40,
+                                    "url": (
+                                        "https://github.com/example/app/commit/"
+                                        + corrected
+                                    ),
+                                }
+                            ],
+                            "events": [
+                                {"introduced": "0"},
+                                {"fixed": corrected},
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = _generate(
+        inputs,
+        stage1_5_evidence=evidence_path,
+        fetch_repository=lambda repository: _project(
+            repository,
+            description="Dependency management library",
+            topics=[],
+        ),
+    )
+
+    project = result["projects"][0]
+    assert [item["component_id"] for item in project["components"]] == [
+        "CVE-2026-0001"
+    ]
+    component = project["components"][0]
+    assert component["stage1_5_resolution"]["component_id"] == "CVE-2026-0001"
+    assert component["fixes"] == [
+        {
+            "sha": corrected,
+            "source": "stage1_5_direct_repair",
+            "url": f"https://github.com/example/app/commit/{corrected}",
+        }
+    ]
+    assert component["application_git_ranges"] == [
+        {
+            "repository": "example/app",
+            "events": [{"introduced": "0"}, {"fixed": corrected}],
+            "blockers": [],
+        }
+    ]
+    unresolved_project = next(
+        item
+        for item in result["unresolved_candidates"]
+        if item.get("repository") == "example/app"
+    )
+    assert unresolved_project["component_ids"] == [
+        "CVE-2025-0001",
+        "CVE-2026-0002",
+    ]
+    assert result["sources"]["stage1_5_evidence"]["sha256"] == hashlib.sha256(
+        evidence_path.read_bytes()
+    ).hexdigest()
+
+    candidates_path = tmp_path / "candidates.json"
+    candidates_path.write_text(json.dumps(result), encoding="utf-8")
+    overlap = generate_overlaps(
+        candidates_path=candidates_path,
+        raw_dir=inputs[0],
+        manifest_path=inputs[1],
+    )
+    overlap_component = overlap["projects"][0]["components"][0]
+    assert overlap_component["project_git_ranges"] == [
+        {
+            "repo": "https://github.com/example/app",
+            "events": [{"introduced": "0"}, {"fixed": corrected}],
+        }
+    ]
+
+
+def test_stage1_5_evidence_rejects_unmatched_repair_boundaries(tmp_path):
+    inputs = _inputs(tmp_path)
+    evidence_path = tmp_path / "stage1_5_evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "resolutions": [
+                    {
+                        "component_id": "CVE-2026-0001",
+                        "repository": "example/app",
+                        "service_evidence": (
+                            "https://github.com/example/app/blob/"
+                            + "7" * 40
+                            + "/README.md"
+                        ),
+                        "repair": {
+                            "commits": [
+                                {
+                                    "sha": "7" * 40,
+                                    "affected_parent": "6" * 40,
+                                    "url": (
+                                        "https://github.com/example/app/commit/"
+                                        + "7" * 40
+                                    ),
+                                }
+                            ],
+                            "events": [
+                                {"introduced": "0"},
+                                {"fixed": "8" * 40},
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        _generate(inputs, stage1_5_evidence=evidence_path)
+    except InputError as error:
+        assert "invalid Stage 1.5 repair range" in str(error)
+    else:
+        raise AssertionError("inconsistent Stage 1.5 repair evidence was accepted")
 
 
 def test_github_metadata_cache_resumes_after_a_late_failure(tmp_path):

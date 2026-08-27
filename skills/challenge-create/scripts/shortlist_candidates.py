@@ -56,6 +56,11 @@ PROJECT_METADATA_FIELDS = (
 )
 METADATA_CACHE_SCHEMA_VERSION = 1
 MAX_RATE_LIMIT_WAIT_SECONDS = 60
+SERVICE_GATE_REASONS = {
+    "conflicting_service_metadata",
+    "deployable_service_not_established",
+    "non_service_shape_indicated",
+}
 
 
 class InputError(ValueError):
@@ -307,6 +312,70 @@ def _load_duplicate_inventory(path: Path | None) -> tuple[set[str], set[str]]:
     return repositories, advisory_ids
 
 
+def _load_stage1_5_evidence(path: Path | None) -> dict[str, dict]:
+    if path is None:
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != 1:
+        raise InputError("Stage 1.5 evidence must use schema_version 1")
+    resolutions = {}
+    for item in payload.get("resolutions", []):
+        if not isinstance(item, dict):
+            raise InputError("invalid Stage 1.5 resolution")
+        component_id = str(item.get("component_id", ""))
+        repository = _canonical_repository(item.get("repository"))
+        service_url = str(item.get("service_evidence", ""))
+        parsed = urlparse(service_url)
+        parts = [part for part in parsed.path.strip("/").split("/") if part]
+        if (
+            not component_id
+            or component_id in resolutions
+            or repository != item.get("repository")
+            or canonical_github_repo(service_url) != repository
+            or len(parts) < 5
+            or parts[2] != "blob"
+            or not HEX40.fullmatch(parts[3])
+        ):
+            raise InputError(f"invalid Stage 1.5 resolution: {component_id!r}")
+
+        resolution = {
+            "component_id": component_id,
+            "repository": repository,
+            "service_evidence": service_url,
+        }
+        if repair := item.get("repair"):
+            commits = repair.get("commits", [])
+            events = repair.get("events", [])
+            phases, blockers = parse_git_phases(events)
+            normalized = []
+            for commit in commits:
+                sha = str(commit.get("sha", "")).lower()
+                parent = str(commit.get("affected_parent", "")).lower()
+                url = str(commit.get("url", ""))
+                if (
+                    not HEX40.fullmatch(sha)
+                    or not HEX40.fullmatch(parent)
+                    or canonical_github_repo(url) != repository
+                    or _commit_from_url(url) != sha
+                ):
+                    raise InputError(f"invalid Stage 1.5 repair: {component_id}")
+                normalized.append({"sha": sha, "affected_parent": parent, "url": url})
+            fixed = {value for phase in phases for value in phase["fixed"]}
+            if (
+                not normalized
+                or blockers
+                or any(not phase["fixed"] for phase in phases)
+                or fixed != {commit["sha"] for commit in normalized}
+            ):
+                raise InputError(f"invalid Stage 1.5 repair range: {component_id}")
+            resolution["repair"] = {
+                "commits": sorted(normalized, key=lambda value: value["sha"]),
+                "events": events,
+            }
+        resolutions[component_id] = resolution
+    return resolutions
+
+
 def _rate_limit_delay(error: HTTPError) -> float | None:
     if error.code not in {403, 429}:
         return None
@@ -466,7 +535,7 @@ def _component_row(
         for value in sorted(component["git_ranges"])
         if (item := json.loads(value))["repository"] == repository
     ]
-    return {
+    row = {
         "component_id": _component_id(component["ids"]),
         "ids": sorted(component["ids"]),
         "earliest_manifested_publication": (
@@ -499,6 +568,9 @@ def _component_row(
             for priority, lane, source in sorted(fast_lane_memberships[root])
         ],
     }
+    if resolution := component.get("stage1_5_resolution"):
+        row["stage1_5_resolution"] = resolution
+    return row
 
 
 def _fast_lane_fields(row: dict) -> dict:
@@ -586,12 +658,14 @@ def generate(
     manifest_path: Path,
     duplicate_inventory_path: Path | None = None,
     metadata_cache_path: Path | None = None,
+    stage1_5_evidence_path: Path | None = None,
     fetch_repository=None,
 ) -> dict:
     manifest, archives = manifest_archives(raw_dir, manifest_path)
     duplicate_repositories, duplicate_ids = _load_duplicate_inventory(
         duplicate_inventory_path
     )
+    resolutions = _load_stage1_5_evidence(stage1_5_evidence_path)
     fetch_repository = fetch_repository or _github_repository
     metadata_cache = _load_metadata_cache(metadata_cache_path)
 
@@ -638,6 +712,23 @@ def generate(
         releases[root].update(item["releases"])
         if item["fast_lane_membership"]:
             fast_lane_memberships[root].add(item["fast_lane_membership"])
+
+    resolutions_by_root = {}
+    for component_id, resolution in resolutions.items():
+        if component_id not in aliases.parent:
+            raise InputError(f"Stage 1.5 component is absent from the corpus: {component_id}")
+        root = aliases.find(component_id)
+        if root in resolutions_by_root:
+            raise InputError(f"multiple Stage 1.5 resolutions target {component_id}")
+        resolutions_by_root[root] = resolution
+        if repair := resolution.get("repair"):
+            repository = resolution["repository"]
+            fixes[root] = {
+                item for item in fixes[root] if item[0] != repository
+            } | {
+                (repository, commit["sha"], "stage1_5_direct_repair", commit["url"])
+                for commit in repair["commits"]
+            }
 
     repair_roots = {
         root for root in set(fixes) | set(releases) if fixes[root] or releases[root]
@@ -715,6 +806,37 @@ def generate(
         for role, repositories in candidate_repository_roles(record).items():
             component["repository_roles"][role].update(repositories)
         component["git_ranges"].update(_git_range_evidence(record))
+
+    for root, resolution in resolutions_by_root.items():
+        component = components.get(root)
+        if component is None:
+            raise InputError(
+                "Stage 1.5 correction does not target a selected component: "
+                f"{_component_id({root})}"
+            )
+        repository, _ = _application_mapping(component)
+        if repository != resolution["repository"]:
+            raise InputError(
+                "Stage 1.5 correction repository does not match application mapping: "
+                f"{_component_id(component['ids'])}"
+            )
+        if repair := resolution.get("repair"):
+            component["git_ranges"] = {
+                value
+                for value in component["git_ranges"]
+                if json.loads(value)["repository"] != repository
+            }
+            component["git_ranges"].add(
+                json.dumps(
+                    {
+                        "repository": repository,
+                        "events": repair["events"],
+                        "blockers": [],
+                    },
+                    sort_keys=True,
+                )
+            )
+        component["stage1_5_resolution"] = resolution
 
     evidence_matrix_rows = {}
     unresolved = []
@@ -864,8 +986,15 @@ def generate(
         if not canonical:
             raise InputError(f"invalid fetched repository identity for {requested_repository}")
         disposition, reason = _project_disposition(project)
-        if disposition != "accepted":
-            for row in component_rows:
+        admitted = component_rows if disposition == "accepted" else []
+        blocked = [] if disposition == "accepted" else component_rows
+        scoped = [row for row in component_rows if row.get("stage1_5_resolution")]
+        if disposition == "unresolved" and reason in SERVICE_GATE_REASONS and scoped:
+            admitted = scoped
+            blocked = [row for row in component_rows if row not in scoped]
+
+        if blocked:
+            for row in blocked:
                 evidence_matrix_rows[row["component_id"]] = _evidence_matrix_row(
                     row,
                     disposition=(
@@ -878,13 +1007,13 @@ def generate(
             item = {
                 "repository": canonical,
                 "requested_repository": requested_repository,
-                "component_ids": sorted(row["component_id"] for row in component_rows),
+                "component_ids": sorted(row["component_id"] for row in blocked),
                 "reason": reason,
                 "project": _project_metadata(project, canonical),
                 "fast_lane_memberships": _combined_fast_lane_memberships(
-                    component_rows
+                    blocked
                 ),
-                "component_publications": _component_publications(component_rows),
+                "component_publications": _component_publications(blocked),
                 "duplicate_matches": sorted(
                     {requested_repository, canonical} & duplicate_repositories
                 ),
@@ -892,9 +1021,11 @@ def generate(
             if disposition == "unresolved":
                 unresolved.append(item)
             else:
-                exclusions[reason] += len(component_rows)
+                exclusions[reason] += len(blocked)
+
+        if not admitted:
             continue
-        for row in component_rows:
+        for row in admitted:
             evidence_matrix_rows[row["component_id"]] = _evidence_matrix_row(
                 row,
                 disposition="resolved",
@@ -920,7 +1051,7 @@ def generate(
             set(result["duplicate_matches"])
             | ({requested_repository, canonical} & duplicate_repositories)
         )
-        result["components"].extend(component_rows)
+        result["components"].extend(admitted)
 
     if metadata_cache_path is not None and not metadata_cache_path.exists():
         _write_metadata_cache(metadata_cache_path, metadata_cache)
@@ -971,6 +1102,11 @@ def generate(
         sources["github_metadata_cache"] = {
             "path": str(metadata_cache_path),
             "sha256": _sha256(metadata_cache_path),
+        }
+    if stage1_5_evidence_path:
+        sources["stage1_5_evidence"] = {
+            "path": str(stage1_5_evidence_path),
+            "sha256": _sha256(stage1_5_evidence_path),
         }
     ordering = [
         "advisory source diversity",
@@ -1060,6 +1196,11 @@ def main(argv: list[str] | None = None) -> int:
             "<output-dir>/sources/github_repository_metadata.json"
         ),
     )
+    parser.add_argument(
+        "--stage1-5-evidence",
+        type=Path,
+        help="validated project facts and direct-repair corrections from Stage 1.5",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     metadata_cache = args.metadata_cache or (
@@ -1071,6 +1212,7 @@ def main(argv: list[str] | None = None) -> int:
             manifest_path=args.manifest,
             duplicate_inventory_path=args.duplicate_inventory,
             metadata_cache_path=metadata_cache,
+            stage1_5_evidence_path=args.stage1_5_evidence,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(

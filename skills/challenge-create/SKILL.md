@@ -178,10 +178,13 @@ confirmation before spawning.
 
 Agents gather primary upstream evidence for the missing matrix assets, add it
 through supported Stage 1 source or metadata inputs, and rebuild
-`candidates.json`. They never hand-edit the candidate index or promote a row by
-judgment. End Stage 1.5 with the refreshed manifested source union, regenerated
-candidate index, and reranked view. Candidates that still lack required
-mechanical evidence remain outside Stage 2 with their exact gap stated.
+`candidates.json`. When official project facts or direct repairs cannot be
+represented by OSV or GitHub metadata, record the bounded result in the
+hash-linked Stage 1.5 evidence file defined by the reference. Never hand-edit
+the candidate index or promote a row by judgment. End Stage 1.5 with the
+refreshed manifested inputs, regenerated candidate index, and reranked view.
+Candidates that still lack required mechanical evidence remain outside Stage 2
+with their exact gap stated.
 
 ## Stage 2: reconstruct and triage candidate windows
 

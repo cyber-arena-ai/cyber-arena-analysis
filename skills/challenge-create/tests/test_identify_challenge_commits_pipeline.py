@@ -1474,11 +1474,30 @@ def test_git_range_resolution_finds_immutable_maximum(tmp_path):
             ],
         }
 
+    first = component("CVE-2026-1001", commits[2])
+    first["stage1_5_resolution"] = {
+        "component_id": "CVE-2026-1001",
+        "repository": "example/app",
+        "service_evidence": (
+            f"https://github.com/example/app/blob/{commits[0]}/README.md"
+        ),
+        "repair": {
+            "commits": [
+                {
+                    "sha": commits[2],
+                    "affected_parent": commits[1],
+                    "url": f"https://github.com/example/app/commit/{commits[2]}",
+                }
+            ],
+            "events": [{"introduced": "0"}, {"fixed": commits[2]}],
+        },
+    }
+
     result = resolve_project(
         {
             "repository": "example/app",
             "components": [
-                component("CVE-2026-1001", commits[2]),
+                first,
                 component("CVE-2026-1002", commits[3]),
             ],
         },
@@ -1511,6 +1530,84 @@ def test_git_range_resolution_finds_immutable_maximum(tmp_path):
     assert {item["component_id"] for item in packet["components"]} == {
         "CVE-2026-1001",
         "CVE-2026-1002",
+    }
+    packet_component = next(
+        item
+        for item in packet["components"]
+        if item["component_id"] == "CVE-2026-1001"
+    )
+    assert packet_component["stage1_5_resolution"] == first["stage1_5_resolution"]
+
+
+def test_stage1_5_repair_rejects_merge_and_mismatched_parent(tmp_path):
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+
+    def git(*arguments):
+        return subprocess.run(
+            ["git", "-C", str(repository), *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def commit(message):
+        git("commit", "--allow-empty", "-qm", message)
+        return git("rev-parse", "HEAD")
+
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    commit("root")
+    default_branch = git("branch", "--show-current")
+    git("checkout", "-qb", "repair")
+    repair_parent = commit("repair")
+    git("checkout", "-q", default_branch)
+    commit("main")
+    git("merge", "-q", "--no-ff", "repair", "-m", "merge")
+    merge_commit = git("rev-parse", "HEAD")
+    single_parent_commit = commit("after")
+
+    def component(identifier, fixed, affected_parent):
+        repair = {
+            "commits": [
+                {
+                    "sha": fixed,
+                    "affected_parent": affected_parent,
+                    "url": f"https://github.com/example/app/commit/{fixed}",
+                }
+            ],
+            "events": [{"introduced": "0"}, {"fixed": fixed}],
+        }
+        return {
+            "component_id": identifier,
+            "project_git_ranges": [
+                {
+                    "repo": "https://github.com/example/app",
+                    "events": repair["events"],
+                }
+            ],
+            "stage1_5_resolution": {"repair": repair},
+        }
+
+    result = resolve_project(
+        {
+            "repository": "example/app",
+            "components": [
+                component("merge", merge_commit, repair_parent),
+                component("mismatch", single_parent_commit, repair_parent),
+            ],
+        },
+        repository,
+    )
+
+    assert {
+        item["component_id"]: item["programmatic_details"]
+        for item in result["excluded_components"]
+    } == {
+        "merge": [f"stage1_5_repair_requires_single_parent:{merge_commit}"],
+        "mismatch": [
+            f"stage1_5_affected_parent_mismatch:{single_parent_commit}"
+        ],
     }
 
 

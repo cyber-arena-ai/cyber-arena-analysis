@@ -87,10 +87,13 @@ other advisories from the same repository. Use schema version 1:
 
 Service evidence must be an immutable official GitHub blob URL. Repair URLs,
 commits, affected parents, and every range boundary must be exact. The fixed
-boundaries must equal the listed direct repairs. Omit `repair` when the
-manifested direct repair and Git range are already correct. This file has no
-verdict or promotion field: the shortlist validates the evidence and applies
-the ordinary mechanical gates.
+boundaries must equal the listed direct repairs. Each listed repair commit must
+have exactly one Git parent, and that parent must equal `affected_parent`;
+Stage 2 verifies both conditions. Do not list a merge commit as the direct
+repair: locate its underlying single-parent repair commit instead. Omit
+`repair` when the manifested direct repair and Git range are already correct.
+This file has no verdict or promotion field: the shortlist validates the
+evidence and applies the ordinary mechanical gates.
 
 ## Recompute and stop
 

@@ -111,6 +111,14 @@ def fetch_missing_boundaries(project: dict, repository_path: Path) -> list[str]:
         for value in event.values()
         if str(value) != "0" and HEX40.fullmatch(str(value).lower())
     }
+    commits.update(
+        str(commit.get("affected_parent", "")).lower()
+        for component in project["components"]
+        for commit in component.get("stage1_5_resolution", {})
+        .get("repair", {})
+        .get("commits", [])
+        if HEX40.fullmatch(str(commit.get("affected_parent", "")).lower())
+    )
     for commit in sorted(commits):
         if _has_commit(repository_path, commit):
             continue
@@ -426,6 +434,12 @@ def resolve_project(
         parsed_ranges = []
         component_sources: dict[str, list[dict]] = defaultdict(list)
         fixed_boundaries = set()
+        stage1_5_parents = {
+            commit["sha"]: commit["affected_parent"]
+            for commit in component.get("stage1_5_resolution", {})
+            .get("repair", {})
+            .get("commits", [])
+        }
         for affected_range in component.get("project_git_ranges", []):
             phases, range_blockers = parse_git_phases(affected_range.get("events", []))
             range_reasons.extend(range_blockers)
@@ -443,6 +457,18 @@ def resolve_project(
                         range_reasons.append(f"missing_commit:{fixed}")
                         continue
                     parents = commit_info(fixed)["parents"]
+                    selected_parent = stage1_5_parents.get(fixed)
+                    if selected_parent is not None:
+                        if len(parents) != 1:
+                            range_reasons.append(
+                                f"stage1_5_repair_requires_single_parent:{fixed}"
+                            )
+                            continue
+                        if parents[0] != selected_parent:
+                            range_reasons.append(
+                                f"stage1_5_affected_parent_mismatch:{fixed}"
+                            )
+                            continue
                     if not parents:
                         range_reasons.append(f"fixed_commit_without_parent:{fixed}")
                     else:
@@ -669,10 +695,13 @@ def _packet_component(component: dict) -> dict:
         "verified_fix_boundaries",
         "introduced_from_origin",
     )
-    return {key: component.get(key) for key in fields} | {
+    packet = {key: component.get(key) for key in fields} | {
         "detail_excerpts": detail_excerpts,
         "full_evidence_sources": component.get("sources", []),
     }
+    if "stage1_5_resolution" in component:
+        packet["stage1_5_resolution"] = component["stage1_5_resolution"]
+    return packet
 
 
 def _markdown(result: dict) -> str:

@@ -33,8 +33,10 @@ Before Stage 2, locate the separate `cyber-arena-docs` checkout as
 7. Read [stage3-study.md](references/stage3-study.md) before runtime study.
 8. Read [dossier-template.md](references/dossier-template.md) when maintaining a
    research-shortlist dossier.
-9. Read `<orche-root>/docs/CHALLENGE_AUTHORING_SOP.md` completely before Stage
-   4. Treat that file as the authoritative authoring contract.
+9. Read [stage4-authoring.md](references/stage4-authoring.md) and
+   `<orche-root>/docs/CHALLENGE_AUTHORING_SOP.md` from the locked orchestration
+   commit completely before authoring in Stage 4. Treat the SOP at that commit
+   as the implemented authoring contract.
 
 Keep vulnerability, exploit, defense, and flag material maintainer-only.
 
@@ -67,6 +69,7 @@ artifacts/
     │       └── evidence/
     ├── stage3/
     ├── stage4/
+    │   ├── result.json
     │   ├── warehouse/
     │   └── pr-report.md
     └── review/
@@ -327,27 +330,26 @@ wrong capability or admit an obvious shortcut.
 
 ## Stage 4: author and register
 
-Treat the accepted Stage 3 study as the vulnerability and capability contract.
-Before assigning implementation work, lock one coherent orchestration checkout
-and challenge-warehouse base revision, then smoke-test the shared authoring
-interfaces at those exact commits. Record both revisions with the Stage 4
-result; if their interfaces disagree, resolve that shared boundary before
-authoring the challenge.
+Read [stage4-authoring.md](references/stage4-authoring.md) and execute its gates
+in order. Treat the accepted Stage 3 study as the semantic contract; Stage 4
+packages and validates it without changing its objective, scope, oracle,
+boundary, or witness.
 
-Create an independent Git worktree from the current challenge-warehouse
-`origin/main` at `artifacts/projects/OWNER__PROJECT/stage4/warehouse`. Enable
-sparse checkout for `_registry` and `<contributor>/<challenge>`; do not
-materialize unrelated challenge packages.
+Use orchestration commit
+`3070fdb4a3dbca59be66110b29ba60a296f3c899` and one exact warehouse base
+commit. Do not substitute a branch tip. Give both hashes to every implementation
+agent. Before authoring a batch at a new locked pair, smoke-test external
+warehouse selection once. Run every framework-facing experiment and verifier
+command from a clean orchestration worktree at the locked hash. Create the
+challenge worktree from the locked warehouse base at
+`artifacts/projects/OWNER__PROJECT/stage4/warehouse`.
 
-Follow `<orche-root>/docs/CHALLENGE_AUTHORING_SOP.md` to implement the smallest
-complete package in that worktree. Run the canonical static, build, and game
-verification path from orchestration with the worktree selected as the
-challenge warehouse. Modify orchestration only when the challenge requires a
-genuine framework change.
-
-Do not proceed to independent admission review until the registered challenge
-passes the canonical verifier. Hand the result to `$challenge-review`; do not
-review your own implementation through this skill.
+Stage 4 is atomic: intermediate fixes live only in the worktree. Write the
+fixed-schema `stage4/result.json` only after the final clean warehouse commit
+passes registration, the canonical static/build/game gates, the defense
+controls, and an accepted attacker-container PoV. Then hand the registered
+challenge to `$challenge-review`; do not review your own implementation through
+this skill.
 
 ## Optional human dossier
 
@@ -381,10 +383,11 @@ exactly four headings:
 - **PoC:** summarize attacker prerequisites, the public attack path, the
   vulnerable operation, and the observed result; cite the retained runnable
   evidence instead of copying a large payload.
-- **Flags and capabilities:** name every planted store, where the flag is placed,
-  and the registered attacker capability and CWE Technical Impact that
-  recovering it proves. One PoC may prove flags on an overlapping attack chain;
-  materially independent paths need independent PoCs.
+- **Flags and capabilities:** name every objective store, its registered
+  capability and CWE Technical Impact, assigned oracle, public target when
+  applicable, and the evidence or observed region that receives credit. One PoC
+  may prove objectives on an overlapping attack chain; materially independent
+  paths need independent PoCs.
 
 Reuse Stage 1–4 evidence and current upstream facts. Cite repository paths or
 direct links, date mutable popularity data, state unknowns instead of guessing,

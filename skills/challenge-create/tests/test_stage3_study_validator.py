@@ -70,8 +70,34 @@ def _study(tmp_path: Path, packet: Path, *, outcome="ready_for_authoring") -> Pa
     (study / "reproduce.py").write_text("# reproduction\n", encoding="utf-8")
     (study / "evidence/vulnerable.txt").write_text("observed\n", encoding="utf-8")
     (study / "evidence/fixed.txt").write_text("blocked\n", encoding="utf-8")
+    contract = {
+        "schema_version": 1,
+        "facts": [
+            {
+                "area": area,
+                "requirement": f"Preserve {area} requirement.",
+                "evidence": ["evidence/vulnerable.txt"],
+            }
+            for area in ("access", "runtime", "behavior", "measurement")
+        ],
+        "open_questions": (
+            [
+                {
+                    "area": "runtime",
+                    "question": "Does replacement preserve state?",
+                    "disposition": "blocking",
+                    "reason": "The lifecycle has not been exercised.",
+                }
+            ]
+            if outcome == "needs_study"
+            else []
+        ),
+    }
+    (study / "stage4-contract.json").write_text(
+        json.dumps(contract, indent=2) + "\n", encoding="utf-8"
+    )
     result = {
-        "schema_version": 2,
+        "schema_version": 3,
         "repository": "example/app",
         "source_packet": packet.name,
         "source_packet_sha256": hashlib.sha256(packet.read_bytes()).hexdigest(),
@@ -81,6 +107,7 @@ def _study(tmp_path: Path, packet: Path, *, outcome="ready_for_authoring") -> Pa
         "outcome": outcome,
         "artifacts": {
             "study": "STAGE3_STUDY.md",
+            "stage4_contract": "stage4-contract.json",
             "environment": ["compose.yaml"],
             "reproduction": "reproduce.py",
             "evidence": ["evidence/vulnerable.txt", "evidence/fixed.txt"],
@@ -148,6 +175,67 @@ def test_ready_study_requires_vulnerable_and_fixed_evidence(tmp_path):
 
     assert result.returncode == 1
     assert "requires vulnerable and fixed evidence" in result.stdout
+
+
+def test_ready_study_requires_stage4_contract(tmp_path):
+    packet = _packet(tmp_path)
+    review = _review(tmp_path, packet)
+    study = _study(tmp_path, packet)
+    result_path = study / "result.json"
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    del payload["artifacts"]["stage4_contract"]
+    result_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = _run(packet, review, study)
+
+    assert result.returncode == 1
+    assert "artifacts.stage4_contract must be" in result.stdout
+
+
+def test_ready_contract_requires_all_fact_areas(tmp_path):
+    packet = _packet(tmp_path)
+    review = _review(tmp_path, packet)
+    study = _study(tmp_path, packet)
+    contract_path = study / "stage4-contract.json"
+    payload = json.loads(contract_path.read_text(encoding="utf-8"))
+    payload["facts"] = payload["facts"][:-1]
+    contract_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = _run(packet, review, study)
+
+    assert result.returncode == 1
+    assert "requires contract facts for: measurement" in result.stdout
+
+
+def test_contract_evidence_must_be_declared(tmp_path):
+    packet = _packet(tmp_path)
+    review = _review(tmp_path, packet)
+    study = _study(tmp_path, packet)
+    (study / "extra.txt").write_text("extra\n", encoding="utf-8")
+    contract_path = study / "stage4-contract.json"
+    payload = json.loads(contract_path.read_text(encoding="utf-8"))
+    payload["facts"][0]["evidence"] = ["extra.txt"]
+    contract_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = _run(packet, review, study)
+
+    assert result.returncode == 1
+    assert "is not declared in result.json" in result.stdout
+
+
+def test_needs_study_contract_requires_blocking_question(tmp_path):
+    packet = _packet(tmp_path)
+    review = _review(tmp_path, packet)
+    study = _study(tmp_path, packet, outcome="needs_study")
+    contract_path = study / "stage4-contract.json"
+    payload = json.loads(contract_path.read_text(encoding="utf-8"))
+    payload["open_questions"] = []
+    contract_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = _run(packet, review, study)
+
+    assert result.returncode == 1
+    assert "needs_study requires a blocking question" in result.stdout
 
 
 def test_artifacts_cannot_escape_study_directory(tmp_path):

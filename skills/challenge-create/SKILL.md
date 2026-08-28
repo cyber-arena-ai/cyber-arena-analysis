@@ -306,9 +306,14 @@ and fixed comparison, understood attack chain and affected features, and a
 natural trial witness without an obvious dominant shortcut. Confirm every
 proposed scope by mapping its live witness to the scope's registered CWE
 Technical Impact. Local flag tiers express progression or partial credit, not
-universal severity.
+universal severity. Run the cheap rejection checks before building the fixed
+case, exercise the authoring-shaped replacement lifecycle only for survivors,
+and promote only a clean-room reproduction bundle. For `ready_for_authoring`
+and `needs_study`, preserve the general Stage 4 contract defined by the
+reference; do not invent application-specific manifest fields.
 
-Validate only the study's mechanical linkage and artifact presence:
+Validate only the study's mechanical linkage, artifact closure, and Stage 4
+contract consistency:
 
 ```bash
 python3 <skill-root>/scripts/validate_stage3_study.py \
@@ -324,6 +329,12 @@ wrong capability or admit an obvious shortcut.
 ## Stage 4: author and register
 
 Treat the accepted Stage 3 study as the vulnerability and capability contract.
+Before assigning implementation work, lock one coherent orchestration checkout
+and challenge-warehouse base revision, then smoke-test the shared authoring
+interfaces at those exact commits. Record both revisions with the Stage 4
+result; if their interfaces disagree, resolve that shared boundary before
+authoring the challenge.
+
 Create an independent Git worktree from the current challenge-warehouse
 `origin/main` at `artifacts/projects/OWNER__PROJECT/stage4/warehouse`. Enable
 sparse checkout for `_registry` and `<contributor>/<challenge>`; do not

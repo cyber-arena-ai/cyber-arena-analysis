@@ -70,6 +70,11 @@ maintained material instead of copying it between repositories.
 - Retain curation and review evidence under this repository's ignored
   `artifacts/projects/<OWNER>__<PROJECT>/` tree. Put disposable clones, build
   trees, containers, and failed experiments in `/tmp`.
+- During parallel challenge work, assign each challenge one owning write agent,
+  one warehouse worktree, and one `artifacts/projects/<OWNER>__<PROJECT>/`
+  directory. Supporting agents may inspect the work but must return evidence to
+  the owner instead of editing its worktree. Use unique Docker names for
+  concurrent challenge and review runs.
 - Implement a challenge only in `challenge-warehouse/<contributor>/<challenge>/`.
   Each package exports exactly one concrete `Challenge` subclass, uses a
   globally unique kebab-case `Challenge.name`, and provides `build.py` with

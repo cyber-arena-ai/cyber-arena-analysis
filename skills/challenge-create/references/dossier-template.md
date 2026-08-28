@@ -5,8 +5,8 @@ retained pipeline artifacts. Replace every placeholder, remove rows that do not
 apply, and do not copy this material into an agent prompt.
 
 Write one dossier for every retained candidate application. Preserve the full
-chronological context needed to understand the selected window: include
-promising, uncertain, and low-potential evidence when it affects window or
+source context needed to understand the selected revision: include promising,
+uncertain, and low-potential evidence when it affects revision or
 scenario selection. Intermediate JSON is evidence for this report, not a
 substitute for it.
 
@@ -37,22 +37,21 @@ portfolio value directly. Do not include opaque popularity scores or ranks.>
 
 <Record configuration or dependency choices needed to make the boundary real.>
 
-## Candidate windows
+## Revision candidates
 
-| Priority | Checkpoint | Reported advisory components | Scenario potential | Deferred checks |
-| ---: | --- | --- | --- | --- |
-| 1 | [`<40-hex commit>`](<immutable commit URL>) | `<component IDs>` | promising / uncertain / low_potential | <Exact implementation checks.> |
+| Priority | Repair parent | Repair | Fallback range claim | Vulnerability | Scenario potential | Deferred checks |
+| ---: | --- | --- | --- | --- | --- | --- |
+| 1 | [`<40-hex commit>`](<immutable commit URL>) | [`<40-hex repair>`](<immutable repair URL>) | `<RANGE-id>` | `<component ID>` | promising / uncertain / low_potential | <Exact implementation checks.> |
 
 <List approximately three to five alternatives when the history provides
-them. Explain the selection signals and identify the first implementation
+them. Explain the evidence and identify the first implementation
 choice plus fallbacks without claiming any is already exploitable.>
 
-## Advisory-history and overlap evidence
+## Advisory repair and range claims
 
-<Record the ordered release checkpoints, reported-present component counts,
-maximal overlap plateau, incompatible alternative windows, unresolved native
-ranges, and package/tag-namespace conflicts. Do not call a range match
-dynamically confirmed.>
+<Record the source-linked repair and range claims, disagreements, disjoint
+phases, and package or tag-namespace conflicts. Do not merge claims or call a
+range dynamically confirmed.>
 
 ## Historical vulnerability-to-scope probes
 
@@ -88,7 +87,8 @@ dynamically confirmed.>
 
 ## Final adversarial questions
 
-1. Which reported `Vi` paths actually coexist at each candidate checkpoint?
+1. Does the selected repair parent reproduce the chosen `Vi`, or is bounded
+   search within its selected range claim required?
 2. Can the stated identity reach each path without a hidden victim or privilege?
 3. Does each scope describe the demonstrated outcome, map to one CWE Technical
    Impact, and avoid treating the advisory's CWE weakness label as proof?

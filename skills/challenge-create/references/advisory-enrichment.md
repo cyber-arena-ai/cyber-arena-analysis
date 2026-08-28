@@ -26,9 +26,9 @@ Retain the primary URL for every claim used in the review.
 
 ## Bounded method
 
-1. Start from one shortlisted repository and its schema-v2 semantic packet.
-2. Search the upstream security history around the packet's selected releases,
-   fixes, and affected feature families.
+1. Start from one shortlisted repository and its schema-v3 semantic packet.
+2. Search the upstream security history around the packet's selected repair,
+   fallback range claim, and affected feature family.
 3. Resolve aliases, package identities, fix commits, and release containment.
 4. Decide how each complementary record relates to the retained packet:
    - **supporting evidence** clarifies the actor, behavior, feature, or repair;
@@ -38,12 +38,12 @@ Retain the primary URL for every claim used in the review.
 5. Put supporting and alias evidence directly in the semantic review with a
    precise claim. Do not add a new component id to `selected_component_ids`
    unless the packet contains it.
-6. If a new component changes the selected affected set or historical window,
+6. If a new component changes the selected repair candidate or source claims,
    normalize its complete OSV-shaped record into a hash-listed advisory archive
    as specified by [source-discovery.md](source-discovery.md), then rerun Stage
    1 and the mechanical Stage 2 resolver against that same manifest. Until
    then, return `uncertain`; do not maintain a parallel hand-built Git
-   chronology.
+   claim set.
 
 ## Duplicate screening
 

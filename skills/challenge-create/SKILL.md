@@ -1,12 +1,12 @@
 ---
 name: challenge-create
-description: Run the OSS Cyber Arena workflow from source discovery through Git-window reconstruction, semantic triage, Docker feasibility study, challenge-warehouse authoring, registration, and PR handoff. Use when discovering or validating historical OSS revisions, implementing a ready candidate in challenge-warehouse, registering it, or documenting it for submission. Do not use for independent admission review.
+description: Run the OSS Cyber Arena workflow from source discovery through repair-parent selection, semantic triage, Docker feasibility study, challenge-warehouse authoring, registration, and PR handoff. Use when discovering or validating historical OSS revisions, implementing a ready candidate in challenge-warehouse, registering it, or documenting it for submission. Do not use for independent admission review.
 ---
 
 # Challenge create
 
 Discover advisory-linked self-hosted network applications and historical Git
-windows that may support Cyber Arena challenges. Treat early results as
+revisions that may support Cyber Arena challenges. Treat early results as
 hypotheses, not confirmed vulnerabilities or challenge admissions.
 
 ## Read first
@@ -24,7 +24,7 @@ Before Stage 2, locate the separate `cyber-arena-docs` checkout as
 3. Read [attack-scopes.json](references/attack-scopes.json) before proposing capability scopes. Treat
    advisory CWE weakness labels as root-cause evidence, not as the Technical
    Impact proved by a flag.
-4. Read [range-overlap.md](references/range-overlap.md) before Git resolution.
+4. Read [revision-selection.md](references/revision-selection.md) before Git resolution.
 5. Read `<docs-root>/docs/challenge-model.md` completely before semantic triage,
    runtime study, or authoring. It is the normative source of truth.
 6. Read [advisory-enrichment.md](references/advisory-enrichment.md) and
@@ -61,9 +61,9 @@ artifacts/
 ├── candidate-views/                  # optional hash-linked queue views
 └── projects/OWNER__PROJECT/
     ├── stage2/
-    │   ├── overlaps/overlap_data/OWNER__PROJECT.json
-    │   ├── git-windows/OWNER__PROJECT.json
-    │   ├── git-windows/semantic_packets/OWNER__PROJECT.json
+    │   ├── revision-claims/revision_data/OWNER__PROJECT.json
+    │   ├── revision-candidates/OWNER__PROJECT.json
+    │   ├── revision-candidates/semantic_packets/OWNER__PROJECT.json
     │   └── semantic-reviews/
     │       ├── OWNER__PROJECT.json
     │       └── evidence/
@@ -80,7 +80,7 @@ it into project directories. Large archives may use Hugging Face/LFS, but the
 paths or artifact references recorded in `candidates.json` must remain
 retrievable. Git caches and Stage 1–3 source worktrees are not required pipeline
 artifacts. Retain the Stage 4 warehouse worktree at
-`artifacts/projects/OWNER__PROJECT/stage4/warehouse`. Generated overlap
+`artifacts/projects/OWNER__PROJECT/stage4/warehouse`. Generated revision-claim
 Markdown and human dossiers are not required pipeline artifacts. Do not create
 per-project README or status-summary files; the structured stage artifacts are
 authoritative.
@@ -189,51 +189,49 @@ refreshed manifested inputs, regenerated candidate index, and reranked view.
 Candidates that still lack required mechanical evidence remain outside Stage 2
 with their exact gap stated.
 
-## Stage 2: reconstruct and triage candidate windows
+## Stage 2: resolve and triage revision candidates
 
 Stage 2 accepts only repositories materialized under `candidates.json`'s
 `projects[]` after Stage 1 or optional Stage 1.5. Never send an unresolved or
 hard-rejected matrix row to Stage 2.
 
-First retain the exact-version audit context for every hard-gated project:
+First retain each advisory's repair and affected-range assertions as independent,
+source-linked claims:
 
 ```bash
-python3 <skill-root>/scripts/compute_candidate_overlaps.py \
+python3 <skill-root>/scripts/prepare_revision_claims.py \
   --candidates artifacts/candidates.json \
-  --raw-dir artifacts/sources/osv/raw \
   --manifest artifacts/sources/osv/osv_manifest.json \
   --repository OWNER/PROJECT \
-  --output-dir artifacts/projects/OWNER__PROJECT/stage2/overlaps
+  --output-dir artifacts/projects/OWNER__PROJECT/stage2/revision-claims
 ```
 
-Then resolve affected Git ranges against cached commit graphs:
+Then resolve each claimed repair's sole parent against a cached commit graph:
 
 ```bash
-python3 <skill-root>/scripts/resolve_git_windows.py \
-  --overlap-dir artifacts/projects/OWNER__PROJECT/stage2/overlaps/overlap_data \
+python3 <skill-root>/scripts/resolve_revision_candidates.py \
+  --claim-dir artifacts/projects/OWNER__PROJECT/stage2/revision-claims/revision_data \
   --repo-cache /tmp/cyber-arena-git-cache \
-  --output-dir artifacts/projects/OWNER__PROJECT/stage2/git-windows
+  --output-dir artifacts/projects/OWNER__PROJECT/stage2/revision-candidates
 ```
 
-Update the project's stable Stage 2 paths together. The resolver rejects
-components whose Git range, disjoint phase, fix, or fix parent cannot be
-resolved. It evaluates fix-parent event points, separates incomparable
-lineages, records the complete chronology, and retains up to five windows per
-application using widest-overlap then marginal component-set diversity. It
-refreshes the cached upstream refs and evaluates current `HEAD` separately.
-Use `--offline-cache` only for a bounded test; the packet will mark HEAD
-freshness as unverified.
+Update the project's stable Stage 2 paths together. Alias-linked records remain
+one deduplicated vulnerability, but no commit is computed to cover multiple
+vulnerabilities. The resolver validates each affected-range claim independently
+and emits one revision candidate for each single-parent repair commit: the sole
+parent is the primary trial commit and source-linked affected ranges are
+fallback search bounds. Conflicting ranges remain visible; their union is never
+treated as verified affected truth. Use `--offline-cache` only for a bounded
+test with all required Git objects already cached.
 
 `semantic_packets/*.json` is the semantic-triage input. A packet is ready when
-it has at least one non-empty, commit-resolved, evidence-complete historical window.
+it has at least one repair-parent candidate with a structurally valid,
+source-linked fallback range.
 This does not establish self-hostability, feature presence, reachability,
-scope, exploitability, or challenge depth. A non-clean HEAD assessment does not
-invalidate historical windows, but it blocks the corpus-limited
-mostly-secure-HEAD claim until reviewed.
+scope, exploitability, or challenge depth.
 
 When the requested stop boundary is programmatic discovery, stop here and
-report the retained applications, selected windows, exclusions, and HEAD
-caveats.
+report the retained applications, independent revision candidates, and exclusions.
 
 ### Semantic triage
 
@@ -282,7 +280,7 @@ Validate a completed review batch:
 
 ```bash
 python3 <skill-root>/scripts/validate_semantic_reviews.py \
-  --packet-dir artifacts/projects/OWNER__PROJECT/stage2/git-windows/semantic_packets \
+  --packet-dir artifacts/projects/OWNER__PROJECT/stage2/revision-candidates/semantic_packets \
   --review-dir artifacts/projects/OWNER__PROJECT/stage2/semantic-reviews \
   --scope-registry <skill-root>/references/attack-scopes.json
 ```
@@ -293,15 +291,15 @@ Stage 3 input. Do not begin runtime study from the packet alone or from an
 
 ### Stage 2 result and resume boundary
 
-The persistent result is the exact Git-window result, schema-v2 semantic packet,
-schema-v4 semantic review, and retained evidence extracts. The review is
+The persistent result is the independent revision-candidate result, schema-v3
+semantic packet, schema-v5 semantic review, and retained evidence extracts. The review is
 hash-linked to its packet. Resume Stage 3 only from a validated `promising`
 review; resume an `uncertain` result in Stage 2.
 
 ## Stage 3: runnable feasibility study
 
 Read [stage3-study.md](references/stage3-study.md) and study one proposed
-challenge kernel from one selected window in a disposable Docker environment.
+challenge kernel from one selected revision candidate in a disposable Docker environment.
 Retain the feasibility study under the project's `stage3/` directory; keep
 disposable source worktrees, containers, and images in `/tmp`. Establish the
 four proof obligations in that reference: exact target, reproduced primitive
@@ -319,7 +317,7 @@ Validate only the study's mechanical linkage and artifact closure:
 
 ```bash
 python3 <skill-root>/scripts/validate_stage3_study.py \
-  --packet artifacts/projects/OWNER__PROJECT/stage2/git-windows/semantic_packets/OWNER__PROJECT.json \
+  --packet artifacts/projects/OWNER__PROJECT/stage2/revision-candidates/semantic_packets/OWNER__PROJECT.json \
   --review artifacts/projects/OWNER__PROJECT/stage2/semantic-reviews/OWNER__PROJECT.json \
   --study-dir artifacts/projects/OWNER__PROJECT/stage3/<study-name>
 ```

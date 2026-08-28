@@ -1,4 +1,4 @@
 interface:
   display_name: "Challenge Create"
   short_description: "Curate OSS candidates and draft challenge PR reports"
-  default_prompt: "Use $challenge-create to discover OSS candidates, resolve historical windows, produce a focused runnable feasibility study, or assemble a concise challenge PR report from completed evidence."
+  default_prompt: "Use $challenge-create to discover OSS candidates, resolve independent repair-parent revisions, produce a focused runnable feasibility study, or assemble a concise challenge PR report from completed evidence."

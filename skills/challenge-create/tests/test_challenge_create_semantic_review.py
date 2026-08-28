@@ -11,130 +11,26 @@ VALIDATOR = Path(__file__).resolve().parents[1] / "scripts/validate_semantic_rev
 def _write_packet(packet_dir: Path) -> Path:
     packet_dir.mkdir()
     packet = {
-        "schema_version": 2,
+        "schema_version": 3,
         "repository": "example/app",
-        "components": [{"component_id": "CVE-2026-1001"}],
-        "candidate_windows": [
+        "components": [
             {
-                "window_id": "W1",
-                "component_ids": ["CVE-2026-1001"],
-                "representative_checkpoint": "a" * 40,
+                "component_id": "CVE-2026-1001",
+                "range_claims": [{"claim_id": "RANGE-1"}],
+            }
+        ],
+        "revision_candidates": [
+            {
+                "candidate_id": "CVE-2026-1001@" + "b" * 40,
+                "component_id": "CVE-2026-1001",
+                "repair_commit": "b" * 40,
+                "primary_commit": "a" * 40,
+                "fallback_range_claim_ids": ["RANGE-1"],
             }
         ],
     }
     path = packet_dir / "EXAMPLE__APP.json"
     path.write_text(json.dumps(packet, indent=2) + "\n", encoding="utf-8")
-    return path
-
-
-def _application(status: str = "promising") -> dict:
-    is_promising = status == "promising"
-    return {
-        "status": status,
-        "self_hosted_network_app": "yes" if is_promising else "no",
-        "natural_security_boundary": "yes" if is_promising else "no",
-        "deployment_model": "A self-hosted network service.",
-        "public_surfaces": ["Object API"] if is_promising else [],
-        "identities": ["Low-privilege user"] if is_promising else [],
-        "protected_assets": ["Tenant object"] if is_promising else [],
-        "legitimate_workflows": ["Authorized object read"] if is_promising else [],
-        "rationale": "Upstream documentation establishes the application shape.",
-        "evidence": [
-            {
-                "type": "upstream",
-                "url": "https://github.com/example/app",
-                "claim": "The project is a self-hosted network service.",
-            }
-        ],
-        "uncertainties": [],
-    }
-
-
-def _write_legacy_review(review_dir: Path, packet_path: Path) -> Path:
-    review_dir.mkdir()
-    clusters = [
-        {
-            "cluster_id": "C1",
-            "component_ids": ["CVE-2026-1001"],
-            "entry_surface": "Object API",
-            "affected_component": "Authorization layer",
-            "starting_privilege": "Low-privilege user",
-            "likely_capabilities": ["Unauthorized application read"],
-            "rationale": "The record describes the same entry surface and boundary.",
-        }
-    ]
-    assessments = [
-        {
-            "component_id": "CVE-2026-1001",
-            "cluster_id": "C1",
-            "status": "promising",
-            "attacker_start": "Authenticated low-privilege user.",
-            "public_feature": "Normal object-read API.",
-            "protected_target": "Another tenant's protected object.",
-            "security_boundary": "Tenant ownership boundary.",
-            "primitive_hypothesis": "The advisory reports an ownership bypass.",
-            "candidate_scopes": [
-                {
-                    "scope_id": "app.cross_boundary.read",
-                    "confidence": "plausible",
-                    "capability_hypothesis": "The bypass may disclose a protected object.",
-                    "witness_hypothesis": "Rotate an object under another tenant.",
-                    "required_effects": ["Read the protected object."],
-                    "policy_result": "eligible",
-                    "assumptions": [],
-                    "deferred_checks": ["Confirm the endpoint at the checkpoint."],
-                }
-            ],
-            "evidence": [
-                {
-                    "type": "advisory",
-                    "url": "https://example.com/advisory",
-                    "claim": "The advisory describes behavior and role.",
-                },
-                {
-                    "type": "fix",
-                    "url": "https://github.com/example/app/commit/" + "b" * 40,
-                    "claim": "The exact patch repairs the invariant.",
-                },
-            ],
-            "uncertainties": [],
-        }
-    ]
-    windows = [
-        {
-            "window_id": "W1",
-            "commit": "a" * 40,
-            "component_ids": ["CVE-2026-1001"],
-            "status": "promising",
-            "representative_component_ids": ["CVE-2026-1001"],
-            "scenario_hypothesis": "A user reads another tenant's object.",
-            "candidate_scope_ids": ["app.cross_boundary.read"],
-            "rationale": "Public evidence supports a natural boundary hypothesis.",
-            "assumptions": [],
-            "deferred_checks": ["Build and reproduce the exact checkpoint."],
-        }
-    ]
-    review = {
-        "schema_version": 3,
-        "repository": "example/app",
-        "source_packet": packet_path.name,
-        "source_packet_sha256": hashlib.sha256(packet_path.read_bytes()).hexdigest(),
-        "review_basis": "public_evidence_only",
-        "dynamic_testing_performed": False,
-        "application": _application(),
-        "clusters": clusters,
-        "advisory_assessments": assessments,
-        "windows": windows,
-        "review_budget": {
-            "maximum_advisory_assessments": 3,
-            "reviewed_advisory_assessments": len(assessments),
-            "early_stop_reason": "The representative is sufficient for prioritization.",
-        },
-        "status": "promising",
-        "rationale": "The overall status follows the application and windows.",
-    }
-    path = review_dir / packet_path.name
-    path.write_text(json.dumps(review, indent=2) + "\n", encoding="utf-8")
     return path
 
 
@@ -151,15 +47,17 @@ def _write_review(
     repair_artifact.write_text("repair behavior\n", encoding="utf-8")
     operability_artifact.write_text("official deployment behavior\n", encoding="utf-8")
     review = {
-        "schema_version": 4,
+        "schema_version": 5,
         "repository": "example/app",
         "source_packet": packet_path.name,
         "source_packet_sha256": hashlib.sha256(packet_path.read_bytes()).hexdigest(),
         "review_basis": "public_evidence_and_bounded_source_review",
         "decision": {
             "verdict": verdict,
-            "window_id": "W1",
-            "commit": "a" * 40,
+            "candidate_id": "CVE-2026-1001@" + "b" * 40,
+            "repair_commit": "b" * 40,
+            "primary_commit": "a" * 40,
+            "fallback_range_claim_id": "RANGE-1",
             "selected_component_ids": ["CVE-2026-1001"],
             "candidate_scope_ids": (
                 [] if verdict == "low_potential" else ["app.cross_boundary.read"]
@@ -322,27 +220,31 @@ def test_semantic_validator_allows_early_application_exclusion(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_semantic_validator_accepts_legacy_schema_three(tmp_path):
+def test_semantic_validator_rejects_legacy_schema_three(tmp_path):
     packet_dir = tmp_path / "packets"
     review_dir = tmp_path / "reviews"
     packet = _write_packet(packet_dir)
-    _write_legacy_review(review_dir, packet)
+    review_dir.mkdir()
+    (review_dir / packet.name).write_text(
+        json.dumps({"schema_version": 3}), encoding="utf-8"
+    )
 
     result = subprocess.run(
         _command(tmp_path, packet_dir, review_dir), capture_output=True, text=True
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 1
+    assert "schema-version 5" in result.stdout
 
 
-def test_semantic_validator_rejects_unregistered_scope_and_missing_window(tmp_path):
+def test_semantic_validator_rejects_unregistered_scope_and_missing_candidate(tmp_path):
     packet_dir = tmp_path / "packets"
     review_dir = tmp_path / "reviews"
     packet = _write_packet(packet_dir)
     review_path = _write_review(review_dir, packet)
     review = json.loads(review_path.read_text(encoding="utf-8"))
     review["decision"]["candidate_scope_ids"] = ["host.unknown"]
-    review["decision"]["window_id"] = "W2"
+    review["decision"]["candidate_id"] = "CVE-2026-9999@" + "f" * 40
     review_path.write_text(json.dumps(review), encoding="utf-8")
 
     result = subprocess.run(
@@ -351,16 +253,16 @@ def test_semantic_validator_rejects_unregistered_scope_and_missing_window(tmp_pa
 
     assert result.returncode == 1
     assert "decision uses unregistered scope host.unknown" in result.stdout
-    assert "decision.window_id is outside the source packet" in result.stdout
+    assert "decision.candidate_id is outside the source packet" in result.stdout
 
 
-def test_semantic_validator_rejects_window_identity_drift(tmp_path):
+def test_semantic_validator_rejects_candidate_identity_drift(tmp_path):
     packet_dir = tmp_path / "packets"
     review_dir = tmp_path / "reviews"
     packet = _write_packet(packet_dir)
     review_path = _write_review(review_dir, packet)
     review = json.loads(review_path.read_text(encoding="utf-8"))
-    review["decision"]["commit"] = "b" * 40
+    review["decision"]["repair_commit"] = "c" * 40
     review["decision"]["selected_component_ids"] = ["CVE-2026-9999"]
     review_path.write_text(json.dumps(review), encoding="utf-8")
 
@@ -369,8 +271,8 @@ def test_semantic_validator_rejects_window_identity_drift(tmp_path):
     )
 
     assert result.returncode == 1
-    assert "decision.commit does not match the selected source window" in result.stdout
-    assert "decision selects a component outside the selected window" in result.stdout
+    assert "decision.repair_commit does not match the selected candidate" in result.stdout
+    assert "decision selects a component outside the source packet" in result.stdout
 
 
 def test_semantic_validator_rejects_unretained_or_untyped_evidence(tmp_path):

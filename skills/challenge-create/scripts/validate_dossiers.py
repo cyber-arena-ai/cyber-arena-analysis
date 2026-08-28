@@ -12,7 +12,7 @@ from pathlib import Path
 REQUIRED_HEADERS = (
     "## Why it is a good candidate",
     "## Proposed scenario",
-    "## Candidate windows",
+    "## Revision candidates",
     "## Historical vulnerability-to-scope probes",
     "## Provisional multiflag capability envelope",
 )

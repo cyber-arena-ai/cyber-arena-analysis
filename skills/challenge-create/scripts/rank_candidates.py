@@ -120,8 +120,8 @@ def generate(
 
     candidates_sha256 = _sha256(candidates_path)
     payload = json.loads(candidates_path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") != 4:
-        raise InputError("candidate ranking requires candidate schema version 4")
+    if payload.get("schema_version") != 5:
+        raise InputError("candidate ranking requires candidate schema version 5")
     matrix = payload.get("evidence_matrix")
     if not isinstance(matrix, dict) or not isinstance(matrix.get("rows"), list):
         raise InputError("candidate index requires evidence_matrix rows")

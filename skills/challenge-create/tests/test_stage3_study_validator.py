@@ -7,7 +7,10 @@ from pathlib import Path
 
 VALIDATOR = Path(__file__).resolve().parents[1] / "scripts/validate_stage3_study.py"
 COMMIT = "a" * 40
+REPAIR = "b" * 40
 COMPONENT = "CVE-2026-1001"
+CANDIDATE = f"{COMPONENT}@{REPAIR}"
+RANGE_CLAIM = "RANGE-1"
 
 
 def _packet(tmp_path: Path) -> Path:
@@ -15,13 +18,16 @@ def _packet(tmp_path: Path) -> Path:
     path.write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "repository": "example/app",
-                "candidate_windows": [
+                "components": [{"component_id": COMPONENT}],
+                "revision_candidates": [
                     {
-                        "window_id": "W1",
-                        "representative_checkpoint": COMMIT,
-                        "component_ids": [COMPONENT],
+                        "candidate_id": CANDIDATE,
+                        "component_id": COMPONENT,
+                        "repair_commit": REPAIR,
+                        "primary_commit": COMMIT,
+                        "fallback_range_claim_ids": [RANGE_CLAIM],
                     }
                 ],
             },
@@ -38,7 +44,7 @@ def _review(tmp_path: Path, packet: Path, *, verdict="promising") -> Path:
     path.write_text(
         json.dumps(
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "repository": "example/app",
                 "source_packet": packet.name,
                 "source_packet_sha256": hashlib.sha256(
@@ -46,8 +52,10 @@ def _review(tmp_path: Path, packet: Path, *, verdict="promising") -> Path:
                 ).hexdigest(),
                 "decision": {
                     "verdict": verdict,
-                    "window_id": "W1",
-                    "commit": COMMIT,
+                    "candidate_id": CANDIDATE,
+                    "repair_commit": REPAIR,
+                    "primary_commit": COMMIT,
+                    "fallback_range_claim_id": RANGE_CLAIM,
                     "selected_component_ids": [COMPONENT],
                 },
             },
@@ -63,7 +71,8 @@ def _study(tmp_path: Path, packet: Path, *, outcome="ready_for_authoring") -> Pa
     study = tmp_path / "study"
     (study / "evidence").mkdir(parents=True)
     (study / "STAGE3_STUDY.md").write_text(
-        f"# Study\n\nCommit: `{COMMIT}`\n\nComponent: `{COMPONENT}`\n",
+        f"# Study\n\nVulnerable: `{COMMIT}`\n\nRepair: `{REPAIR}`\n\n"
+        f"Range: `{RANGE_CLAIM}`\n\nComponent: `{COMPONENT}`\n",
         encoding="utf-8",
     )
     (study / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
@@ -71,12 +80,16 @@ def _study(tmp_path: Path, packet: Path, *, outcome="ready_for_authoring") -> Pa
     (study / "evidence/vulnerable.txt").write_text("observed\n", encoding="utf-8")
     (study / "evidence/fixed.txt").write_text("blocked\n", encoding="utf-8")
     result = {
-        "schema_version": 3,
+        "schema_version": 4,
         "repository": "example/app",
         "source_packet": packet.name,
         "source_packet_sha256": hashlib.sha256(packet.read_bytes()).hexdigest(),
-        "window_id": "W1",
-        "commit": COMMIT,
+        "candidate_id": CANDIDATE,
+        "repair_commit": REPAIR,
+        "primary_commit": COMMIT,
+        "fallback_range_claim_id": RANGE_CLAIM,
+        "reproduced_commit": COMMIT,
+        "fallback_search_used": False,
         "selected_component_ids": [COMPONENT],
         "outcome": outcome,
         "artifacts": {
@@ -120,19 +133,19 @@ def test_ready_study_passes_with_linked_runtime_artifacts(tmp_path):
     assert "PASS" in result.stdout
 
 
-def test_ready_study_rejects_wrong_window_commit(tmp_path):
+def test_ready_study_rejects_unreported_fallback_commit(tmp_path):
     packet = _packet(tmp_path)
     review = _review(tmp_path, packet)
     study = _study(tmp_path, packet)
     result_path = study / "result.json"
     payload = json.loads(result_path.read_text(encoding="utf-8"))
-    payload["commit"] = "b" * 40
+    payload["reproduced_commit"] = "c" * 40
     result_path.write_text(json.dumps(payload), encoding="utf-8")
 
     result = _run(packet, review, study)
 
     assert result.returncode == 1
-    assert "commit does not match" in result.stdout
+    assert "must equal primary_commit" in result.stdout
 
 
 def test_ready_study_requires_vulnerable_and_fixed_evidence(tmp_path):
@@ -190,3 +203,18 @@ def test_uncertain_semantic_review_cannot_advance(tmp_path):
 
     assert result.returncode == 1
     assert "semantic review is not eligible for Stage 3" in result.stdout
+
+
+def test_rejected_study_may_record_no_reproduced_commit(tmp_path):
+    packet = _packet(tmp_path)
+    review = _review(tmp_path, packet)
+    study = _study(tmp_path, packet, outcome="rejected")
+    result_path = study / "result.json"
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    payload["reproduced_commit"] = None
+    payload["artifacts"] = {"study": "STAGE3_STUDY.md"}
+    result_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = _run(packet, review, study)
+
+    assert result.returncode == 0, result.stdout + result.stderr

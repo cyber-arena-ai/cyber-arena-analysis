@@ -37,7 +37,7 @@ def _write_inputs(tmp_path: Path, *, scope: str = "host.file.read") -> tuple[Pat
                 "",
                 "> The attacker begins as a user. The target is protected data. Defenders must preserve normal reads. The task does not grant administrator access.",
                 "",
-                "## Candidate windows",
+                "## Revision candidates",
                 "",
                 "| Priority | Checkpoint | Reported advisory components | Scenario potential | Deferred checks |",
                 "| ---: | --- | --- | --- | --- |",

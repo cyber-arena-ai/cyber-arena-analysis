@@ -14,15 +14,23 @@ sys.path.insert(0, str(SCRIPT_DIR))
 import shortlist_candidates  # noqa: E402
 from shortlist_candidates import InputError, generate  # noqa: E402
 from osv_history import CorpusError  # noqa: E402
-from compute_candidate_overlaps import (  # noqa: E402
-    _repository_records,
-    generate as generate_overlaps,
-)
-from resolve_git_windows import (  # noqa: E402
+from prepare_revision_claims import generate as prepare_claims  # noqa: E402
+from resolve_revision_candidates import (  # noqa: E402
     refresh_repository,
     resolve_project,
     write_outputs,
 )
+
+
+def prepare_revision_claims(
+    *, candidates_path, manifest_path, repository=None, raw_dir=None
+):
+    del raw_dir
+    return prepare_claims(
+        candidates_path=candidates_path,
+        manifest_path=manifest_path,
+        repository=repository,
+    )
 
 
 def _record(identifier, published, commit, *, aliases=(), withdrawn=None):
@@ -183,7 +191,7 @@ def test_canonical_index_preserves_all_dates_and_aliases_do_not_double_count(tmp
 
     result = _generate(inputs)
 
-    assert result["schema_version"] == 4
+    assert result["schema_version"] == 5
     assert "date_cutoff" not in result
     assert [
         component["component_id"]
@@ -229,6 +237,51 @@ def test_canonical_index_preserves_all_dates_and_aliases_do_not_double_count(tmp
         "usable_application_git_range": True,
         "repository_metadata": True,
     }
+
+
+def test_one_invalid_alias_range_does_not_hide_a_valid_claim(tmp_path):
+    raw_dir, manifest, archive_path = _inputs(tmp_path)
+    with zipfile.ZipFile(archive_path, "a") as archive:
+        archive.writestr(
+            "invalid-alias-range.json",
+            json.dumps(
+                {
+                    "id": "GHSA-invalid-range-claim",
+                    "aliases": ["CVE-2026-0002"],
+                    "published": "2026-04-02T00:00:00Z",
+                    "summary": "Conflicting range claim",
+                    "affected": [
+                        {
+                            "package": {
+                                "ecosystem": "PyPI",
+                                "name": "example-app",
+                            },
+                            "ranges": [
+                                {
+                                    "type": "GIT",
+                                    "repo": "https://github.com/example/app",
+                                    "events": [{"introduced": "0"}],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ),
+        )
+    _refresh_source(manifest, archive_path)
+
+    result = _generate((raw_dir, manifest, archive_path))
+    component = next(
+        item
+        for item in result["projects"][0]["components"]
+        if item["component_id"] == "CVE-2026-0002"
+    )
+
+    assert len(component["application_range_claims"]) == 2
+    assert sorted(
+        bool(item["blockers"])
+        for item in component["application_range_claims"]
+    ) == [False, True]
 
 
 def test_manifest_hash_mismatch_fails_closed(tmp_path):
@@ -377,20 +430,17 @@ def test_stage1_5_evidence_promotes_only_scoped_components(tmp_path):
     ]
     component = project["components"][0]
     assert component["stage1_5_resolution"]["component_id"] == "CVE-2026-0001"
-    assert component["fixes"] == [
-        {
-            "sha": corrected,
-            "source": "stage1_5_direct_repair",
-            "url": f"https://github.com/example/app/commit/{corrected}",
-        }
+    assert component["fixes"][0]["sha"] == corrected
+    assert component["fixes"][0]["source"] == "stage1_5_direct_repair"
+    assert component["fixes"][0]["claim_id"].startswith("FIX-")
+    assert component["fixes"][0]["provenance"]["database"] == "stage1_5"
+    assert component["application_range_claims"][0]["events"] == [
+        {"introduced": "0"},
+        {"fixed": corrected},
     ]
-    assert component["application_git_ranges"] == [
-        {
-            "repository": "example/app",
-            "events": [{"introduced": "0"}, {"fixed": corrected}],
-            "blockers": [],
-        }
-    ]
+    assert component["application_range_claims"][0]["claim_id"].startswith(
+        "RANGE-"
+    )
     unresolved_project = next(
         item
         for item in result["unresolved_candidates"]
@@ -406,17 +456,14 @@ def test_stage1_5_evidence_promotes_only_scoped_components(tmp_path):
 
     candidates_path = tmp_path / "candidates.json"
     candidates_path.write_text(json.dumps(result), encoding="utf-8")
-    overlap = generate_overlaps(
+    prepared = prepare_revision_claims(
         candidates_path=candidates_path,
         raw_dir=inputs[0],
         manifest_path=inputs[1],
     )
-    overlap_component = overlap["projects"][0]["components"][0]
-    assert overlap_component["project_git_ranges"] == [
-        {
-            "repo": "https://github.com/example/app",
-            "events": [{"introduced": "0"}, {"fixed": corrected}],
-        }
+    prepared_component = prepared["projects"][0]["components"][0]
+    assert prepared_component["range_claims"] == component[
+        "application_range_claims"
     ]
 
 
@@ -565,60 +612,6 @@ def test_github_metadata_retries_a_short_rate_limit(monkeypatch):
 
     assert project["repository"] == "example/app"
     assert sleeps == [0.0]
-
-
-def test_package_rename_records_expand_to_a_fixed_point():
-    direct = {
-        "source_archive": "test.zip",
-        "source_member": "direct.json",
-        "record": {
-            "affected": [
-                {
-                    "package": {"ecosystem": "PyPI", "name": "old-name"},
-                    "ranges": [
-                        {
-                            "type": "GIT",
-                            "repo": "https://github.com/example/app",
-                            "events": [{"introduced": "0"}, {"fixed": "a" * 40}],
-                        }
-                    ],
-                }
-            ]
-        },
-    }
-    renamed = {
-        "source_archive": "test.zip",
-        "source_member": "renamed.json",
-        "record": {
-            "affected": [
-                {
-                    "package": {"ecosystem": "PyPI", "name": "new-name"},
-                    "versions": ["2.0"],
-                }
-            ]
-        },
-    }
-    bridge = {
-        "source_archive": "test.zip",
-        "source_member": "bridge.json",
-        "record": {
-            "affected": [
-                {"package": {"ecosystem": "PyPI", "name": "old-name"}},
-                {"package": {"ecosystem": "PyPI", "name": "new-name"}},
-            ]
-        },
-    }
-
-    selected = _repository_records(
-        [direct, renamed, bridge], {"example/app"}, strict=True
-    )
-
-    assert [item["source_member"] for item in selected] == [
-        "direct.json",
-        "bridge.json",
-        "renamed.json",
-    ]
-    assert selected[-1]["record"]["affected"][0]["versions"] == ["2.0"]
 
 
 def test_shortlist_rejects_components_without_behavioral_evidence(tmp_path):
@@ -831,7 +824,7 @@ def test_manifested_complementary_record_survives_stage_two(tmp_path):
     candidates = _generate((raw_dir, manifest, archive_path))
     candidates_path = tmp_path / "candidates.json"
     candidates_path.write_text(json.dumps(candidates), encoding="utf-8")
-    overlap = generate_overlaps(
+    prepared = prepare_revision_claims(
         candidates_path=candidates_path,
         raw_dir=raw_dir,
         manifest_path=manifest,
@@ -839,14 +832,18 @@ def test_manifested_complementary_record_survives_stage_two(tmp_path):
 
     component = next(
         item
-        for item in overlap["projects"][0]["components"]
+        for item in prepared["projects"][0]["components"]
         if item["component_id"] == "CVE-2026-2003"
     )
-    assert component["raw_record_count"] == 1
-    assert component["affected_units"] == ["Vendor:example-app"]
-    assert "CVE-2026-2003" not in overlap["projects"][0][
-        "components_without_raw_records"
-    ]
+    assert component["packages"] == ["Vendor:example-app"]
+    assert component["range_claims"][0]["provenance"] == {
+        "archive": "vendor.zip",
+        "member": "vendor-record.json",
+        "database": "vendor-advisory",
+        "record_ids": ["CVE-2026-2003"],
+        "affected_index": 0,
+        "range_index": 1,
+    }
 
 
 def test_fast_lane_selects_seeded_alias_closure_and_retains_seed_only_gaps(tmp_path):
@@ -1031,7 +1028,7 @@ def test_duplicate_inventory_is_review_context_not_a_popularity_gate(tmp_path):
     assert component["duplicate_matches"] == ["CVE-2026-0002"]
 
 
-def test_stage_two_excludes_foreign_package_only_alias_records(tmp_path):
+def test_stage_two_preserves_alias_context_without_manufacturing_a_range(tmp_path):
     raw_dir, manifest, archive_path = _inputs(tmp_path)
     foreign = {
         "id": "VENDOR-FOREIGN",
@@ -1052,7 +1049,7 @@ def test_stage_two_excludes_foreign_package_only_alias_records(tmp_path):
     candidates_path = tmp_path / "candidates.json"
     candidates_path.write_text(json.dumps(candidates), encoding="utf-8")
 
-    overlap = generate_overlaps(
+    prepared = prepare_revision_claims(
         candidates_path=candidates_path,
         raw_dir=raw_dir,
         manifest_path=manifest,
@@ -1060,11 +1057,12 @@ def test_stage_two_excludes_foreign_package_only_alias_records(tmp_path):
 
     component = next(
         item
-        for item in overlap["projects"][0]["components"]
+        for item in prepared["projects"][0]["components"]
         if item["component_id"] == "CVE-2026-0002"
     )
-    assert component["affected_units"] == ["PyPI:example-app"]
-    assert component["raw_record_count"] == 1
+    assert component["packages"] == ["PyPI:example-app", "PyPI:foreign-package"]
+    assert len(component["range_claims"]) == 1
+    assert component["range_claims"][0]["repository"] == "example/app"
 
 
 def test_repository_redirect_preserves_advisory_identity(tmp_path):
@@ -1127,16 +1125,18 @@ def test_repository_redirect_preserves_advisory_identity(tmp_path):
     )
     candidates_path = tmp_path / "candidates.json"
     candidates_path.write_text(json.dumps(result), encoding="utf-8")
-    overlap = generate_overlaps(
+    prepared = prepare_revision_claims(
         candidates_path=candidates_path,
         raw_dir=raw_dir,
         manifest_path=manifest,
     )
-    assert overlap["projects"][0]["repository_aliases"] == [
+    assert prepared["projects"][0]["repository_aliases"] == [
         "example/app",
         "example/renamed",
     ]
-    assert overlap["projects"][0]["components_without_raw_records"] == []
+    assert prepared["projects"][0]["component_count"] == len(
+        prepared["projects"][0]["components"]
+    )
 
 
 def test_stage_two_rejects_a_different_manifest(tmp_path):
@@ -1149,7 +1149,7 @@ def test_stage_two_rejects_a_different_manifest(tmp_path):
     manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
 
     try:
-        generate_overlaps(
+        prepare_revision_claims(
             candidates_path=candidates_path,
             raw_dir=raw_dir,
             manifest_path=manifest,
@@ -1241,20 +1241,22 @@ def test_generated_candidate_reaches_the_git_resolver(tmp_path):
     )
     candidates_path = tmp_path / "candidates.json"
     candidates_path.write_text(json.dumps(candidates), encoding="utf-8")
-    overlap = generate_overlaps(
+    prepared = prepare_revision_claims(
         candidates_path=candidates_path,
         raw_dir=raw_dir,
         manifest_path=manifest,
     )
 
-    result = resolve_project(overlap["projects"][0], repository)
+    result = resolve_project(prepared["projects"][0], repository)
 
     assert result["component_count"] == 1
-    assert result["rejected_component_count"] == 0
-    assert result["candidate_window_count"] == 1
+    assert result["excluded_component_count"] == 0
+    assert result["revision_candidate_count"] == 1
+    assert result["revision_candidates"][0]["primary_commit"] == commits[0]
+    assert result["revision_candidates"][0]["repair_commit"] == commits[1]
 
 
-def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
+def test_prepared_claims_keep_vulnerabilities_independent(tmp_path):
     raw_dir = tmp_path / "raw"
     raw_dir.mkdir()
     records = [
@@ -1327,6 +1329,7 @@ def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
     )
 
     def component(identifier, priority):
+        suffix = identifier[-1]
         return {
             "component_id": identifier,
             "ids": [identifier],
@@ -1334,9 +1337,36 @@ def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
             "summaries": [identifier],
             "fixes": [
                 {
-                    "sha": f"{int(identifier[-1]):040x}",
+                    "claim_id": f"FIX-{suffix}",
+                    "sha": f"{int(suffix):040x}",
                     "source": "reference_fix",
                     "url": "https://github.com/example/app/commit/" + "1" * 40,
+                    "provenance": {
+                        "archive": "PyPI.zip",
+                        "member": f"record-{int(suffix) - 1}.json",
+                        "database": "PyPI",
+                        "record_ids": [identifier],
+                    },
+                }
+            ],
+            "application_range_claims": [
+                {
+                    "claim_id": f"RANGE-{suffix}",
+                    "repository": "example/app",
+                    "package": "PyPI:example-app",
+                    "events": [
+                        {"introduced": "a" * 40},
+                        {"fixed": chr(ord("a") + int(suffix)) * 40},
+                    ],
+                    "blockers": [],
+                    "provenance": {
+                        "archive": "PyPI.zip",
+                        "member": f"record-{int(suffix) - 1}.json",
+                        "database": "PyPI",
+                        "record_ids": [identifier],
+                        "affected_index": 0,
+                        "range_index": 0,
+                    },
                 }
             ],
             "priority": priority,
@@ -1346,7 +1376,7 @@ def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
     candidates_path.write_text(
         json.dumps(
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "sources": {
                     "advisory_manifest": {
                         "sha256": hashlib.sha256(manifest.read_bytes()).hexdigest()
@@ -1368,41 +1398,23 @@ def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
         encoding="utf-8",
     )
 
-    result = generate_overlaps(
+    result = prepare_revision_claims(
         candidates_path=candidates_path,
         raw_dir=raw_dir,
         manifest_path=manifest,
     )
     project = result["projects"][0]
-    lane = project["lanes"][0]
 
     assert result["component_count"] == 2
     assert project["project"] == {"description": "Example application"}
-    assert lane["affected_unit"] == "PyPI:example-app"
-    assert lane["selection"]["maximum_count"] == 2
-    assert lane["selection"]["maximal_checkpoints"] == ["1.1"]
-    assert lane["provisional_semantic_review_components"] == [
+    assert [item["component_id"] for item in project["components"]] == [
         "CVE-2026-1001",
         "CVE-2026-1002",
     ]
-    assert lane["range_evaluation_required_at_maxima"] == []
-    assert lane["components_with_unevaluated_ranges"] == [
-        "CVE-2026-1001",
-        "CVE-2026-1002",
-    ]
-    assert project["components"][0]["project_git_ranges"] == [
-        {
-            "repo": "https://github.com/example/app",
-            "events": [{"introduced": "a" * 40}, {"fixed": "b" * 40}],
-        }
-    ]
-    assert lane["maximal_component_groups"] == [
-        {
-            "component_ids": ["CVE-2026-1001", "CVE-2026-1002"],
-            "checkpoint_count": 1,
-            "checkpoints": ["1.1"],
-        }
-    ]
+    assert [
+        item["range_claims"][0]["claim_id"] for item in project["components"]
+    ] == ["RANGE-1", "RANGE-2"]
+    assert "lanes" not in project
 
     candidates = json.loads(candidates_path.read_text(encoding="utf-8"))
     second = json.loads(json.dumps(candidates["projects"][0]))
@@ -1410,7 +1422,7 @@ def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
     candidates["projects"].append(second)
     candidates_path.write_text(json.dumps(candidates), encoding="utf-8")
 
-    scoped = generate_overlaps(
+    scoped = prepare_revision_claims(
         candidates_path=candidates_path,
         raw_dir=raw_dir,
         manifest_path=manifest,
@@ -1421,17 +1433,21 @@ def test_batch_overlap_uses_hard_gate_components_before_semantics(tmp_path):
 
 def test_stage_two_rejects_legacy_candidate_schema(tmp_path):
     candidates_path = tmp_path / "candidates.json"
-    candidates_path.write_text(json.dumps({"schema_version": 3}), encoding="utf-8")
+    candidates_path.write_text(json.dumps({"schema_version": 4}), encoding="utf-8")
 
     try:
-        generate_overlaps(candidates_path=candidates_path, raw_dir=tmp_path)
+        prepare_revision_claims(
+            candidates_path=candidates_path,
+            raw_dir=tmp_path,
+            manifest_path=tmp_path / "missing-manifest.json",
+        )
     except ValueError as error:
-        assert "requires candidate schema version 4" in str(error)
+        assert "requires candidate schema version 5" in str(error)
     else:
         raise AssertionError("Stage 2 accepted a legacy candidate schema")
 
 
-def test_git_range_resolution_finds_immutable_maximum(tmp_path):
+def test_git_resolution_emits_independent_repair_parent_candidates(tmp_path):
     repository = tmp_path / "repository"
     subprocess.run(["git", "init", "-q", str(repository)], check=True)
     subprocess.run(
@@ -1461,15 +1477,37 @@ def test_git_range_resolution_finds_immutable_maximum(tmp_path):
         )
 
     def component(identifier, fixed):
+        member = f"{identifier}.json"
         return {
             "component_id": identifier,
             "ids": [identifier],
             "summaries": [identifier],
-            "fixes": [],
-            "project_git_ranges": [
+            "repair_claims": [
                 {
-                    "repo": "https://github.com/example/app",
+                    "claim_id": f"FIX-{identifier}",
+                    "sha": fixed,
+                    "source": "reference_fix",
+                    "url": f"https://github.com/example/app/commit/{fixed}",
+                    "provenance": {
+                        "archive": "test.zip",
+                        "member": member,
+                        "database": "test",
+                        "record_ids": [identifier],
+                    },
+                }
+            ],
+            "range_claims": [
+                {
+                    "claim_id": f"RANGE-{identifier}",
+                    "repository": "example/app",
                     "events": [{"introduced": "0"}, {"fixed": fixed}],
+                    "blockers": [],
+                    "provenance": {
+                        "archive": "test.zip",
+                        "member": member,
+                        "database": "test",
+                        "record_ids": [identifier],
+                    },
                 }
             ],
         }
@@ -1504,14 +1542,17 @@ def test_git_range_resolution_finds_immutable_maximum(tmp_path):
         repository,
     )
 
-    assert result["maximum_reported_overlap"] == 2
     assert [
-        window["component_ids"] for window in result["candidate_windows"]
+        (item["component_id"], item["primary_commit"], item["repair_commit"])
+        for item in result["revision_candidates"]
     ] == [
-        ["CVE-2026-1001", "CVE-2026-1002"],
-        ["CVE-2026-1002"],
+        ("CVE-2026-1001", commits[1], commits[2]),
+        ("CVE-2026-1002", commits[2], commits[3]),
     ]
-    assert result["head_reference"]["snapshot_limited_no_known_applicable_issue"]
+    assert all(
+        len(item["fallback_range_claim_ids"]) == 1
+        for item in result["revision_candidates"]
+    )
 
     output_dir = tmp_path / "output"
     write_outputs([result], output_dir)
@@ -1520,10 +1561,10 @@ def test_git_range_resolution_finds_immutable_maximum(tmp_path):
             encoding="utf-8"
         )
     )
-    assert packet["schema_version"] == 2
+    assert packet["schema_version"] == 3
     assert packet["ready_for_semantic_review"] is True
-    assert len(packet["candidate_windows"]) == 2
-    assert "checkpoints" not in packet["candidate_windows"][0]
+    assert len(packet["revision_candidates"]) == 2
+    assert "candidate_windows" not in packet
     assert packet["source_result"]["sha256"] == hashlib.sha256(
         (output_dir / "EXAMPLE__APP.json").read_bytes()
     ).hexdigest()
@@ -1537,6 +1578,78 @@ def test_git_range_resolution_finds_immutable_maximum(tmp_path):
         if item["component_id"] == "CVE-2026-1001"
     )
     assert packet_component["stage1_5_resolution"] == first["stage1_5_resolution"]
+
+
+def test_conflicting_alias_ranges_remain_source_linked_candidates(tmp_path):
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.name", "Test"],
+        check=True,
+    )
+    commits = []
+    for message in ("root", "vulnerable", "repair", "release-marker"):
+        subprocess.run(
+            ["git", "-C", str(repository), "commit", "--allow-empty", "-qm", message],
+            check=True,
+        )
+        commits.append(
+            subprocess.run(
+                ["git", "-C", str(repository), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        )
+
+    def claim(source, fixed, repair_source):
+        provenance = {"archive": "claims.zip", "member": f"{source}.json"}
+        return (
+            {
+                "claim_id": f"FIX-{source}",
+                "sha": fixed,
+                "source": repair_source,
+                "url": f"https://github.com/example/app/commit/{fixed}",
+                "provenance": provenance,
+            },
+            {
+                "claim_id": f"RANGE-{source}",
+                "repository": "example/app",
+                "events": [{"introduced": "0"}, {"fixed": fixed}],
+                "blockers": [],
+                "provenance": provenance,
+            },
+        )
+
+    direct_fix, direct_range = claim("GHSA", commits[2], "reference_fix")
+    late_fix, late_range = claim("CVE", commits[3], "osv_git_fixed")
+    result = resolve_project(
+        {
+            "repository": "example/app",
+            "components": [
+                {
+                    "component_id": "CVE-2026-1001",
+                    "ids": ["CVE-2026-1001", "GHSA-aaaa-bbbb-cccc"],
+                    "summaries": ["Authorization bypass"],
+                    "repair_claims": [late_fix, direct_fix],
+                    "range_claims": [late_range, direct_range],
+                }
+            ],
+        },
+        repository,
+    )
+
+    assert [
+        (item["repair_commit"], item["primary_commit"], item["fallback_range_claim_ids"])
+        for item in result["revision_candidates"]
+    ] == [
+        (commits[2], commits[1], ["RANGE-GHSA"]),
+        (commits[3], commits[2], ["RANGE-CVE"]),
+    ]
 
 
 def test_stage1_5_repair_rejects_merge_and_mismatched_parent(tmp_path):
@@ -1580,10 +1693,28 @@ def test_stage1_5_repair_rejects_merge_and_mismatched_parent(tmp_path):
         }
         return {
             "component_id": identifier,
-            "project_git_ranges": [
+            "repair_claims": [
                 {
-                    "repo": "https://github.com/example/app",
+                    "claim_id": f"FIX-{identifier}",
+                    "sha": fixed,
+                    "source": "stage1_5_direct_repair",
+                    "url": f"https://github.com/example/app/commit/{fixed}",
+                    "provenance": {
+                        "archive": "stage1_5_evidence.json",
+                        "member": identifier,
+                    },
+                }
+            ],
+            "range_claims": [
+                {
+                    "claim_id": f"RANGE-{identifier}",
+                    "repository": "example/app",
                     "events": repair["events"],
+                    "blockers": [],
+                    "provenance": {
+                        "archive": "stage1_5_evidence.json",
+                        "member": identifier,
+                    },
                 }
             ],
             "stage1_5_resolution": {"repair": repair},
@@ -1601,13 +1732,13 @@ def test_stage1_5_repair_rejects_merge_and_mismatched_parent(tmp_path):
     )
 
     assert {
-        item["component_id"]: item["programmatic_details"]
+        item["component_id"]: item["invalid_repair_claims"][0][
+            "programmatic_details"
+        ]
         for item in result["excluded_components"]
     } == {
-        "merge": [f"stage1_5_repair_requires_single_parent:{merge_commit}"],
-        "mismatch": [
-            f"stage1_5_affected_parent_mismatch:{single_parent_commit}"
-        ],
+        "merge": [f"repair_requires_single_parent:{merge_commit}"],
+        "mismatch": [f"affected_parent_mismatch:{single_parent_commit}"],
     }
 
 
@@ -1636,11 +1767,17 @@ def test_repository_refresh_updates_the_recorded_default_branch(tmp_path):
         capture_output=True,
         text=True,
     ).stdout.strip()
+    branch = subprocess.run(
+        ["git", "-C", str(upstream), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
-    refreshed_ref = refresh_repository(cache)
+    refresh_repository(cache)
 
     observed = subprocess.run(
-        ["git", "-C", str(cache), "rev-parse", refreshed_ref],
+        ["git", "-C", str(cache), "rev-parse", f"refs/heads/{branch}"],
         check=True,
         capture_output=True,
         text=True,
@@ -1648,7 +1785,7 @@ def test_repository_refresh_updates_the_recorded_default_branch(tmp_path):
     assert observed == expected
 
 
-def test_git_resolver_rejects_unresolved_ranges(tmp_path):
+def test_git_resolver_keeps_range_failures_claim_local(tmp_path):
     repository = tmp_path / "repository"
     subprocess.run(["git", "init", "-q", str(repository)], check=True)
     subprocess.run(
@@ -1680,29 +1817,40 @@ def test_git_resolver_rejects_unresolved_ranges(tmp_path):
     def component(identifier, fixed):
         return {
             "component_id": identifier,
-            "references": [],
-            "project_git_ranges": [
+            "repair_claims": [
                 {
-                    "repo": "https://github.com/example/app",
+                    "claim_id": f"FIX-{identifier}",
+                    "sha": fixed,
+                    "source": "reference_fix",
+                    "url": f"https://github.com/example/app/commit/{fixed}",
+                    "provenance": {"archive": "test.zip", "member": identifier},
+                }
+            ],
+            "range_claims": [
+                {
+                    "claim_id": f"RANGE-{identifier}",
+                    "repository": "example/app",
                     "events": [{"introduced": "0"}, {"fixed": fixed}],
+                    "blockers": [],
+                    "provenance": {"archive": "test.zip", "member": identifier},
                 }
             ],
         }
 
-    last_affected = {
-        "component_id": "last-affected",
-        "project_git_ranges": [
-            {
-                "repo": "https://github.com/example/app",
-                "events": [
-                    {"introduced": "0"},
-                    {"fixed": commits[1]},
-                    {"introduced": commits[1]},
-                    {"last_affected": commits[1]},
-                ],
-            }
-        ],
-    }
+    last_affected = component("last-affected", commits[1])
+    last_affected["range_claims"][0]["events"] = [
+        {"introduced": "0"},
+        {"fixed": commits[1]},
+        {"introduced": commits[1]},
+        {"last_affected": commits[1]},
+    ]
+    invalid_topology = component("invalid-topology", commits[1])
+    invalid_topology["range_claims"][0]["events"] = [
+        {"introduced": commits[2]},
+        {"fixed": commits[1]},
+    ]
+    no_range = component("no-range", commits[1])
+    no_range["range_claims"] = []
 
     result = resolve_project(
         {
@@ -1710,41 +1858,102 @@ def test_git_resolver_rejects_unresolved_ranges(tmp_path):
             "components": [
                 component("resolved", commits[1]),
                 last_affected,
-                {
-                    "component_id": "invalid-topology",
-                    "project_git_ranges": [
-                        {
-                            "repo": "https://github.com/example/app",
-                            "events": [
-                                {"introduced": commits[2]},
-                                {"fixed": commits[1]},
-                            ],
-                        }
-                    ],
-                },
+                invalid_topology,
                 component("missing", "f" * 40),
-                {"component_id": "no-range", "project_git_ranges": []},
+                no_range,
             ],
         },
         repository,
     )
 
     assert [item["component_id"] for item in result["components"]] == ["resolved"]
-    assert result["rejected_component_count"] == 4
+    assert result["excluded_component_count"] == 4
     assert {
-        item["component_id"]: item["programmatic_details"]
+        item["component_id"]: item["programmatic_reason"]
         for item in result["excluded_components"]
     } == {
+        "missing": "no_valid_affected_range_claim",
+        "no-range": "no_valid_affected_range_claim",
+        "last-affected": "no_valid_affected_range_claim",
+        "invalid-topology": "no_valid_affected_range_claim",
+    }
+    failures = {
+        item["component_id"]: item["invalid_range_claims"][0][
+            "programmatic_details"
+        ]
+        for item in result["excluded_components"]
+        if item["invalid_range_claims"]
+    }
+    assert failures == {
         "missing": ["missing_commit:" + "f" * 40],
-        "no-range": ["no_project_git_range"],
         "last-affected": ["phase_without_fix_boundary"],
         "invalid-topology": ["introduction_not_ancestor_of_fix"],
     }
-    assert result["fix_boundaries"] == [
+
+
+def test_git_resolver_rejects_any_unrelated_fixed_boundary(tmp_path):
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+
+    def git(*arguments):
+        return subprocess.run(
+            ["git", "-C", str(repository), *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def commit(message):
+        git("commit", "--allow-empty", "-qm", message)
+        return git("rev-parse", "HEAD")
+
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    introduced = commit("introduced")
+    fixed = commit("fixed")
+    default_branch = git("branch", "--show-current")
+    git("checkout", "-q", "--orphan", "unrelated")
+    unrelated = commit("unrelated")
+    git("checkout", "-q", default_branch)
+
+    provenance = {"archive": "test.zip", "member": "mixed-topology"}
+
+    result = resolve_project(
         {
-            "commit": commits[1],
-            "committed_at": result["fix_boundaries"][0]["committed_at"],
-            "parents": [commits[0]],
-        }
+            "repository": "example/app",
+            "components": [
+                {
+                    "component_id": "mixed-topology",
+                    "repair_claims": [
+                        {
+                            "claim_id": "FIX-mixed-topology",
+                            "sha": fixed,
+                            "source": "reference_fix",
+                            "url": f"https://github.com/example/app/commit/{fixed}",
+                            "provenance": provenance,
+                        }
+                    ],
+                    "range_claims": [
+                        {
+                            "claim_id": "RANGE-mixed-topology",
+                            "repository": "example/app",
+                            "events": [
+                                {"introduced": introduced},
+                                {"fixed": fixed},
+                                {"fixed": unrelated},
+                            ],
+                            "blockers": [],
+                            "provenance": provenance,
+                        }
+                    ],
+                }
+            ],
+        },
+        repository,
+    )
+
+    assert result["components"] == []
+    invalid_range = result["excluded_components"][0]["invalid_range_claims"][0]
+    assert invalid_range["programmatic_details"] == [
+        "introduction_not_ancestor_of_fix"
     ]
-    assert all(item["commit"] != commits[1] for item in result["checkpoints"])

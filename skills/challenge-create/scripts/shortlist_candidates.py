@@ -134,10 +134,25 @@ def _commit_from_url(url: str | None) -> str | None:
     return None
 
 
-def _fix_boundaries(record: dict) -> set[tuple[str, str, str, str]]:
+def _claim_id(prefix: str, payload: dict) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return f"{prefix}-{hashlib.sha256(encoded).hexdigest()[:16]}"
+
+
+def _claim_source(wrapped: dict, record: dict) -> dict:
+    return {
+        "archive": wrapped["source_archive"],
+        "member": wrapped["source_member"],
+        "database": wrapped["source_database"],
+        "record_ids": sorted(_record_ids(record)),
+    }
+
+
+def _fix_boundaries(record: dict, wrapped: dict) -> set[str]:
     fixes = set()
-    for affected in record.get("affected", []):
-        for affected_range in affected.get("ranges", []):
+    source = _claim_source(wrapped, record)
+    for affected_index, affected in enumerate(record.get("affected", [])):
+        for range_index, affected_range in enumerate(affected.get("ranges", [])):
             if affected_range.get("type") != "GIT":
                 continue
             repository = canonical_github_repo(affected_range.get("repo"))
@@ -146,22 +161,42 @@ def _fix_boundaries(record: dict) -> set[tuple[str, str, str, str]]:
             for event in affected_range.get("events", []):
                 commit = str(event.get("fixed", "")).lower()
                 if HEX40.fullmatch(commit):
+                    claim = {
+                        "repository": repository,
+                        "sha": commit,
+                        "source": "osv_git_fixed",
+                        "url": f"https://github.com/{repository}/commit/{commit}",
+                        "provenance": {
+                            **source,
+                            "affected_index": affected_index,
+                            "range_index": range_index,
+                        },
+                    }
                     fixes.add(
-                        (
-                            repository,
-                            commit,
-                            "osv_git_fixed",
-                            f"https://github.com/{repository}/commit/{commit}",
+                        json.dumps(
+                            {**claim, "claim_id": _claim_id("FIX", claim)},
+                            sort_keys=True,
                         )
                     )
-    for reference in record.get("references", []):
+    for reference_index, reference in enumerate(record.get("references", [])):
         if reference.get("type") != "FIX":
             continue
         url = str(reference.get("url", ""))
         repository = canonical_github_repo(url)
         commit = _commit_from_url(url)
         if repository and commit:
-            fixes.add((repository, commit, "reference_fix", url))
+            claim = {
+                "repository": repository,
+                "sha": commit,
+                "source": "reference_fix",
+                "url": url,
+                "provenance": {**source, "reference_index": reference_index},
+            }
+            fixes.add(
+                json.dumps(
+                    {**claim, "claim_id": _claim_id("FIX", claim)}, sort_keys=True
+                )
+            )
     return fixes
 
 
@@ -183,10 +218,17 @@ def _release_boundaries(record: dict) -> set[tuple[str, str, str]]:
     return boundaries
 
 
-def _git_range_evidence(record: dict) -> set[str]:
+def _git_range_evidence(record: dict, wrapped: dict) -> set[str]:
     evidence = set()
-    for affected in record.get("affected", []):
-        for affected_range in affected.get("ranges", []):
+    source = _claim_source(wrapped, record)
+    for affected_index, affected in enumerate(record.get("affected", [])):
+        package = affected.get("package", {})
+        package_key = (
+            f"{package['ecosystem']}:{package['name']}"
+            if package.get("ecosystem") and package.get("name")
+            else None
+        )
+        for range_index, affected_range in enumerate(affected.get("ranges", [])):
             if affected_range.get("type") != "GIT":
                 continue
             repository = canonical_github_repo(affected_range.get("repo"))
@@ -196,14 +238,20 @@ def _git_range_evidence(record: dict) -> set[str]:
             phases, blockers = parse_git_phases(events)
             if any(not phase["fixed"] for phase in phases):
                 blockers = sorted({*blockers, "phase_without_fix_boundary"})
+            claim = {
+                "repository": repository,
+                "package": package_key,
+                "events": events,
+                "blockers": blockers,
+                "provenance": {
+                    **source,
+                    "affected_index": affected_index,
+                    "range_index": range_index,
+                },
+            }
             evidence.add(
                 json.dumps(
-                    {
-                        "repository": repository,
-                        "events": events,
-                        "blockers": blockers,
-                    },
-                    sort_keys=True,
+                    {**claim, "claim_id": _claim_id("RANGE", claim)}, sort_keys=True
                 )
             )
     return evidence
@@ -518,19 +566,19 @@ def _component_row(
     releases: dict,
     fast_lane_memberships: dict,
 ) -> dict:
+    fix_claims = [json.loads(value) for value in fixes[root]]
     component["repository_roles"]["fix_repository"].update(
-        fix_repository for fix_repository, _, _, _ in fixes[root]
+        claim["repository"] for claim in fix_claims
     )
     repository, mapping = _application_mapping(component)
-    commit_repairs = [
-        {"repository": fix_repository, "sha": sha, "source": source, "url": url}
-        for fix_repository, sha, source, url in sorted(fixes[root])
-    ]
+    commit_repairs = sorted(
+        fix_claims, key=lambda item: (item["repository"], item["sha"], item["claim_id"])
+    )
     release_repairs = [
         {"range_type": range_type, "package": package, "fixed": fixed}
         for range_type, package, fixed in sorted(releases[root])
     ]
-    application_git_ranges = [
+    application_range_claims = [
         item
         for value in sorted(component["git_ranges"])
         if (item := json.loads(value))["repository"] == repository
@@ -562,7 +610,7 @@ def _component_row(
         "repair_evidence": [*commit_repairs, *release_repairs],
         "application_repository": repository,
         "application_mapping": mapping,
-        "application_git_ranges": application_git_ranges,
+        "application_range_claims": application_range_claims,
         "fast_lane_memberships": [
             {"priority": priority, "lane": lane, "source": source}
             for priority, lane, source in sorted(fast_lane_memberships[root])
@@ -600,8 +648,9 @@ def _evidence_matrix_row(
             repair.get("fixed") for repair in row["repair_evidence"]
         ),
         "application_repository": bool(row["application_repository"]),
-        "usable_application_git_range": bool(row["application_git_ranges"])
-        and not any(item["blockers"] for item in row["application_git_ranges"]),
+        "usable_application_git_range": any(
+            not item["blockers"] for item in row["application_range_claims"]
+        ),
         "repository_metadata": repository_metadata,
     }
     return {
@@ -686,7 +735,7 @@ def generate(
                 {
                     "identifier": min(ids),
                     "published": _timestamp(record.get("published")),
-                    "fixes": _fix_boundaries(record),
+                    "fixes": _fix_boundaries(record, wrapped),
                     "releases": _release_boundaries(record),
                     "fast_lane_membership": (
                         (
@@ -701,7 +750,7 @@ def generate(
             )
 
     dates: dict[str, list[datetime]] = defaultdict(list)
-    fixes: dict[str, set[tuple[str, str, str, str]]] = defaultdict(set)
+    fixes: dict[str, set[str]] = defaultdict(set)
     releases: dict[str, set[tuple[str, str, str]]] = defaultdict(set)
     fast_lane_memberships: dict[str, set[tuple[int, str, str]]] = defaultdict(set)
     for item in metadata:
@@ -724,11 +773,30 @@ def generate(
         if repair := resolution.get("repair"):
             repository = resolution["repository"]
             fixes[root] = {
-                item for item in fixes[root] if item[0] != repository
-            } | {
-                (repository, commit["sha"], "stage1_5_direct_repair", commit["url"])
-                for commit in repair["commits"]
+                value
+                for value in fixes[root]
+                if json.loads(value)["repository"] != repository
             }
+            for index, commit in enumerate(repair["commits"]):
+                claim = {
+                    "repository": repository,
+                    "sha": commit["sha"],
+                    "source": "stage1_5_direct_repair",
+                    "url": commit["url"],
+                    "provenance": {
+                        "archive": "stage1_5_evidence.json",
+                        "member": resolution["component_id"],
+                        "database": "stage1_5",
+                        "record_ids": [resolution["component_id"]],
+                        "repair_index": index,
+                    },
+                }
+                fixes[root].add(
+                    json.dumps(
+                        {**claim, "claim_id": _claim_id("FIX", claim)},
+                        sort_keys=True,
+                    )
+                )
 
     repair_roots = {
         root for root in set(fixes) | set(releases) if fixes[root] or releases[root]
@@ -805,7 +873,7 @@ def generate(
         component["source_databases"].add(wrapped["source_database"])
         for role, repositories in candidate_repository_roles(record).items():
             component["repository_roles"][role].update(repositories)
-        component["git_ranges"].update(_git_range_evidence(record))
+        component["git_ranges"].update(_git_range_evidence(record, wrapped))
 
     for root, resolution in resolutions_by_root.items():
         component = components.get(root)
@@ -826,13 +894,23 @@ def generate(
                 for value in component["git_ranges"]
                 if json.loads(value)["repository"] != repository
             }
+            claim = {
+                "repository": repository,
+                "package": None,
+                "events": repair["events"],
+                "blockers": [],
+                "provenance": {
+                    "archive": "stage1_5_evidence.json",
+                    "member": resolution["component_id"],
+                    "database": "stage1_5",
+                    "record_ids": [resolution["component_id"]],
+                    "affected_index": 0,
+                    "range_index": 0,
+                },
+            }
             component["git_ranges"].add(
                 json.dumps(
-                    {
-                        "repository": repository,
-                        "events": repair["events"],
-                        "blockers": [],
-                    },
+                    {**claim, "claim_id": _claim_id("RANGE", claim)},
                     sort_keys=True,
                 )
             )
@@ -916,8 +994,8 @@ def generate(
                 }
             )
             continue
-        if not row["application_git_ranges"] or any(
-            item["blockers"] for item in row["application_git_ranges"]
+        if not any(
+            not item["blockers"] for item in row["application_range_claims"]
         ):
             evidence_matrix_rows[row["component_id"]] = _evidence_matrix_row(
                 row,
@@ -932,7 +1010,7 @@ def generate(
                     "reason": "usable_application_git_range_not_established",
                     "application_repository": repository,
                     "application_mapping": row["application_mapping"],
-                    "application_git_ranges": row["application_git_ranges"],
+                    "application_range_claims": row["application_range_claims"],
                     "repair_evidence": row["repair_evidence"],
                     "earliest_manifested_publication": row[
                         "earliest_manifested_publication"
@@ -1120,7 +1198,7 @@ def generate(
         row["disposition"] for row in evidence_matrix_rows.values()
     )
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "method": "advisory_first_candidate_shortlist",
         "project_gates": {
             "maximum_inactivity_days": MAX_INACTIVITY_DAYS,

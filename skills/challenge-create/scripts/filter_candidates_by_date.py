@@ -63,8 +63,8 @@ def _materialize(bucket: dict) -> dict:
 def generate(*, candidates_path: Path, cutoff_value: str) -> dict:
     cutoff = _timestamp(cutoff_value)
     payload = json.loads(candidates_path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") != 4:
-        raise InputError("candidate date views require candidate schema version 4")
+    if payload.get("schema_version") != 5:
+        raise InputError("candidate date views require candidate schema version 5")
     if payload.get("date_cutoff", {}).get("enabled"):
         raise InputError("candidate date views require an unfiltered candidate index")
 

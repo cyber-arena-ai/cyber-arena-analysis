@@ -1,6 +1,6 @@
 # Stage 3 runnable study
 
-Stage 3 decides whether one selected historical window is worth challenge
+Stage 3 decides whether one selected revision candidate is worth challenge
 authoring. Keep the study compact. It is a focused experiment, not a complete
 challenge and not an exhaustive security audit.
 
@@ -25,8 +25,8 @@ prove multiple flags when their attack chain overlaps. Use independent
 reproductions for materially independent paths. Require Stage 4 to carry any
 custom definition unchanged into the challenge's maintainer-only documentation.
 
-Do not require reproduction of unrelated CVEs that merely coexist in the
-selected window. If another genuine in-band vulnerability reaches the witness,
+Do not require reproduction of unrelated CVEs from the same application. If
+another genuine in-band vulnerability reaches the witness,
 record it as a valid free-hunt path; do not reject the challenge for having more
 than one vulnerability.
 
@@ -34,11 +34,15 @@ than one vulnerability.
 
 Run these passes in order. They are one atomic study, not resumable sub-stages.
 
-1. **Lock the kernel.** Select one Stage 2 window and write down the exact
-   commit, baseline principal, public entrypoint, protected outcome and scope,
-   and proposed trial witness. Return to Stage 2 if any of these changes
-   materially during the study.
-2. **Bootstrap the vulnerable case.** Start the exact source in one faithful
+1. **Lock the kernel.** Select one Stage 2 repair candidate, its primary commit,
+   one fallback range claim, baseline principal, public entrypoint, protected
+   outcome and scope, and proposed trial witness. Return to Stage 2 if the
+   repair, vulnerability, boundary, chain, or witness changes materially.
+2. **Locate and bootstrap the vulnerable case.** Try the repair's sole parent
+   first. If it does not reproduce the documented primitive, perform a bounded
+   binary subdivision within the selected source-linked range claim. Treat
+   disjoint phases independently and stop at one reproducibly vulnerable
+   commit; do not attempt to validate the full advisory range. Start that exact source in one faithful
    deployment, provision two distinct equal-role principals, and establish the
    authorized baseline and ordinary attacker denial for the witness. Keep
    credentials stable for the study; rotation is not required.
@@ -112,12 +116,16 @@ Write `STAGE3_STUDY.md` under these short headings:
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "repository": "owner/project",
   "source_packet": "OWNER__PROJECT.json",
   "source_packet_sha256": "64 lowercase hex characters",
-  "window_id": "W1",
-  "commit": "40 lowercase hex characters",
+  "candidate_id": "CVE-YYYY-NNNN@40-lowercase-hex-repair-commit",
+  "repair_commit": "40 lowercase hex characters",
+  "primary_commit": "the repair commit's sole 40-character parent",
+  "fallback_range_claim_id": "RANGE-identifier",
+  "reproduced_commit": "40 lowercase hex characters",
+  "fallback_search_used": false,
   "selected_component_ids": ["CVE-YYYY-NNNN"],
   "outcome": "ready_for_authoring",
   "artifacts": {
@@ -132,6 +140,12 @@ Write `STAGE3_STUDY.md` under these short headings:
   }
 }
 ```
+
+When `fallback_search_used` is false, `reproduced_commit` must equal
+`primary_commit`. When it is true, `STAGE3_STUDY.md` must explain the bounded
+search and why the final commit is within the selected claim. Do not retain the
+intermediate search attempts. A `rejected` or `needs_study` result may use
+`null` when no vulnerable commit was reproduced; `ready_for_authoring` may not.
 
 `environment` lists every retained file needed to construct the Docker or
 Compose environment, including source archives or lockfiles, and must include a

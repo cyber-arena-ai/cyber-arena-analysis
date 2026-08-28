@@ -27,7 +27,7 @@ def _matrix_row(identifier, publication, disposition, repository=None):
 
 def test_date_view_preserves_three_buckets_and_hash_links_source(tmp_path):
     candidates = {
-        "schema_version": 4,
+        "schema_version": 5,
         "evidence_matrix": {
             "rows": [
                 _matrix_row(
@@ -85,7 +85,7 @@ def test_date_view_preserves_three_buckets_and_hash_links_source(tmp_path):
     assert view["candidate_source"] == {
         "path": str(candidates_path),
         "sha256": hashlib.sha256(candidates_path.read_bytes()).hexdigest(),
-        "schema_version": 4,
+        "schema_version": 5,
     }
     assert view["summary"] == {
         "retained_components": 8,
@@ -118,7 +118,7 @@ def test_date_view_rejects_an_already_filtered_source(tmp_path):
     candidates_path.write_text(
         json.dumps(
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "date_cutoff": {"enabled": True},
                 "evidence_matrix": {"rows": []},
             }
@@ -140,7 +140,7 @@ def test_date_view_rejects_an_already_filtered_source(tmp_path):
 def test_date_view_rejects_legacy_candidate_schema(tmp_path):
     candidates_path = tmp_path / "candidates.json"
     candidates_path.write_text(
-        json.dumps({"schema_version": 3, "evidence_matrix": {"rows": []}}),
+        json.dumps({"schema_version": 4, "evidence_matrix": {"rows": []}}),
         encoding="utf-8",
     )
 
@@ -150,6 +150,6 @@ def test_date_view_rejects_legacy_candidate_schema(tmp_path):
             cutoff_value="2026-02-16T23:59:59Z",
         )
     except InputError as error:
-        assert "candidate schema version 4" in str(error)
+        assert "candidate schema version 5" in str(error)
     else:
         raise AssertionError("date view accepted a legacy candidate schema")

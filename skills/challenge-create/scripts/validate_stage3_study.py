@@ -40,16 +40,15 @@ def validate(packet_path: Path, review_path: Path, study_dir: Path) -> list[str]
     packet_bytes = packet_path.read_bytes()
     packet = json.loads(packet_bytes)
     review = json.loads(review_path.read_text(encoding="utf-8"))
-    result_path = study_dir / "result.json"
-    result = json.loads(result_path.read_text(encoding="utf-8"))
-    errors: list[str] = []
-
-    if not isinstance(packet, dict) or packet.get("schema_version") != 2:
-        return ["source packet must be a schema-version 2 JSON object"]
-    if not isinstance(review, dict) or review.get("schema_version") != 4:
-        return ["source review must be a schema-version 4 JSON object"]
+    result = json.loads((study_dir / "result.json").read_text(encoding="utf-8"))
+    if not isinstance(packet, dict) or packet.get("schema_version") != 3:
+        return ["source packet must be a schema-version 3 JSON object"]
+    if not isinstance(review, dict) or review.get("schema_version") != 5:
+        return ["source review must be a schema-version 5 JSON object"]
     if not isinstance(result, dict):
         return ["result.json must be a JSON object"]
+
+    errors: list[str] = []
     decision = review.get("decision")
     if not isinstance(decision, dict) or decision.get("verdict") != "promising":
         errors.append("semantic review is not eligible for Stage 3")
@@ -60,8 +59,8 @@ def validate(packet_path: Path, review_path: Path, study_dir: Path) -> list[str]
         errors.append("semantic review source_packet does not match source packet")
     if review.get("source_packet_sha256") != hashlib.sha256(packet_bytes).hexdigest():
         errors.append("semantic review is not hash-linked to the source packet")
-    if result.get("schema_version") != 3:
-        errors.append("schema_version must be 3")
+    if result.get("schema_version") != 4:
+        errors.append("schema_version must be 4")
     if result.get("repository") != packet.get("repository"):
         errors.append("repository does not match source packet")
     if result.get("source_packet") != packet_path.name:
@@ -72,23 +71,49 @@ def validate(packet_path: Path, review_path: Path, study_dir: Path) -> list[str]
     elif digest != hashlib.sha256(packet_bytes).hexdigest():
         errors.append("source_packet_sha256 does not match source packet")
 
-    windows = {
-        item.get("window_id"): item
-        for item in packet.get("candidate_windows", [])
-        if isinstance(item, dict) and _text(item.get("window_id"))
+    candidates = {
+        item.get("candidate_id"): item
+        for item in packet.get("revision_candidates", [])
+        if isinstance(item, dict) and _text(item.get("candidate_id"))
     }
-    window = windows.get(result.get("window_id"))
-    if window is None:
-        errors.append("window_id does not identify a source-packet window")
-    if result.get("window_id") != decision.get("window_id"):
-        errors.append("window_id does not match the semantic review")
-    commit = result.get("commit")
-    if not isinstance(commit, str) or not HEX40.fullmatch(commit):
-        errors.append("commit must be 40 lowercase hex characters")
-    elif window is not None and commit != window.get("representative_checkpoint"):
-        errors.append("commit does not match the selected source-packet window")
-    if commit != decision.get("commit"):
-        errors.append("commit does not match the semantic review")
+    candidate = candidates.get(result.get("candidate_id"))
+    if candidate is None:
+        errors.append("candidate_id does not identify a source-packet candidate")
+        candidate = {}
+    if result.get("candidate_id") != decision.get("candidate_id"):
+        errors.append("candidate_id does not match the semantic review")
+    for field in ("repair_commit", "primary_commit", "fallback_range_claim_id"):
+        if result.get(field) != decision.get(field):
+            errors.append(f"{field} does not match the semantic review")
+    for field in ("repair_commit", "primary_commit"):
+        if result.get(field) != candidate.get(field):
+            errors.append(f"{field} does not match the source-packet candidate")
+    if result.get("fallback_range_claim_id") not in candidate.get(
+        "fallback_range_claim_ids", []
+    ):
+        errors.append("fallback_range_claim_id is outside the source-packet candidate")
+
+    outcome = result.get("outcome")
+    if outcome not in OUTCOMES:
+        errors.append("outcome is invalid")
+    reproduced = result.get("reproduced_commit")
+    if reproduced is not None and (
+        not isinstance(reproduced, str) or not HEX40.fullmatch(reproduced)
+    ):
+        errors.append("reproduced_commit must be null or 40 lowercase hex characters")
+    if outcome == "ready_for_authoring" and not isinstance(reproduced, str):
+        errors.append("ready_for_authoring requires reproduced_commit")
+    search_used = result.get("fallback_search_used")
+    if not isinstance(search_used, bool):
+        errors.append("fallback_search_used must be boolean")
+    elif (
+        not search_used
+        and reproduced is not None
+        and reproduced != result.get("primary_commit")
+    ):
+        errors.append(
+            "reproduced_commit must equal primary_commit when fallback search was not used"
+        )
 
     components = result.get("selected_component_ids")
     if (
@@ -99,29 +124,31 @@ def validate(packet_path: Path, review_path: Path, study_dir: Path) -> list[str]
     ):
         errors.append("selected_component_ids must be unique non-empty strings")
         components = []
-    if window is not None and not set(components).issubset(
-        set(window.get("component_ids", []))
-    ):
-        errors.append("selected_component_ids contains a component outside the window")
+    packet_components = {
+        item.get("component_id")
+        for item in packet.get("components", [])
+        if isinstance(item, dict)
+    }
+    if not set(components).issubset(packet_components):
+        errors.append("selected_component_ids contains a component outside the packet")
     if components != decision.get("selected_component_ids"):
         errors.append("selected_component_ids does not match the semantic review")
 
-    outcome = result.get("outcome")
-    if outcome not in OUTCOMES:
-        errors.append("outcome is invalid")
     artifacts = result.get("artifacts")
     if not isinstance(artifacts, dict):
         errors.append("artifacts must be an object")
         artifacts = {}
-
     study_path = _artifact(study_dir, artifacts.get("study"), "artifacts.study", errors)
     if study_path is not None:
         study_text = study_path.read_text(encoding="utf-8")
-        if isinstance(commit, str) and commit not in study_text:
-            errors.append("study does not name the selected commit")
-        for component in components:
-            if component not in study_text:
-                errors.append(f"study does not name selected component {component}")
+        for value in (
+            reproduced,
+            result.get("repair_commit"),
+            result.get("fallback_range_claim_id"),
+            *components,
+        ):
+            if isinstance(value, str) and value not in study_text:
+                errors.append(f"study does not name {value}")
 
     if outcome == "ready_for_authoring":
         environment = artifacts.get("environment")
@@ -159,7 +186,6 @@ def validate(packet_path: Path, review_path: Path, study_dir: Path) -> list[str]
         else:
             for index, item in enumerate(evidence):
                 _artifact(study_dir, item, f"artifacts.evidence[{index}]", errors)
-
     return errors
 
 

@@ -32,7 +32,7 @@ def _row(identifier, disposition="unresolved", **enabled):
 def _write_candidates(path, rows):
     path.write_text(
         json.dumps(
-            {"schema_version": 4, "evidence_matrix": {"rows": rows}},
+            {"schema_version": 5, "evidence_matrix": {"rows": rows}},
             indent=2,
             sort_keys=True,
         )

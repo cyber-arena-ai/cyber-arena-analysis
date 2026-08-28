@@ -1,6 +1,6 @@
 # Stage 2 semantic review
 
-Decide whether the strongest candidate in one schema-v2 semantic packet
+Decide whether the strongest candidate in one schema-v3 semantic packet
 deserves an expensive Stage 3 study. This is prioritization, not vulnerability
 confirmation or full challenge design.
 
@@ -66,22 +66,23 @@ or disable the service receive no scope credit.
 
 ## Retained artifact
 
-Write one compact maintainer-only schema-v4 JSON file per packet. Preserve only
+Write one compact maintainer-only schema-v5 JSON file per packet. Preserve only
 the decision and evidence needed by Stage 3; do not preserve intermediate notes,
-clusters, questionnaires, or one assessment per window. Schema v3 remains valid
-only for retained historical reports.
+clusters, questionnaires, or one assessment per vulnerability.
 
 ```json
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "repository": "owner/repository",
   "source_packet": "OWNER__REPOSITORY.json",
   "source_packet_sha256": "64 lowercase hex characters",
   "review_basis": "public_evidence_and_bounded_source_review",
   "decision": {
     "verdict": "promising",
-    "window_id": "W1",
-    "commit": "40 lowercase hex characters copied from the selected window",
+    "candidate_id": "CVE-YYYY-NNNN@40-lowercase-hex-repair-commit",
+    "repair_commit": "40 lowercase hex characters copied from the selected candidate",
+    "primary_commit": "the repair commit's sole 40-character parent",
+    "fallback_range_claim_id": "one RANGE-* ID copied from the selected candidate",
     "selected_component_ids": ["CVE-YYYY-NNNN"],
     "candidate_scope_ids": ["app.cross_boundary.read"],
     "case": "A concise evidence-backed account of the complete application path and repair, followed by the strongest material objection and why the case survives it.",
@@ -113,7 +114,8 @@ collection time.
 `attack_chain` may retain a public PoC, upstream regression, or precise
 behavioral reproduction description; semantic triage does not require
 inventing a second route. Multiple selected components are allowed when they
-support one coherent case. Evidence artifacts are small, maintainer-only
+support one coherent attack chain. Their coexistence is a semantic claim to
+confirm in Stage 3, not a mechanically computed Git overlap. Evidence artifacts are small, maintainer-only
 retained extracts or patches stored beside the review; they make the claim
 resumable when a mutable page changes.
 
@@ -132,6 +134,7 @@ its complete definition:
 }
 ```
 
-The validator checks packet identity, the selected window and component set,
+The validator checks packet identity, the selected revision candidate, fallback
+range claim, and component set,
 scope registration, custom-scope completeness, and evidence shape. It does not
 judge whether the prose is true; the reviewer owns that judgment.

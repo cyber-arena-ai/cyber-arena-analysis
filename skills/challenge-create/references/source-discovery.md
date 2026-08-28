@@ -108,7 +108,7 @@ continues to preserve evidence for hard-gated components.
 The command deliberately works in this order:
 
 1. Verify the manifest and every listed archive.
-2. Join transitive IDs and aliases. Withdrawn records may bridge aliases but
+2. Join transitive IDs and aliases for deduplication only. Withdrawn records may bridge aliases but
    never contribute active evidence. When fast lanes are present, select alias
    components containing an active fast-lane record and retain the rest as the
    deferred coverage count.
@@ -201,14 +201,17 @@ subagent is spawned. After the pass, supply its validated evidence file with
 
 `artifacts/candidates.json` ends Stage 1. It contains:
 
-- schema version 4, whose `earliest_manifested_publication` field may be a
+- schema version 5, whose `earliest_manifested_publication` field may be a
   timestamp or `null` and is never itself an admission gate;
 - `evidence_matrix.rows[]`: one compact row per selected component with its
   `resolved`, `unresolved`, or `rejected` disposition, reason, repository, and
   observed-asset bitmap. A false asset bit means the asset is absent from the
   manifested Stage 1 evidence, not proven absent upstream;
 - `projects[]`: accepted application repositories, observed GitHub metadata,
-  duplicate context, and advisory components;
+  duplicate context, and deduplicated advisory components. Every repair and
+  affected-range assertion retains a stable claim ID plus archive, member,
+  database, record IDs, and source-local position; ranges are not merged into
+  component-level truth;
 - `unresolved_candidates[]`: application mappings or project facts requiring
   bounded evidence gathering. This is a detail projection for resume; Stage
   1.5 selection comes from the hash-linked ranked matrix view, not from list

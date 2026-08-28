@@ -336,7 +336,7 @@ packages and validates it without changing its objective, scope, oracle,
 boundary, or witness.
 
 Use orchestration commit
-`3070fdb4a3dbca59be66110b29ba60a296f3c899` and one exact warehouse base
+`e1d0389bc435d973c35b2c988c63e452822af28c` and one exact warehouse base
 commit. Do not substitute a branch tip. Give both hashes to every implementation
 agent. Before authoring a batch at a new locked pair, smoke-test external
 warehouse selection once. Run every framework-facing experiment and verifier

@@ -13,8 +13,6 @@ from pathlib import Path
 HEX40 = re.compile(r"[0-9a-f]{40}")
 HEX64 = re.compile(r"[0-9a-f]{64}")
 OUTCOMES = {"ready_for_authoring", "needs_study", "rejected"}
-CONTRACT_AREAS = {"access", "runtime", "behavior", "measurement"}
-QUESTION_DISPOSITIONS = {"blocking", "deferred"}
 
 
 def _text(value: object) -> bool:
@@ -36,84 +34,6 @@ def _artifact(
         errors.append(f"{location} does not exist: {path}")
         return None
     return resolved
-
-
-def _validate_contract(
-    contract_path: Path,
-    study_dir: Path,
-    outcome: object,
-    declared_artifacts: set[str],
-    errors: list[str],
-) -> None:
-    contract = json.loads(contract_path.read_text(encoding="utf-8"))
-    if not isinstance(contract, dict) or contract.get("schema_version") != 1:
-        errors.append("stage4 contract must be a schema-version 1 JSON object")
-        return
-
-    facts = contract.get("facts")
-    covered_areas: set[str] = set()
-    if not isinstance(facts, list):
-        errors.append("stage4 contract facts must be a list")
-        facts = []
-    for index, fact in enumerate(facts):
-        location = f"stage4 contract facts[{index}]"
-        if not isinstance(fact, dict):
-            errors.append(f"{location} must be an object")
-            continue
-        area = fact.get("area")
-        if area not in CONTRACT_AREAS:
-            errors.append(f"{location}.area is invalid")
-        else:
-            covered_areas.add(area)
-        if not _text(fact.get("requirement")):
-            errors.append(f"{location}.requirement must be non-empty")
-        evidence = fact.get("evidence")
-        if not isinstance(evidence, list) or not evidence:
-            errors.append(f"{location}.evidence must be a non-empty list")
-            continue
-        for evidence_index, value in enumerate(evidence):
-            evidence_location = f"{location}.evidence[{evidence_index}]"
-            if not _text(value):
-                errors.append(f"{evidence_location} must be a non-empty path")
-                continue
-            if value not in declared_artifacts:
-                errors.append(f"{evidence_location} is not declared in result.json")
-                continue
-            _artifact(study_dir, value, evidence_location, errors)
-
-    questions = contract.get("open_questions")
-    has_blocking_question = False
-    if not isinstance(questions, list):
-        errors.append("stage4 contract open_questions must be a list")
-        questions = []
-    for index, question in enumerate(questions):
-        location = f"stage4 contract open_questions[{index}]"
-        if not isinstance(question, dict):
-            errors.append(f"{location} must be an object")
-            continue
-        if question.get("area") not in CONTRACT_AREAS:
-            errors.append(f"{location}.area is invalid")
-        if not _text(question.get("question")):
-            errors.append(f"{location}.question must be non-empty")
-        disposition = question.get("disposition")
-        if disposition not in QUESTION_DISPOSITIONS:
-            errors.append(f"{location}.disposition is invalid")
-        elif disposition == "blocking":
-            has_blocking_question = True
-        if not _text(question.get("reason")):
-            errors.append(f"{location}.reason must be non-empty")
-
-    if outcome == "ready_for_authoring":
-        missing = CONTRACT_AREAS - covered_areas
-        if missing:
-            errors.append(
-                "ready_for_authoring requires contract facts for: "
-                + ", ".join(sorted(missing))
-            )
-        if has_blocking_question:
-            errors.append("ready_for_authoring cannot have a blocking question")
-    elif outcome == "needs_study" and not has_blocking_question:
-        errors.append("needs_study requires a blocking question")
 
 
 def validate(packet_path: Path, review_path: Path, study_dir: Path) -> list[str]:
@@ -193,32 +113,6 @@ def validate(packet_path: Path, review_path: Path, study_dir: Path) -> list[str]
     if not isinstance(artifacts, dict):
         errors.append("artifacts must be an object")
         artifacts = {}
-
-    declared_artifacts = {
-        item
-        for value in artifacts.values()
-        for item in (value if isinstance(value, list) else [value])
-        if _text(item)
-    }
-    contract_value = artifacts.get("stage4_contract")
-    if _text(contract_value):
-        declared_artifacts.discard(str(contract_value))
-    contract_required = outcome in {"ready_for_authoring", "needs_study"}
-    if contract_required or contract_value is not None:
-        contract_path = _artifact(
-            study_dir,
-            contract_value,
-            "artifacts.stage4_contract",
-            errors,
-        )
-        if contract_path is not None:
-            _validate_contract(
-                contract_path,
-                study_dir,
-                outcome,
-                declared_artifacts,
-                errors,
-            )
 
     study_path = _artifact(study_dir, artifacts.get("study"), "artifacts.study", errors)
     if study_path is not None:

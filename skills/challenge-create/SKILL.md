@@ -308,12 +308,11 @@ proposed scope by mapping its live witness to the scope's registered CWE
 Technical Impact. Local flag tiers express progression or partial credit, not
 universal severity. Run the cheap rejection checks before building the fixed
 case, exercise the authoring-shaped replacement lifecycle only for survivors,
-and promote only a clean-room reproduction bundle. For `ready_for_authoring`
-and `needs_study`, preserve the general Stage 4 contract defined by the
-reference; do not invent application-specific manifest fields.
+and promote only a clean-room reproduction bundle. Use `STAGE3_STUDY.md` as the
+single semantic handoff; `result.json` only links the selected input and
+retained runtime artifacts.
 
-Validate only the study's mechanical linkage, artifact closure, and Stage 4
-contract consistency:
+Validate only the study's mechanical linkage and artifact closure:
 
 ```bash
 python3 <skill-root>/scripts/validate_stage3_study.py \

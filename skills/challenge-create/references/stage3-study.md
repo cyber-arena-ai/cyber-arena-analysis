@@ -54,12 +54,13 @@ Run these passes in order. They are one atomic study, not resumable sub-stages.
    only when the upstream fix cannot preserve the workflow; explain and retain
    the substitution.
 5. **Exercise the authoring lifecycle.** After startup, assign a fresh baseline
-   principal through the intended interface and verify its stable credential,
-   service identity, and request/network context. From the declared editable
-   source, make a small offline change, rebuild or reload, replace the service
-   gracefully, and confirm that principal state, witness state, health, and the
-   legitimate workflow survive. Record the measured startup and replacement
-   times.
+   principal through the intended interface and verify its stable credential
+   and request/network context. When the attack, witness, capture, or restart
+   model depends on an OS or service identity, verify that identity too. From
+   the declared editable source, make a small offline change, rebuild or reload,
+   replace the service gracefully, and confirm that principal state, witness
+   state, health, and the legitimate workflow survive. Record the measured
+   startup and replacement times.
 
 Use a clean attacker container and a clean application environment. Record the
 commands and raw results for the vulnerable and fixed cases. Use only the
@@ -85,7 +86,6 @@ A non-rejected study directory has this compact bundle:
 ```text
 STAGE3_STUDY.md       concise findings and authoring decision
 result.json           minimal link to the source packet and evidence
-stage4-contract.json  general facts and open questions for authoring
 <docker artifact>     Dockerfile, Compose file, or equivalent build definition
 <reproduction files>  probe plus raw vulnerable/fixed observations
 ```
@@ -105,7 +105,8 @@ Write `STAGE3_STUDY.md` under these short headings:
 - **Witness and authoring consequences** — trial flag/state, suggested scopes,
   their CWE Technical Impacts and local progression, legitimate behavior to
   preserve, obvious shortcuts checked, and the minimum constraints Stage 4 must
-  inherit.
+  inherit. State concrete access, runtime, behavior, and measurement facts when
+  changing or omitting them could invalidate authoring.
 
 `result.json` is deliberately small:
 
@@ -121,7 +122,6 @@ Write `STAGE3_STUDY.md` under these short headings:
   "outcome": "ready_for_authoring",
   "artifacts": {
     "study": "STAGE3_STUDY.md",
-    "stage4_contract": "stage4-contract.json",
     "environment": ["Dockerfile", "compose.yaml"],
     "reproduction": "reproduce.py",
     "evidence": [
@@ -139,49 +139,6 @@ Dockerfile or Compose file. Keep setup inside the single reproduction script
 rather than creating an unindexed collection of manual setup files. The
 manifest proves linkage and artifact presence. The study and raw runtime
 evidence carry the semantic argument.
-
-For `ready_for_authoring` and `needs_study`, write this general
-`stage4-contract.json` rather than adding application-specific manifest fields:
-
-```json
-{
-  "schema_version": 1,
-  "facts": [
-    {
-      "area": "access",
-      "requirement": "Assign a fresh equal-role baseline principal after startup.",
-      "evidence": ["evidence/lifecycle.txt"]
-    },
-    {
-      "area": "runtime",
-      "requirement": "Replacement preserves principal and witness state.",
-      "evidence": ["evidence/lifecycle.txt"]
-    },
-    {
-      "area": "behavior",
-      "requirement": "Preserve the legitimate workflow exercised by the study.",
-      "evidence": ["evidence/fixed.txt"]
-    },
-    {
-      "area": "measurement",
-      "requirement": "Observe the protected outcome through the public service.",
-      "evidence": ["evidence/vulnerable.txt"]
-    }
-  ],
-  "open_questions": []
-}
-```
-
-Each fact has one area from `access`, `runtime`, `behavior`, or `measurement`, a
-concrete requirement, and one or more evidence paths already named by
-`result.json`. Record a fact only when changing or omitting it could invalidate
-principal assignment, public exploit reachability, objective proof, the
-declared workflow, or rebuild/restart persistence.
-
-An open question has `area`, `question`, `disposition` (`blocking` or
-`deferred`), and `reason`. `ready_for_authoring` requires facts in all four
-areas and no blocking question. `needs_study` requires at least one blocking
-question. A rejected study may omit the contract.
 
 Before declaring the atomic result complete, copy `result.json` and only the
 files it names to a clean directory with no manual clone, cache, or build tree,

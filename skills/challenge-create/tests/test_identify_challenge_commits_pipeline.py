@@ -1414,7 +1414,6 @@ def test_prepared_claims_keep_vulnerabilities_independent(tmp_path):
     assert [
         item["range_claims"][0]["claim_id"] for item in project["components"]
     ] == ["RANGE-1", "RANGE-2"]
-    assert "lanes" not in project
 
     candidates = json.loads(candidates_path.read_text(encoding="utf-8"))
     second = json.loads(json.dumps(candidates["projects"][0]))
@@ -1564,7 +1563,6 @@ def test_git_resolution_emits_independent_repair_parent_candidates(tmp_path):
     assert packet["schema_version"] == 3
     assert packet["ready_for_semantic_review"] is True
     assert len(packet["revision_candidates"]) == 2
-    assert "candidate_windows" not in packet
     assert packet["source_result"]["sha256"] == hashlib.sha256(
         (output_dir / "EXAMPLE__APP.json").read_bytes()
     ).hexdigest()

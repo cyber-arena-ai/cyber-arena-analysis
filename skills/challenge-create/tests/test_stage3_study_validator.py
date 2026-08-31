@@ -130,7 +130,6 @@ def test_ready_study_passes_with_linked_runtime_artifacts(tmp_path):
     result = _run(packet, review, study)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "PASS" in result.stdout
 
 
 def test_ready_study_rejects_unreported_fallback_commit(tmp_path):

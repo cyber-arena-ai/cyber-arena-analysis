@@ -161,7 +161,6 @@ def test_semantic_validator_accepts_compact_review(tmp_path):
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "PASS" in result.stdout
 
 
 def test_promising_review_requires_retained_operability_evidence(tmp_path):

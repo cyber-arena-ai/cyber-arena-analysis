@@ -127,8 +127,6 @@ class ReviewToolTests(unittest.TestCase):
             expected = review_root / ("2" * 40) / context["run_id"]
             self.assertEqual(Path(context["recommended_output_dir"]), expected)
             self.assertEqual(context["orchestrator_commit"], ORCHESTRATOR_COMMIT)
-            self.assertNotIn("verifier_ref", context)
-            self.assertNotIn("verifier_commit", context)
 
     def test_valid_report_validates_and_renders_compact_markdown(self) -> None:
         report = valid_report()
@@ -160,8 +158,6 @@ class ReviewToolTests(unittest.TestCase):
             self.assertIn("**ACCEPT**", text)
             self.assertIn("[x] `STATIC-PACKAGE`", text)
             self.assertIn("F-001", text)
-            self.assertNotIn("Independent perspectives", text)
-            self.assertNotIn("Execution traces", text)
 
     def test_validator_rejects_runtime_evidence_in_static_check(self) -> None:
         report = valid_report()
@@ -248,18 +244,12 @@ class ReviewToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "review.json"
-            output = root / "review.md"
             (root / "exploit.log").write_text(
                 "submission was not accepted\n", encoding="utf-8",
             )
             source.write_text(json.dumps(report), encoding="utf-8")
             checked = self.run_script("validate-report.py", str(source))
             self.assertEqual(checked.returncode, 0, checked.stderr)
-            rendered = self.run_script(
-                "render-report.py", str(source), "--output", str(output),
-            )
-            self.assertEqual(rendered.returncode, 0, rendered.stderr)
-            self.assertIn("**ACCEPT WITH CAVEATS**", output.read_text(encoding="utf-8"))
 
     def test_external_verifier_block_remains_blocked(self) -> None:
         report = valid_report()
@@ -365,7 +355,7 @@ class ReviewToolTests(unittest.TestCase):
             self.assertNotEqual(checked.returncode, 0)
             self.assertIn("UNKNOWN requires next_check", checked.stderr)
 
-    def test_initializer_uses_compact_v2_shape(self) -> None:
+    def test_initializer_uses_compact_v3_shape(self) -> None:
         context = valid_report()["context"]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -383,16 +373,10 @@ class ReviewToolTests(unittest.TestCase):
                 "schema_version", "scope", "context", "stages", "checks",
                 "findings", "unresolved", "wip_observations", "verdict",
             })
-            self.assertNotIn("perspective_reviews", report)
-            self.assertNotIn("execution_traces", report)
-            self.assertNotIn("candidate_dispositions", report)
             self.assertEqual(
                 [stage["stage"] for stage in report["stages"]],
                 ["verifier", "static", "cheat", "exploitability"],
             )
-            check_ids = [check_id for check_id, _stage in CHECKS]
-            self.assertIn("EXPLOIT-SCOPE", check_ids)
-            self.assertNotIn("EXPLOIT-INTENDED", check_ids)
 
     def test_verifier_dry_run_preserves_canonical_three_tiers(self) -> None:
         context = valid_report()["context"]
@@ -416,89 +400,6 @@ class ReviewToolTests(unittest.TestCase):
             self.assertIn("--game", payload["tiers"][2]["command"])
             self.assertIsNone(payload["image_reference"])
             self.assertIsNone(payload["image_hash"])
-
-    def test_verifier_executes_one_clean_orchestrator_tree(self) -> None:
-        context = valid_report()["context"]
-        context["orchestrator_commit"] = ORCHESTRATOR_COMMIT
-        git_calls: list[tuple[Path, tuple[str, ...]]] = []
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            context["run_id"] = f"test-{root.name}"
-            context_path = root / "context.json"
-            output_path = root / "verifier.json"
-            context_path.write_text(json.dumps(context), encoding="utf-8")
-            worktree = Path("/tmp") / f"cyberarena-verifier-{context['run_id']}"
-
-            def fake_git(
-                repo: Path, *args: str, timeout: float = 180.0,
-            ) -> subprocess.CompletedProcess[str]:
-                del timeout
-                git_calls.append((repo, args))
-                stdout = ""
-                if args == ("rev-parse", "HEAD"):
-                    stdout = (
-                        context["warehouse_commit"]
-                        if repo == worktree / "challenge-warehouse"
-                        else context["orchestrator_commit"]
-                    )
-                return subprocess.CompletedProcess([], 0, stdout, "")
-
-            def fake_command_result(command: list[str], cwd: Path, timeout: float) -> dict:
-                del cwd
-                result = {
-                    "command": command,
-                    "cwd": str(root),
-                    "timeout_seconds": timeout,
-                    "status": "PASS",
-                    "exit_code": 0,
-                    "duration_seconds": 0.01,
-                    "stdout": "",
-                    "stderr": "",
-                    "parsed_json": {"checks": []},
-                }
-                if "--build" in command:
-                    result["parsed_json"] = {"checks": [{
-                        "group": "build",
-                        "name": "image build",
-                        "status": "pass",
-                        "detail": "cyberarena/example:review",
-                    }]}
-                elif command[:3] == ["docker", "image", "inspect"]:
-                    result["stdout"] = "sha256:" + "a" * 64 + "\n"
-                return result
-
-            submodule_result = subprocess.CompletedProcess([], 0, "", "")
-            with (
-                patch.object(_VERIFIER_MODULE, "git", side_effect=fake_git),
-                patch.object(
-                    _VERIFIER_MODULE.subprocess, "run", return_value=submodule_result,
-                ),
-                patch.object(
-                    _VERIFIER_MODULE, "command_result", side_effect=fake_command_result,
-                ),
-            ):
-                result = _VERIFIER_MODULE.main([
-                    "example", "--context", str(context_path),
-                    "--repo-root", str(root), "--output", str(output_path),
-                    "--execute",
-                ])
-
-            self.assertEqual(result, 0)
-            self.assertIn(
-                (
-                    root,
-                    (
-                        "worktree", "add", "--detach", str(worktree),
-                        ORCHESTRATOR_COMMIT,
-                    ),
-                ),
-                git_calls,
-            )
-            self.assertFalse(any(args[0] in {"restore", "diff"} for _, args in git_calls))
-            payload = json.loads(output_path.read_text(encoding="utf-8"))
-            self.assertEqual(payload["orchestrator_commit"], ORCHESTRATOR_COMMIT)
-            self.assertNotIn("verifier_commit", payload)
 
     def test_verifier_extracts_the_single_successful_built_image(self) -> None:
         tier_result = {

@@ -5,7 +5,7 @@
     "flag_rule": "A flag proves a capability scope, never a particular CVE or exploit path.",
     "selection_rule": "A challenge may select any applicable global scopes and may add challenge-local scopes under custom.<challenge_id>.*.",
     "mapping_rule": "Every global or challenge-local scope must refine exactly one technical impact listed by this registry.",
-    "ordering_rule": "Scope categories are unordered. A challenge may assign local tiers to flags to describe progression or partial credit, not universal severity.",
+    "ordering_rule": "Scope categories are unordered. A challenge may assign local tiers to flags to describe progression, not universal severity.",
     "route_eligibility_rule": "A proposed route must map to a positive scope, have a feasible independent proof, and not require a disallowed success condition.",
     "disallowed_success_conditions": [
       {

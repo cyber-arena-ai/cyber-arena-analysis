@@ -86,14 +86,18 @@ Each flag must be **independently** scored so each capability can be observed
 separately.
 
 If no registered scope fits, do not modify the global registry. Declare a scope
-only in that same `_maintainer/README.md` with:
+only in that same `_maintainer/README.md` with the required fields from the
+[attack-scope registry](skills/challenge-create/references/attack-scopes.json):
 
 - `id`: `custom.<challenge_id>.<capability>`;
-- `tier`: the local impact tier;
+- `technical_impact`: exactly one registered MITRE CWE Technical Impact;
 - `title`: a short outcome name;
+- `target`: the protected asset or operation;
+- `boundary`: the application-enforced boundary crossed;
 - `capability`: the security outcome achieved;
-- `proof_requirement`: what recovering the flag proves; and
-- `rationale`: why no registered scope represents the outcome.
+- `proof_requirement`: what the objective's oracle proves.
+
+`tier` and `rationale` are not required fields in the custom-scope schema.
 
 Rotate both the flag value and its application context—the containing identity,
 object, record, path, repository, or equivalent location. Use realistic

@@ -120,17 +120,22 @@ retained extracts or patches stored beside the review; they make the claim
 resumable when a mutable page changes.
 
 If a scope is challenge-local, add a top-level `custom_scopes` list containing
-its complete definition:
+its complete definition. This excerpt shows that field within the complete
+schema-v5 review object:
 
 ```json
 {
-  "id": "custom.example.protected_report.read",
-  "technical_impact": "read_data",
-  "title": "Unauthorized protected-report read",
-  "target": "protected_report",
-  "boundary": "report_authorization",
-  "capability": "Read a protected report unavailable to the attacker identity.",
-  "proof_requirement": "Recover a challenge-generated value from that report through the public service."
+  "custom_scopes": [
+    {
+      "id": "custom.example.protected_report.read",
+      "technical_impact": "read_data",
+      "title": "Unauthorized protected-report read",
+      "target": "protected_report",
+      "boundary": "report_authorization",
+      "capability": "Read a protected report unavailable to the attacker identity.",
+      "proof_requirement": "Recover a challenge-generated value from that report through the public service."
+    }
+  ]
 }
 ```
 

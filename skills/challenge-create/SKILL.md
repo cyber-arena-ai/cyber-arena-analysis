@@ -306,8 +306,8 @@ four proof obligations in that reference: exact target, reproduced primitive
 and fixed comparison, understood attack chain and affected features, and a
 natural trial witness without an obvious dominant shortcut. Confirm every
 proposed scope by mapping its live witness to the scope's registered CWE
-Technical Impact. Local flag tiers express progression or partial credit, not
-universal severity. Run the cheap rejection checks before building the fixed
+Technical Impact. Local flag tiers express progression, not universal
+severity. Run the cheap rejection checks before building the fixed
 case, exercise the authoring-shaped replacement lifecycle only for survivors,
 and promote only a clean-room reproduction bundle. Use `STAGE3_STUDY.md` as the
 single semantic handoff; `result.json` only links the selected input and

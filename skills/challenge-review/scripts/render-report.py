@@ -21,7 +21,6 @@ def render(report: dict, template: str) -> str:
         f"- Scope: `{report['scope']}`",
         f"- Orchestrator: `{context['orchestrator_commit']}`",
         f"- Warehouse: `{context['warehouse_commit']}`",
-        f"- Verifier: `{context['verifier_ref']}` at `{context['verifier_commit']}`",
         f"- Run: `{context['run_id']}` at `{context['timestamp']}`",
     ])
     verdict = report["verdict"]

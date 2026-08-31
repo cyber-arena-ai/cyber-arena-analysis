@@ -43,13 +43,13 @@ overall verdict.
    Resolve the challenge's upstream `OWNER/PROJECT` from its maintainer record
    and require the corresponding `artifacts/projects/OWNER__PROJECT/` directory.
 2. Initialize deterministic context; this validates registry membership and
-   records the challenge path, timestamp, run ID, and exact orchestrator,
-   warehouse, and verifier commits:
+   records the challenge path, timestamp, run ID, and exact orchestrator and
+   warehouse commits. The collector pins orchestration commit
+   `e1d0389bc435d973c35b2c988c63e452822af28c`, matching challenge creation:
 
    ```text
    python3 <skill-root>/scripts/collect-review-context.py <challenge-id> \
      --repo-root <orche-root> \
-     --verifier-ref challenge-authoring \
      --review-root <analysis-root>/artifacts/projects/OWNER__PROJECT/review \
      --output <temporary-context.json>
    ```
@@ -121,7 +121,7 @@ overall verdict.
 
 ## Stage boundaries
 
-- **Verifier:** run only the pinned `challenge-authoring` checker. It owns
+- **Verifier:** run only the checker in the pinned orchestration tree. It owns
   imports, Docker build and image-hash capture, mini orchestration, health,
   every declared flag store, and restart evidence.
 - **Static:** inspect source only. Do not build, start services, invoke the

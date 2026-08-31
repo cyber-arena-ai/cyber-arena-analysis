@@ -9,7 +9,7 @@ from pathlib import Path
 
 from _contracts import (
     ACTIVE_STAGES, ANTIPATTERNS, CHECK_STATUSES, CHECKS, CONTEXT_KEYS,
-    EVIDENCE_KINDS, SEVERITY_ORDER, STAGE_ORDER, STAGE_STATUSES,
+    EVIDENCE_KINDS, ORCHESTRATOR_COMMIT, SEVERITY_ORDER, STAGE_ORDER, STAGE_STATUSES,
     VERDICT_EFFECTS, VERDICTS, WIP_OBSERVATIONS,
 )
 
@@ -143,8 +143,8 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
         return errors
     assert isinstance(report, dict)
 
-    if report["schema_version"] != "2.0":
-        errors.append("$.schema_version: expected '2.0'")
+    if report["schema_version"] != "3.0":
+        errors.append("$.schema_version: expected '3.0'")
     scope = report["scope"]
     if scope not in ACTIVE_STAGES:
         errors.append(f"$.scope: expected one of {sorted(ACTIVE_STAGES)}")
@@ -158,9 +158,14 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
         for key in CONTEXT_KEYS:
             if not nonempty(context.get(key)):
                 errors.append(f"$.context.{key}: expected non-empty string")
-        for key in ("orchestrator_commit", "warehouse_commit", "verifier_commit"):
+        for key in ("orchestrator_commit", "warehouse_commit"):
             if isinstance(context.get(key), str) and not COMMIT.fullmatch(context[key]):
                 errors.append(f"$.context.{key}: expected 40-character lowercase commit")
+        if context.get("orchestrator_commit") != ORCHESTRATOR_COMMIT:
+            errors.append(
+                "$.context.orchestrator_commit: expected pinned commit "
+                f"{ORCHESTRATOR_COMMIT}"
+            )
 
     stages = report["stages"]
     stage_status: dict[str, str] = {}

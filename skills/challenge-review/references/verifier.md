@@ -2,9 +2,8 @@
 
 ## Objective
 
-Use the verifier from the recorded `challenge-authoring` commit as the sole
-authority for challenge discovery, imports, Docker build, and mini orchestration.
-Do not reimplement or substitute its phases.
+Use the verifier from the recorded orchestration commit as the sole authority
+for challenge discovery, imports, Docker build, and mini orchestration.
 
 ## Exact command
 
@@ -19,9 +18,8 @@ python3 <skill-root>/scripts/run-verifier.py <challenge-id> \
 ```
 
 The wrapper creates an isolated worktree at the recorded orchestrator commit,
-overlays only `challenges/check` from the recorded verifier commit, pins the
-warehouse commit, serializes shared Docker access, and cleans up afterward. It
-runs these canonical tiers in order:
+pins the warehouse commit, serializes shared Docker access, and cleans up
+afterward. It runs these canonical tiers in order:
 
 ```text
 python -m challenges.check <challenge-id> --json

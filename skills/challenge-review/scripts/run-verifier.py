@@ -11,6 +11,8 @@ import sys
 import time
 from pathlib import Path
 
+from _contracts import ORCHESTRATOR_COMMIT
+
 
 IMAGE_HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -116,9 +118,11 @@ def main(argv: list[str] | None = None) -> int:
         return fail(str(exc))
     if context.get("challenge_id") != args.challenge_id:
         return fail("challenge id does not match review context")
-    required = ["orchestrator_commit", "verifier_commit", "warehouse_commit", "run_id"]
+    required = ["orchestrator_commit", "warehouse_commit", "run_id"]
     if any(not context.get(key) for key in required):
         return fail(f"context missing one of {required}")
+    if context["orchestrator_commit"] != ORCHESTRATOR_COMMIT:
+        return fail(f"context must use pinned orchestrator commit {ORCHESTRATOR_COMMIT}")
 
     worktree = Path("/tmp") / f"cyberarena-verifier-{context['run_id']}"
     tier_args = [[], ["--build", "--ready-timeout", "150"], ["--game", "--ready-timeout", "150"]]
@@ -144,7 +148,6 @@ def main(argv: list[str] | None = None) -> int:
         "mode": "dry-run" if args.dry_run else "execute",
         "challenge_id": args.challenge_id,
         "orchestrator_commit": context["orchestrator_commit"],
-        "verifier_commit": context["verifier_commit"],
         "warehouse_commit": context["warehouse_commit"],
         "image_reference": None,
         "image_hash": None,
@@ -188,23 +191,6 @@ def main(argv: list[str] | None = None) -> int:
                     payload["error"] = "git worktree add failed"
 
             if payload["error"] is None:
-                restore = git(
-                    worktree, "restore", f"--source={context['verifier_commit']}",
-                    "--staged", "--worktree", "--", "challenges/check",
-                )
-                payload["setup"].append({
-                    "command": [
-                        "git", "restore", f"--source={context['verifier_commit']}",
-                        "--staged", "--worktree", "--", "challenges/check",
-                    ],
-                    "exit_code": restore.returncode,
-                    "stdout": restore.stdout,
-                    "stderr": restore.stderr,
-                })
-                if restore.returncode != 0:
-                    payload["error"] = "canonical verifier overlay failed"
-
-            if payload["error"] is None:
                 submodule = subprocess.run(
                     [
                         "git", "-C", str(worktree), "-c", "protocol.file.allow=always",
@@ -235,15 +221,9 @@ def main(argv: list[str] | None = None) -> int:
 
             if payload["error"] is None:
                 orchestrator_head = git(worktree, "rev-parse", "HEAD")
-                verifier_diff = git(
-                    worktree, "diff", "--quiet", context["verifier_commit"],
-                    "--", "challenges/check",
-                )
                 warehouse_head = git(worktree / "challenge-warehouse", "rev-parse", "HEAD")
                 if orchestrator_head.stdout.strip() != context["orchestrator_commit"]:
                     payload["error"] = "orchestrator worktree commit mismatch"
-                elif verifier_diff.returncode != 0:
-                    payload["error"] = "canonical verifier tree mismatch"
                 elif warehouse_head.stdout.strip() != context["warehouse_commit"]:
                     payload["error"] = "warehouse worktree commit mismatch"
 

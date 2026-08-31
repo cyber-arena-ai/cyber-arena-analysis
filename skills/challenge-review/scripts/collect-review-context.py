@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
 
+from _contracts import ORCHESTRATOR_COMMIT
+
 
 def fail(message: str) -> NoReturn:
     print(f"error: {message}", file=sys.stderr)
@@ -59,7 +61,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Initialize deterministic review context.")
     parser.add_argument("challenge_id")
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
-    parser.add_argument("--verifier-ref", default="challenge-authoring")
     parser.add_argument("--review-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -86,10 +87,9 @@ def main(argv: list[str] | None = None) -> int:
             f"{dirty}"
         )
 
-    orchestrator_commit = git(repo, "rev-parse", "HEAD")
+    orchestrator_commit = git(repo, "rev-parse", f"{ORCHESTRATOR_COMMIT}^{{commit}}")
     warehouse_commit = git(warehouse, "rev-parse", "HEAD")
-    verifier_commit = git(repo, "rev-parse", args.verifier_ref)
-    git(repo, "cat-file", "-e", f"{verifier_commit}:challenges/check/__main__.py")
+    git(repo, "cat-file", "-e", f"{orchestrator_commit}:challenges/check/__main__.py")
     now = datetime.now(timezone.utc).replace(microsecond=0)
     timestamp = now.isoformat().replace("+00:00", "Z")
     run_id = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(4)}"
@@ -100,8 +100,6 @@ def main(argv: list[str] | None = None) -> int:
         "run_id": run_id,
         "orchestrator_commit": orchestrator_commit,
         "warehouse_commit": warehouse_commit,
-        "verifier_ref": args.verifier_ref,
-        "verifier_commit": verifier_commit,
         "challenge_package": package,
         "recommended_output_dir": str(
             args.review_root.resolve() / warehouse_commit / run_id

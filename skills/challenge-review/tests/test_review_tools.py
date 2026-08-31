@@ -14,7 +14,7 @@ SKILL_DIR = Path(__file__).resolve().parents[1]
 SCRIPTS = SKILL_DIR / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from _contracts import CHECKS, STAGE_ORDER  # noqa: E402
+from _contracts import CHECKS, ORCHESTRATOR_COMMIT, STAGE_ORDER  # noqa: E402
 
 _VERIFIER_SPEC = importlib.util.spec_from_file_location(
     "challenge_review_run_verifier", SCRIPTS / "run-verifier.py",
@@ -46,17 +46,15 @@ def check_evidence(check_id: str, stage: str) -> str:
 
 def valid_report() -> dict:
     return {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "scope": "all",
         "context": {
             "challenge_id": "example",
             "challenge_dir": "challenge-warehouse/example/example",
             "timestamp": "2026-07-13T12:00:00Z",
             "run_id": "20260713T120000Z-a1b2c3d4",
-            "orchestrator_commit": "1" * 40,
+            "orchestrator_commit": ORCHESTRATOR_COMMIT,
             "warehouse_commit": "2" * 40,
-            "verifier_ref": "challenge-authoring",
-            "verifier_commit": "3" * 40,
         },
         "stages": [
             {"stage": stage, "status": "PASS", "summary": f"{stage} passed."}
@@ -102,10 +100,10 @@ class ReviewToolTests(unittest.TestCase):
             def fake_git(repo: Path, *args: str) -> str:
                 if args[0] == "status" or args[0] == "cat-file":
                     return ""
-                if args == ("rev-parse", "challenge-authoring"):
-                    return "3" * 40
+                if args == ("rev-parse", f"{ORCHESTRATOR_COMMIT}^{{commit}}"):
+                    return ORCHESTRATOR_COMMIT
                 if args == ("rev-parse", "HEAD"):
-                    return ("2" if repo == warehouse else "1") * 40
+                    return "2" * 40
                 raise AssertionError((repo, args))
 
             with (
@@ -128,6 +126,9 @@ class ReviewToolTests(unittest.TestCase):
             context = json.loads(output.read_text(encoding="utf-8"))
             expected = review_root / ("2" * 40) / context["run_id"]
             self.assertEqual(Path(context["recommended_output_dir"]), expected)
+            self.assertEqual(context["orchestrator_commit"], ORCHESTRATOR_COMMIT)
+            self.assertNotIn("verifier_ref", context)
+            self.assertNotIn("verifier_commit", context)
 
     def test_valid_report_validates_and_renders_compact_markdown(self) -> None:
         report = valid_report()
@@ -334,6 +335,20 @@ class ReviewToolTests(unittest.TestCase):
             self.assertNotEqual(checked.returncode, 0)
             self.assertIn("expected REJECT", checked.stderr)
 
+    def test_validator_rejects_unpinned_orchestrator_commit(self) -> None:
+        report = valid_report()
+        report["context"]["orchestrator_commit"] = "1" * 40
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "exploit.log").write_text(
+                "submission result: ACCEPTED\n", encoding="utf-8",
+            )
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+            self.assertNotEqual(checked.returncode, 0)
+            self.assertIn("expected pinned commit", checked.stderr)
+
     def test_unknown_check_requires_matching_unresolved_concern(self) -> None:
         report = valid_report()
         report["scope"] = "static"
@@ -363,7 +378,7 @@ class ReviewToolTests(unittest.TestCase):
             )
             self.assertEqual(initialized.returncode, 0, initialized.stderr)
             report = json.loads(report_path.read_text(encoding="utf-8"))
-            self.assertEqual(report["schema_version"], "2.0")
+            self.assertEqual(report["schema_version"], "3.0")
             self.assertEqual(set(report), {
                 "schema_version", "scope", "context", "stages", "checks",
                 "findings", "unresolved", "wip_observations", "verdict",
@@ -401,6 +416,89 @@ class ReviewToolTests(unittest.TestCase):
             self.assertIn("--game", payload["tiers"][2]["command"])
             self.assertIsNone(payload["image_reference"])
             self.assertIsNone(payload["image_hash"])
+
+    def test_verifier_executes_one_clean_orchestrator_tree(self) -> None:
+        context = valid_report()["context"]
+        context["orchestrator_commit"] = ORCHESTRATOR_COMMIT
+        git_calls: list[tuple[Path, tuple[str, ...]]] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            context["run_id"] = f"test-{root.name}"
+            context_path = root / "context.json"
+            output_path = root / "verifier.json"
+            context_path.write_text(json.dumps(context), encoding="utf-8")
+            worktree = Path("/tmp") / f"cyberarena-verifier-{context['run_id']}"
+
+            def fake_git(
+                repo: Path, *args: str, timeout: float = 180.0,
+            ) -> subprocess.CompletedProcess[str]:
+                del timeout
+                git_calls.append((repo, args))
+                stdout = ""
+                if args == ("rev-parse", "HEAD"):
+                    stdout = (
+                        context["warehouse_commit"]
+                        if repo == worktree / "challenge-warehouse"
+                        else context["orchestrator_commit"]
+                    )
+                return subprocess.CompletedProcess([], 0, stdout, "")
+
+            def fake_command_result(command: list[str], cwd: Path, timeout: float) -> dict:
+                del cwd
+                result = {
+                    "command": command,
+                    "cwd": str(root),
+                    "timeout_seconds": timeout,
+                    "status": "PASS",
+                    "exit_code": 0,
+                    "duration_seconds": 0.01,
+                    "stdout": "",
+                    "stderr": "",
+                    "parsed_json": {"checks": []},
+                }
+                if "--build" in command:
+                    result["parsed_json"] = {"checks": [{
+                        "group": "build",
+                        "name": "image build",
+                        "status": "pass",
+                        "detail": "cyberarena/example:review",
+                    }]}
+                elif command[:3] == ["docker", "image", "inspect"]:
+                    result["stdout"] = "sha256:" + "a" * 64 + "\n"
+                return result
+
+            submodule_result = subprocess.CompletedProcess([], 0, "", "")
+            with (
+                patch.object(_VERIFIER_MODULE, "git", side_effect=fake_git),
+                patch.object(
+                    _VERIFIER_MODULE.subprocess, "run", return_value=submodule_result,
+                ),
+                patch.object(
+                    _VERIFIER_MODULE, "command_result", side_effect=fake_command_result,
+                ),
+            ):
+                result = _VERIFIER_MODULE.main([
+                    "example", "--context", str(context_path),
+                    "--repo-root", str(root), "--output", str(output_path),
+                    "--execute",
+                ])
+
+            self.assertEqual(result, 0)
+            self.assertIn(
+                (
+                    root,
+                    (
+                        "worktree", "add", "--detach", str(worktree),
+                        ORCHESTRATOR_COMMIT,
+                    ),
+                ),
+                git_calls,
+            )
+            self.assertFalse(any(args[0] in {"restore", "diff"} for _, args in git_calls))
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["orchestrator_commit"], ORCHESTRATOR_COMMIT)
+            self.assertNotIn("verifier_commit", payload)
 
     def test_verifier_extracts_the_single_successful_built_image(self) -> None:
         tier_result = {

@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
 
     active = ACTIVE_STAGES[args.scope]
     report = {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "scope": args.scope,
         "context": {key: raw_context[key] for key in CONTEXT_KEYS},
         "stages": [

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 
+ORCHESTRATOR_COMMIT = "e1d0389bc435d973c35b2c988c63e452822af28c"
+
 STAGE_ORDER = ("verifier", "static", "cheat", "exploitability")
 
 CHECKS = (
@@ -68,6 +70,5 @@ WIP_OBSERVATIONS = {
 
 CONTEXT_KEYS = (
     "challenge_id", "challenge_dir", "timestamp", "run_id",
-    "orchestrator_commit", "warehouse_commit", "verifier_ref",
-    "verifier_commit",
+    "orchestrator_commit", "warehouse_commit",
 )

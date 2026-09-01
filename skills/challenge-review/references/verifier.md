@@ -7,7 +7,7 @@ for challenge discovery, imports, Docker build, and mini orchestration.
 
 ## Exact command
 
-Run this wrapper once in execution mode from the master context:
+The root agent runs this wrapper once in execution mode:
 
 ```text
 python3 <skill-root>/scripts/run-verifier.py <challenge-id> \

@@ -78,6 +78,9 @@ persistence, and leakage behavior here.
 - Reviewed and defender-edited source enters the built image and serving
   process.
 - Startup failures are not masked.
+- Inspect provenance directly in the selected package. Missing or ambiguous
+  immutable origin is `AP-PROVENANCE-MISSING` and requires revision, not a
+  context-collection failure.
 - **YOU MUST** pin upstream source and every dependency that can change challenge
   or vulnerability behavior to an immutable version, and record usable upstream
   provenance. This includes the base image or system packages when they affect

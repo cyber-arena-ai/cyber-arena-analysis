@@ -52,8 +52,10 @@ PASS evidence.
 
 ## Independence
 
-- Give each specialist the frozen context, `<analysis-root>/CONTRIBUTING.md`,
-  this protocol, challenge source, and only its stage reference.
+- Give each specialist the frozen context, this protocol, challenge source, and
+  only its stage reference. Give `<analysis-root>/CONTRIBUTING.md` only to the
+  static specialist; give the attack-scope registry to static and
+  exploitability.
 - Do not reveal another specialist's findings, suspected defects, oracle
   reports, or expected verdict.
 - Use clean isolated state for every dynamic specialist and cheat mutation.
@@ -109,8 +111,10 @@ Re-read every cited construct in full. For dynamic claims, require the exact
 actor boundary, action, observed result, and authoritative artifact. Never infer
 an accepted exploit by combining proof recovery with generic scoring wiring.
 For scope claims, require the observed protected result—not merely potential
-access—and resolve the scope's CWE Technical Impact from the registry. Do not
-persist the disposition ledger or specialist transcripts.
+access—and resolve the scope's CWE Technical Impact from the registry. Treat an
+advisory's CWE weakness label as root-cause evidence, not as the Technical
+Impact proved by an objective outcome. Do not persist the disposition ledger or
+specialist transcripts.
 
 ## Status and finding rules
 

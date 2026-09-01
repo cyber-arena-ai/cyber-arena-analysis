@@ -5,11 +5,11 @@ description: "Review exactly one registered Cyber Arena attack/defense challenge
 
 # Challenge review
 
-Act as a lightweight reviewer and orchestrator. Run the canonical verifier,
-dispatch independent specialists, wait for their results, and adjudicate their
-evidence into one compact, mechanically rendered report. Do not redo specialist
-reviews or modify the challenge, except for disposable cheat mutations in
-isolated runtime state.
+Act as a lightweight reviewer and orchestrator. When required, run the canonical
+verifier, dispatch independent specialists, wait for their results, and
+adjudicate their evidence into one compact, mechanically rendered report. Do
+not redo specialist reviews or modify the challenge, except for disposable
+cheat mutations in isolated runtime state.
 
 Resolve the directory containing this file as `<skill-root>`. If the current
 working directory is inside the `cyber-arena-analysis` checkout, use that
@@ -18,7 +18,7 @@ repository as `<analysis-root>`. Otherwise stop and ask the user to identify the
 cache directory. Persist reviews under `<analysis-root>/artifacts/reviews/`.
 Locate the separate
 `cyber-arena-orche` checkout as `<orche-root>`; do not persist review artifacts
-there. Use the required warehouse-path input for every review operation.
+there.
 
 ## Input
 
@@ -37,16 +37,11 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
 
 ## Execute in this order
 
-1. Read `<analysis-root>/CONTRIBUTING.md`. For `STATIC`, `EXPLOITABILITY`, or
-   `ALL`, also read
+1. For `STATIC` or `ALL`, read `<analysis-root>/CONTRIBUTING.md`. For `STATIC`,
+   `EXPLOITABILITY`, or `ALL`, also read
    `<analysis-root>/skills/challenge-create/references/attack-scopes.json`;
    for other scopes, load that registry only if adjudicating a surviving scope
-   claim. Treat advisory CWE weakness labels as root-cause
-   evidence, not as the Technical Impact proved by an objective outcome.
-   Do not resolve upstream project identity during setup. When static review is
-   selected, inspect provenance directly in the selected challenge package;
-   missing or ambiguous immutable origin is `AP-PROVENANCE-MISSING` and requires
-   revision, not a context-collection failure.
+   claim. Do not resolve upstream project identity during setup.
 2. Initialize pinned review context; this validates runtime auto-discovery from
    the explicitly selected warehouse and records its absolute path, the
    challenge path, timestamp, run ID, and exact orchestrator commit. The
@@ -61,10 +56,9 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
      --output <temporary-context.json>
    ```
 
-   The collector prints known IDs when auto-discovery fails. Discovery is setup
-   only; do not treat it as verifier evidence. Create the collector's
-   `recommended_output_dir`, move the context to `context.json`, and initialize
-   the schema-v6 `review.json`; its objective matrix starts empty:
+   Discovery is setup only; do not treat it as verifier evidence. Create the
+   collector's `recommended_output_dir`, move the context to `context.json`, and
+   initialize `review.json`:
 
    ```text
    python3 <skill-root>/scripts/init-report.py \
@@ -81,12 +75,9 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    [antipattern-catalog.md](references/antipattern-catalog.md) only when
    classifying a surviving finding.
 4. For `VERIFIER`, `CHEAT`, `EXPLOITABILITY`, or `ALL`, run the exact wrapper in
-   [verifier.md](references/verifier.md) from the master context and populate
-   the verifier checks from its authoritative output. Do not delegate or
-   substitute this command. Require the pinned orchestrator and a built-image
-   `sha256:<64 hex>` ID. Copy its `image_hash` into report context and its frozen
-   `{store, outcome, scope, oracle}` rows into the report objective matrix. Use
-   real `verifier.json#/...` JSON Pointers for verifier evidence. For `ALL`,
+   [verifier.md](references/verifier.md) directly; do not delegate or substitute
+   it. Populate the verifier checks from its authoritative output and copy its
+   verified image hash and frozen objective matrix into the report. For `ALL`,
    verifier `FAIL` is a hard `REJECT`: mark the other stages `NOT_RUN` and skip
    to reporting. Treat unavailable external verifier infrastructure as
    `BLOCKED`. Continue only after verifier `PASS`.
@@ -97,10 +88,11 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
      cheat, and exploitability—concurrently on isolated state.
 
    Start each task with the exact prompt in its stage reference, then provide
-   the frozen context, `<analysis-root>/CONTRIBUTING.md`, review protocol, stage
-   reference, the attack-scope registry when loaded for that stage, and verifier
-   output for dynamic stages. Do not preface or rewrite the prompt.
-   Never reveal another specialist's findings, an oracle, or a draft verdict.
+   the frozen context, review protocol, stage reference, and verifier output for
+   dynamic stages. Give `<analysis-root>/CONTRIBUTING.md` only to the static
+   specialist; give the attack-scope registry to static and exploitability. Do
+   not preface or rewrite the prompt. Never reveal another specialist's
+   findings, oracle reports, or a draft verdict.
    If independent agents are unavailable, stop as `BLOCKED`.
 6. Wait for every dispatched specialist to finish before adjudicating. Do not
    leak partial findings between specialists or issue an early verdict.
@@ -110,16 +102,7 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    actionable findings or benchmark-critical unresolved concerns. Do not use
    voting or numeric confidence thresholds.
 8. Read [report-schema.md](references/report-schema.md), then fill the selected
-   high-level checklist and report entries. Use `UNKNOWN` only with concise
-   evidence, one exact `next_check`, and a matching unresolved concern. Static
-   review may require a later runtime check but never executes it. Keep each
-   stage and checklist summary to one conclusion sentence; put supporting facts
-   only in its `evidence` field or surviving finding. For a static-only review,
-   fill the objective matrix directly from the selected package. A passing
-   `STATIC-FLAG` conclusion includes at least one source evidence fact beginning
-   `store=<store>; outcome=<outcome>; scope=<scope>; oracle=<oracle>;` for
-   every matrix row. Use `BLOCKED` only for external
-   infrastructure.
+   high-level checklist and report entries.
 9. Persist only `context.json`, `review.json`, `review.md`, canonical verifier
    output, and the minimum raw dynamic artifacts needed to substantiate a cheat
    or exploit result. Dynamic artifacts contain the exact command or request and

@@ -58,6 +58,13 @@ accepted objective through another genuine vulnerability is valid. Fail this
 check only when the path depends on the arena environment rather than a
 vulnerability that affects broader upstream use.
 
+For every EXECUTE objective, identify any concrete, source-supported in-band
+write-only path against the proof operation or its backing state. For each such
+path, run a direct-WRITE negative control and verify that it neither reveals nor
+creates a value accepted for EXECUTE. If no such path exists, record that
+conclusion instead of manufacturing an out-of-band control. Victim filesystem
+access and facility proof state are not valid evidence.
+
 ### `CHEAT-DEF-AMPUTATE`
 
 Disable the narrow useful route, method, parameter, or component carrying the

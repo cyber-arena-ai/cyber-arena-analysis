@@ -12,6 +12,7 @@ CHECKS = (
     ("VERIFY-FLAG", "verifier"),
     ("VERIFY-RESTART", "verifier"),
     ("STATIC-PACKAGE", "static"),
+    ("STATIC-AUTH", "static"),
     ("STATIC-BUILD", "static"),
     ("STATIC-VULNERABILITY", "static"),
     ("STATIC-FLAG", "static"),

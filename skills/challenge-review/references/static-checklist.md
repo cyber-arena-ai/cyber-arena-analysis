@@ -53,6 +53,27 @@ Do not turn an expected later runtime confirmation into static work.
 Registry imports and interface execution belong to the verifier. Record source
 contradictions here; hand runtime uncertainty to `VERIFY-INTERFACE`.
 
+### `STATIC-AUTH`
+
+- Identify how every attacker obtains a distinct baseline principal and
+  credential with the same declared normal-user privileges: independent native
+  self-registration or arena provisioning. A shared anonymous identity or
+  shared published login does not satisfy the normative principal contract.
+- When `provision_principals()` is overridden, it derives independent
+  assignments from the framework seeds, covers the exact attacker set, and
+  uses supported application administration rather than opaque state mutation.
+- Each credential is unguessable and cannot be derived from team IDs, public
+  data, another credential, or an attacker's own assigned state.
+- Except for requester-scoped framework delivery, challenge-controlled
+  endpoints, prompts, logs, events, records, handles, targets, and artifacts
+  expose no credential.
+- Principals and credentials remain valid across restart and are not recreated
+  or rotated with objective context.
+
+Requester-scoped delivery and the framework's once-per-match principal registry
+belong to orchestration. Review only challenge-owned assignment, privilege,
+persistence, and leakage behavior here.
+
 ### `STATIC-BUILD`
 
 - Reviewed and defender-edited source enters the built image and serving
@@ -78,6 +99,9 @@ contradictions here; hand runtime uncertainty to `VERIFY-INTERFACE`.
 
 - Every `flag_store_specs()` entry binds one protected asset to a READ, WRITE,
   or EXECUTE outcome, a matching scope, and a coherent oracle and scoring path.
+- `PASS` evidence names every declared store and its outcome, scope, oracle,
+  target rotation, and capture or scoring path; one store cannot stand in for
+  another.
 - READ plants a token in protected state and scores only recovery and submission
   of that current token.
 - WRITE exposes the attacker's issued mark and target, then scores only when
@@ -85,8 +109,11 @@ contradictions here; hand runtime uncertainty to `VERIFY-INTERFACE`.
   facility integrity token is not attacker proof and is never scoreable.
 - EXECUTE scores only a current token released by invoking the execution proof
   operation from the victim service context.
-- Rotation selects the current objective instance and proof material rather
-  than stale state.
+- Placement converges stale, partial, or repeated state to the declared current
+  round context without leaving an older objective instance scoreable.
+- Objective instances, proof material, and target IDs rotate each round.
+  WRITE and EXECUTE expose a nonempty round-specific target ID containing no
+  proof token, credential, or facility-only state.
 - Every objective maps to a registered scope, or a complete `custom.*` scope,
   and that scope refines exactly one registered CWE Technical Impact.
 - A custom scope's complete definition is retained in the challenge's
@@ -116,7 +143,9 @@ hand the precise mutation to cheat review when execution decides it.
 
 - Restart rebuilds or reloads defender-edited source.
 - Failures surface clearly and old workers cannot obviously continue serving.
-- Required application and objective state survives according to the contract.
+- Repeated restarts converge on the same serving state.
+- Required application and objective state survives according to the contract,
+  and baseline principals and credentials remain usable.
 
 ### `STATIC-PROMPT`
 

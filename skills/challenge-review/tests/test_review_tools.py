@@ -15,7 +15,7 @@ SKILL_DIR = Path(__file__).resolve().parents[1]
 SCRIPTS = SKILL_DIR / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from _contracts import CHECKS, ORCHESTRATOR_COMMIT, STAGE_ORDER  # noqa: E402
+from _contracts import CHECKS, ORCHESTRATOR_COMMIT, SCHEMA_VERSION, STAGE_ORDER  # noqa: E402
 
 _VERIFIER_SPEC = importlib.util.spec_from_file_location(
     "challenge_review_run_verifier", SCRIPTS / "run-verifier.py",
@@ -34,14 +34,71 @@ _CONTEXT_SPEC.loader.exec_module(_CONTEXT_MODULE)
 
 def check_evidence(check_id: str, stage: str) -> str:
     if stage == "static":
+        if check_id == "STATIC-FLAG":
+            return (
+                "source: challenge-warehouse/example/example/challenge.py:20 — "
+                "store=default; outcome=read; scope=app.cross_boundary.read; "
+                "oracle=submit; declaration and scoring path agree"
+            )
         return "source: challenge-warehouse/example/example/challenge.py:10 — behavior is wired"
     if stage == "verifier":
-        return f"verifier: verifier.json#{check_id} — canonical check passed"
+        tier = {
+            "VERIFY-INTERFACE": 0,
+            "VERIFY-BUILD": 1,
+            "VERIFY-HEALTH": 2,
+            "VERIFY-FLAG": 2,
+            "VERIFY-RESTART": 2,
+        }[check_id]
+        return f"verifier: verifier.json#/tiers/{tier}/status — canonical tier passed"
     if stage == "cheat":
         return f"dynamic: cheat.log:1 — {check_id} control produced the required result"
     if check_id == "EXPLOIT-ACCEPT":
-        return "dynamic: exploit.log:1 — current opponent flag submission was ACCEPTED"
+        return "dynamic: events.jsonl:1 — current opponent objective was accepted"
     return f"dynamic: exploit.log:1 — {check_id} was observed in band"
+
+
+def report_evidence(check_id: str, stage: str) -> list[str]:
+    evidence = [check_evidence(check_id, stage)]
+    if check_id == "VERIFY-FLAG":
+        evidence.insert(
+            0,
+            "verifier: verifier.json#/tiers/1/status — handler round-trip passed",
+        )
+    return evidence
+
+
+IMAGE_HASH = f"sha256:{'a' * 64}"
+OBJECTIVES = [{
+    "store": "default",
+    "outcome": "read",
+    "scope": "app.cross_boundary.read",
+    "oracle": "submit",
+}]
+
+
+def accepted_event(**payload_overrides: object) -> dict:
+    payload = {
+        "accepted": True,
+        "reason": "ACCEPTED",
+        "submitter_team_id": "team1",
+        "victim_team_id": "team2",
+        "service": "example",
+        "store": "default",
+        "phase": "ATTACK",
+        "outcome": "read",
+        "scope": "app.cross_boundary.read",
+        "oracle": "submit",
+    }
+    payload.update(payload_overrides)
+    return {
+        "id": "event-1",
+        "ts": 1.0,
+        "type": "FLAG_SUBMITTED",
+        "team_id": payload["submitter_team_id"],
+        "round_id": 1,
+        "phase": payload["phase"],
+        "payload": payload,
+    }
 
 
 def make_warehouse(root: Path) -> Path:
@@ -75,7 +132,7 @@ def checker_stdout(*, ok: bool = True, checks: list[dict] | None = None) -> str:
 
 def valid_report() -> dict:
     return {
-        "schema_version": "5.0",
+        "schema_version": SCHEMA_VERSION,
         "scope": "all",
         "context": {
             "challenge_id": "example",
@@ -84,7 +141,9 @@ def valid_report() -> dict:
             "run_id": "20260713T120000Z-a1b2c3d4",
             "orchestrator_commit": ORCHESTRATOR_COMMIT,
             "warehouse_path": "/tmp/selected-warehouse",
+            "image_hash": IMAGE_HASH,
         },
+        "objectives": [dict(item) for item in OBJECTIVES],
         "stages": [
             {"stage": stage, "status": "PASS", "summary": f"{stage} passed."}
             for stage in STAGE_ORDER
@@ -95,7 +154,7 @@ def valid_report() -> dict:
                 "stage": stage,
                 "status": "PASS",
                 "summary": "Required behavior is supported.",
-                "evidence": [check_evidence(check_id, stage)],
+                "evidence": report_evidence(check_id, stage),
                 "next_check": None,
             }
             for check_id, stage in CHECKS
@@ -107,12 +166,84 @@ def valid_report() -> dict:
     }
 
 
+def static_report() -> dict:
+    report = valid_report()
+    report["scope"] = "static"
+    report["context"]["image_hash"] = None
+    report["checks"] = [item for item in report["checks"] if item["stage"] == "static"]
+    for stage in report["stages"]:
+        if stage["stage"] != "static":
+            stage.update(status="NOT_RUN", summary="Outside selected scope.")
+    report["verdict"] = {"value": "PARTIAL", "summary": "Static-only review."}
+    return report
+
+
 class ReviewToolTests(unittest.TestCase):
     def run_script(self, name: str, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(SCRIPTS / name), *args],
             text=True, capture_output=True, check=False,
         )
+
+    def verifier_payload(self, report: dict) -> dict:
+        status = next(
+            item["status"] for item in report["stages"]
+            if item["stage"] == "verifier"
+        )
+        passed = json.loads(checker_stdout())
+        failed = json.loads(checker_stdout(ok=False))
+        if status == "PASS":
+            tier_statuses = ["PASS", "PASS", "PASS"]
+            parsed = [passed, passed, passed]
+            objectives = report["objectives"]
+            error = None
+        elif status == "FAIL":
+            tier_statuses = ["FAIL", "NOT_RUN", "NOT_RUN"]
+            parsed = [failed, None, None]
+            objectives = None
+            error = None
+        else:
+            tier_statuses = ["PASS", "BLOCKED", "NOT_RUN"]
+            parsed = [passed, None, None]
+            objectives = report["objectives"]
+            error = "Docker infrastructure unavailable"
+        return {
+            "mode": "execute",
+            "challenge_id": report["context"]["challenge_id"],
+            "run_id": report["context"]["run_id"],
+            "orchestrator_commit": report["context"]["orchestrator_commit"],
+            "warehouse_path": report["context"]["warehouse_path"],
+            "image_hash": report["context"]["image_hash"],
+            "objectives": objectives,
+            "status": status,
+            "tiers": [
+                {"name": name, "status": tier_status, "parsed_json": parsed_json}
+                for name, tier_status, parsed_json in zip(
+                    ("static", "build", "game"), tier_statuses, parsed, strict=True,
+                )
+            ],
+            "error": error,
+        }
+
+    def write_artifacts(
+        self,
+        root: Path,
+        report: dict,
+        *,
+        include_acceptance: bool = True,
+        event: dict | None = None,
+        verifier: dict | None = None,
+    ) -> None:
+        (root / "cheat.log").write_text("control completed\n", encoding="utf-8")
+        (root / "exploit.log").write_text("PoV completed\n", encoding="utf-8")
+        if include_acceptance:
+            (root / "events.jsonl").write_text(
+                json.dumps(event or accepted_event()) + "\n", encoding="utf-8",
+            )
+        if any(item["stage"] == "verifier" for item in report["checks"]):
+            (root / "verifier.json").write_text(
+                json.dumps(verifier or self.verifier_payload(report)), encoding="utf-8",
+            )
 
     def run_verifier_main(
         self,
@@ -193,6 +324,7 @@ class ReviewToolTests(unittest.TestCase):
             self.assertEqual(context["orchestrator_commit"], ORCHESTRATOR_COMMIT)
             self.assertEqual(context["warehouse_path"], str(warehouse))
             self.assertEqual(context["challenge_dir"], "example/package")
+            self.assertIsNone(context["image_hash"])
 
     def test_context_collector_requires_valid_explicit_warehouse(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -229,7 +361,7 @@ class ReviewToolTests(unittest.TestCase):
             root = Path(tmp)
             source = root / "review.json"
             output = root / "review.md"
-            (root / "exploit.log").write_text("submission result: ACCEPTED\n", encoding="utf-8")
+            self.write_artifacts(root, report)
             source.write_text(json.dumps(report), encoding="utf-8")
 
             checked = self.run_script("validate-report.py", str(source))
@@ -240,8 +372,244 @@ class ReviewToolTests(unittest.TestCase):
             self.assertEqual(rendered.returncode, 0, rendered.stderr)
             text = output.read_text(encoding="utf-8")
             self.assertIn("**ACCEPT**", text)
-            self.assertIn("[x] `STATIC-PACKAGE`", text)
+            self.assertIn("[PASS] `STATIC-PACKAGE`", text)
+            self.assertIn(check_evidence("STATIC-PACKAGE", "static"), text)
             self.assertIn("F-001", text)
+
+    def test_validator_rejects_not_applicable_check_status(self) -> None:
+        report = valid_report()
+        report["checks"][0].update(status="NOT_APPLICABLE", evidence=[])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_artifacts(root, report)
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+
+        self.assertNotEqual(checked.returncode, 0)
+        self.assertIn("unknown status 'NOT_APPLICABLE'", checked.stderr)
+
+    def test_validator_rejects_selected_stage_left_not_run(self) -> None:
+        report = static_report()
+        next(
+            stage for stage in report["stages"] if stage["stage"] == "static"
+        ).update(status="NOT_RUN", summary="Static review was not run.")
+        for check in report["checks"]:
+            check.update(status="NOT_RUN", evidence=[])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_artifacts(root, report, include_acceptance=False)
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+
+        self.assertNotEqual(checked.returncode, 0)
+        self.assertIn("selected stage must run", checked.stderr)
+
+    def test_static_pass_may_retain_runtime_unknown(self) -> None:
+        report = static_report()
+        check = next(item for item in report["checks"] if item["check_id"] == "STATIC-BUILD")
+        check.update(
+            status="UNKNOWN",
+            next_check="Run VERIFY-BUILD against the selected warehouse.",
+        )
+        report["unresolved"] = [{
+            "concern_id": "U-001",
+            "stage": "static",
+            "check_id": "STATIC-BUILD",
+            "concern": "Runtime build behavior remains undecided.",
+            "evidence": check["evidence"],
+            "resolving_check": "Run VERIFY-BUILD.",
+            "owner_stage": "verifier",
+        }]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_artifacts(root, report, include_acceptance=False)
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+
+    def test_static_flag_pass_requires_evidence_for_every_objective(self) -> None:
+        report = static_report()
+        report["objectives"].append({
+            "store": "profile",
+            "outcome": "write",
+            "scope": "app.cross_boundary.write",
+            "oracle": "claim",
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_artifacts(root, report, include_acceptance=False)
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+
+        self.assertNotEqual(checked.returncode, 0)
+        self.assertIn("missing per-store evidence for ['profile']", checked.stderr)
+
+    def test_static_flag_evidence_must_match_the_full_objective_row(self) -> None:
+        report = static_report()
+        report["objectives"][0].update(
+            outcome="write", scope="app.cross_boundary.write", oracle="claim",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_artifacts(root, report, include_acceptance=False)
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+
+        self.assertNotEqual(checked.returncode, 0)
+        self.assertIn("missing per-store evidence for ['default']", checked.stderr)
+
+    def test_exploit_accept_requires_matching_authoritative_event(self) -> None:
+        cases = {
+            "negated-prose": "submission was not accepted",
+            "rejected": accepted_event(accepted=False, reason="UNKNOWN"),
+            "own-team": accepted_event(victim_team_id="team1"),
+            "wrong-scope": accepted_event(scope="host.file.read"),
+            "malformed-scope": accepted_event(scope={"name": "not-a-string"}),
+        }
+        for name, event in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                report = valid_report()
+                root = Path(tmp)
+                self.write_artifacts(
+                    root, report,
+                    event=event if isinstance(event, dict) else accepted_event(),
+                )
+                if isinstance(event, str):
+                    (root / "events.jsonl").write_text(event + "\n", encoding="utf-8")
+                source = root / "review.json"
+                source.write_text(json.dumps(report), encoding="utf-8")
+                checked = self.run_script("validate-report.py", str(source))
+
+                self.assertNotEqual(checked.returncode, 0)
+                self.assertIn("accepted FLAG_SUBMITTED evidence", checked.stderr)
+
+    def test_exploit_accept_allows_any_confined_raw_event_artifact(self) -> None:
+        report = valid_report()
+        accept = next(
+            item for item in report["checks"] if item["check_id"] == "EXPLOIT-ACCEPT"
+        )
+        accept["evidence"] = [
+            "dynamic: pov-events.jsonl:1 — current opponent objective was accepted",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_artifacts(root, report)
+            (root / "pov-events.jsonl").write_text(
+                json.dumps(accepted_event()) + "\n", encoding="utf-8",
+            )
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+
+    def test_validator_binds_verifier_artifact_and_json_pointer(self) -> None:
+        mutations = {
+            "challenge": lambda artifact: artifact.update(challenge_id="other"),
+            "run": lambda artifact: artifact.update(run_id="different-run"),
+            "dry-run": lambda artifact: artifact.update(mode="dry-run"),
+            "image": lambda artifact: artifact.update(image_hash=f"sha256:{'b' * 64}"),
+            "tier": lambda artifact: artifact["tiers"][2].update(status="FAIL"),
+            "objectives": lambda artifact: artifact["objectives"][0].update(
+                scope="host.file.read"
+            ),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                report = valid_report()
+                artifact = self.verifier_payload(report)
+                mutate(artifact)
+                root = Path(tmp)
+                self.write_artifacts(root, report, verifier=artifact)
+                source = root / "review.json"
+                source.write_text(json.dumps(report), encoding="utf-8")
+                checked = self.run_script("validate-report.py", str(source))
+
+                self.assertNotEqual(checked.returncode, 0)
+
+        report = valid_report()
+        report["checks"][0]["evidence"] = [
+            "verifier: verifier.json#/tiers/99/status — nonexistent tier passed",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_artifacts(root, report)
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+
+        self.assertNotEqual(checked.returncode, 0)
+        self.assertIn("must resolve a JSON Pointer", checked.stderr)
+
+        report = valid_report()
+        build = next(
+            item for item in report["checks"] if item["check_id"] == "VERIFY-BUILD"
+        )
+        build["evidence"] = [
+            "verifier: verifier.json#/tiers/0/status — wrong tier also passed",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_artifacts(root, report)
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+
+        self.assertNotEqual(checked.returncode, 0)
+        self.assertIn("this check's matching tier status", checked.stderr)
+
+        report = valid_report()
+        flag = next(
+            item for item in report["checks"] if item["check_id"] == "VERIFY-FLAG"
+        )
+        flag["evidence"] = flag["evidence"][:1]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_artifacts(root, report)
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+
+        self.assertNotEqual(checked.returncode, 0)
+        self.assertIn("this check's matching tier status", checked.stderr)
+
+    def test_validator_requires_verifier_artifact(self) -> None:
+        report = valid_report()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_artifacts(root, report)
+            (root / "verifier.json").unlink()
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+
+        self.assertNotEqual(checked.returncode, 0)
+        self.assertIn("verifier.json", checked.stderr)
+
+    def test_validator_rejects_artifact_symlink_outside_run_directory(self) -> None:
+        report = valid_report()
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside_tmp,
+        ):
+            root = Path(tmp)
+            outside = Path(outside_tmp) / "events.jsonl"
+            outside.write_text(json.dumps(accepted_event()) + "\n", encoding="utf-8")
+            self.write_artifacts(root, report)
+            (root / "events.jsonl").unlink()
+            (root / "events.jsonl").symlink_to(outside)
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+
+        self.assertNotEqual(checked.returncode, 0)
+        self.assertIn("run-relative artifact line", checked.stderr)
 
     def test_validator_rejects_runtime_evidence_in_static_check(self) -> None:
         report = valid_report()
@@ -251,7 +619,7 @@ class ReviewToolTests(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "exploit.log").write_text("submission result: ACCEPTED\n", encoding="utf-8")
+            self.write_artifacts(root, report)
             source = root / "review.json"
             source.write_text(json.dumps(report), encoding="utf-8")
             checked = self.run_script("validate-report.py", str(source))
@@ -264,23 +632,27 @@ class ReviewToolTests(unittest.TestCase):
             item for item in report["checks"] if item["check_id"] == "EXPLOIT-ACCEPT"
         )
         accept["evidence"] = [
-            "verifier: verifier.json#game — submission wiring was exercised",
+            "verifier: verifier.json#/tiers/2/status — submission wiring was exercised",
         ]
         with tempfile.TemporaryDirectory() as tmp:
-            source = Path(tmp) / "review.json"
+            root = Path(tmp)
+            self.write_artifacts(root, report)
+            source = root / "review.json"
             source.write_text(json.dumps(report), encoding="utf-8")
             checked = self.run_script("validate-report.py", str(source))
             self.assertNotEqual(checked.returncode, 0)
-            self.assertIn("direct dynamic ACCEPTED evidence", checked.stderr)
+            self.assertIn("accepted FLAG_SUBMITTED evidence", checked.stderr)
 
     def test_validator_rejects_missing_acceptance_artifact(self) -> None:
         report = valid_report()
         with tempfile.TemporaryDirectory() as tmp:
-            source = Path(tmp) / "review.json"
+            root = Path(tmp)
+            self.write_artifacts(root, report, include_acceptance=False)
+            source = root / "review.json"
             source.write_text(json.dumps(report), encoding="utf-8")
             checked = self.run_script("validate-report.py", str(source))
             self.assertNotEqual(checked.returncode, 0)
-            self.assertIn("direct dynamic ACCEPTED evidence", checked.stderr)
+            self.assertIn("accepted FLAG_SUBMITTED evidence", checked.stderr)
 
     def test_all_scope_verifier_failure_rejects_and_skips_specialists(self) -> None:
         report = valid_report()
@@ -294,7 +666,9 @@ class ReviewToolTests(unittest.TestCase):
                 check.update(
                     status="FAIL",
                     summary="Canonical interface verification failed.",
-                    evidence=["verifier: verifier.json#static — interface tier failed"],
+                    evidence=[
+                        "verifier: verifier.json#/tiers/0/status — interface tier failed"
+                    ],
                 )
             else:
                 check.update(
@@ -303,8 +677,11 @@ class ReviewToolTests(unittest.TestCase):
         report["verdict"] = {
             "value": "REJECT", "summary": "The verifier gate failed.",
         }
+        report["context"]["image_hash"] = None
         with tempfile.TemporaryDirectory() as tmp:
-            source = Path(tmp) / "review.json"
+            root = Path(tmp)
+            self.write_artifacts(root, report, include_acceptance=False)
+            source = root / "review.json"
             source.write_text(json.dumps(report), encoding="utf-8")
             checked = self.run_script("validate-report.py", str(source))
             self.assertEqual(checked.returncode, 0, checked.stderr)
@@ -328,9 +705,8 @@ class ReviewToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "review.json"
-            (root / "exploit.log").write_text(
-                "submission was not accepted\n", encoding="utf-8",
-            )
+            self.write_artifacts(root, report, include_acceptance=False)
+            (root / "exploit.log").write_text("submission was not accepted\n", encoding="utf-8")
             source.write_text(json.dumps(report), encoding="utf-8")
             checked = self.run_script("validate-report.py", str(source))
             self.assertEqual(checked.returncode, 0, checked.stderr)
@@ -349,13 +725,16 @@ class ReviewToolTests(unittest.TestCase):
         report["verdict"] = {
             "value": "BLOCKED", "summary": "External infrastructure blocked review.",
         }
+        report["context"]["image_hash"] = None
         with tempfile.TemporaryDirectory() as tmp:
-            source = Path(tmp) / "review.json"
+            root = Path(tmp)
+            self.write_artifacts(root, report, include_acceptance=False)
+            source = root / "review.json"
             source.write_text(json.dumps(report), encoding="utf-8")
             checked = self.run_script("validate-report.py", str(source))
             self.assertEqual(checked.returncode, 0, checked.stderr)
 
-    def test_renderer_does_not_duplicate_failed_check_evidence(self) -> None:
+    def test_renderer_preserves_failed_status_and_check_evidence(self) -> None:
         report = valid_report()
         failed = next(item for item in report["checks"] if item["check_id"] == "STATIC-BUILD")
         failed.update(
@@ -378,7 +757,7 @@ class ReviewToolTests(unittest.TestCase):
         report["verdict"] = {"value": "REVISE", "summary": "Build input must be pinned."}
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "exploit.log").write_text("submission result: ACCEPTED\n", encoding="utf-8")
+            self.write_artifacts(root, report)
             source = root / "review.json"
             output = root / "review.md"
             source.write_text(json.dumps(report), encoding="utf-8")
@@ -387,7 +766,23 @@ class ReviewToolTests(unittest.TestCase):
             )
             self.assertEqual(rendered.returncode, 0, rendered.stderr)
             text = output.read_text(encoding="utf-8")
-            self.assertEqual(text.count("source: image/Dockerfile:1"), 1)
+            self.assertIn("[FAIL] `STATIC-BUILD`", text)
+            self.assertIn("source: image/Dockerfile:1", text)
+
+    def test_renderer_preserves_literal_not_run_status(self) -> None:
+        report = static_report()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "review.json"
+            output = root / "review.md"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            rendered = self.run_script(
+                "render-report.py", str(source), "--output", str(output),
+            )
+            self.assertEqual(rendered.returncode, 0, rendered.stderr)
+            self.assertIn(
+                "[NOT_RUN] **verifier**", output.read_text(encoding="utf-8"),
+            )
 
     def test_validator_rejects_verdict_contradiction(self) -> None:
         report = valid_report()
@@ -403,7 +798,9 @@ class ReviewToolTests(unittest.TestCase):
             "verdict_effect": "REJECT",
         }]
         with tempfile.TemporaryDirectory() as tmp:
-            source = Path(tmp) / "review.json"
+            root = Path(tmp)
+            self.write_artifacts(root, report)
+            source = root / "review.json"
             source.write_text(json.dumps(report), encoding="utf-8")
             checked = self.run_script("validate-report.py", str(source))
             self.assertNotEqual(checked.returncode, 0)
@@ -414,9 +811,7 @@ class ReviewToolTests(unittest.TestCase):
         report["context"]["orchestrator_commit"] = "1" * 40
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "exploit.log").write_text(
-                "submission result: ACCEPTED\n", encoding="utf-8",
-            )
+            self.write_artifacts(root, report)
             source = root / "review.json"
             source.write_text(json.dumps(report), encoding="utf-8")
             checked = self.run_script("validate-report.py", str(source))
@@ -426,6 +821,7 @@ class ReviewToolTests(unittest.TestCase):
     def test_unknown_check_requires_matching_unresolved_concern(self) -> None:
         report = valid_report()
         report["scope"] = "static"
+        report["context"]["image_hash"] = None
         report["verdict"] = {"value": "PARTIAL", "summary": "Static-only review."}
         for stage in report["stages"]:
             if stage["stage"] != "static":
@@ -433,14 +829,17 @@ class ReviewToolTests(unittest.TestCase):
         report["checks"] = [item for item in report["checks"] if item["stage"] == "static"]
         report["checks"][0].update(status="UNKNOWN", next_check=None)
         with tempfile.TemporaryDirectory() as tmp:
-            source = Path(tmp) / "review.json"
+            root = Path(tmp)
+            self.write_artifacts(root, report)
+            source = root / "review.json"
             source.write_text(json.dumps(report), encoding="utf-8")
             checked = self.run_script("validate-report.py", str(source))
             self.assertNotEqual(checked.returncode, 0)
             self.assertIn("UNKNOWN requires next_check", checked.stderr)
 
-    def test_initializer_uses_compact_v5_shape(self) -> None:
+    def test_initializer_uses_compact_v6_shape(self) -> None:
         context = valid_report()["context"]
+        context["image_hash"] = None
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             context_path = root / "context.json"
@@ -452,11 +851,12 @@ class ReviewToolTests(unittest.TestCase):
             )
             self.assertEqual(initialized.returncode, 0, initialized.stderr)
             report = json.loads(report_path.read_text(encoding="utf-8"))
-            self.assertEqual(report["schema_version"], "5.0")
+            self.assertEqual(report["schema_version"], SCHEMA_VERSION)
             self.assertEqual(set(report), {
-                "schema_version", "scope", "context", "stages", "checks",
-                "findings", "unresolved", "wip_observations", "verdict",
+                "schema_version", "scope", "context", "objectives", "stages",
+                "checks", "findings", "unresolved", "wip_observations", "verdict",
             })
+            self.assertEqual(report["objectives"], [])
             self.assertEqual(
                 [stage["stage"] for stage in report["stages"]],
                 ["verifier", "static", "cheat", "exploitability"],
@@ -488,6 +888,7 @@ class ReviewToolTests(unittest.TestCase):
             self.assertIsNone(payload["image_reference"])
             self.assertIsNone(payload["image_hash"])
             self.assertEqual(payload["warehouse_path"], str(warehouse))
+            self.assertEqual(payload["run_id"], context["run_id"])
 
             other_warehouse = make_warehouse(root / "other")
             mismatch = self.run_script(
@@ -509,6 +910,7 @@ class ReviewToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result, payload = self.run_verifier_main(Path(tmp), [
                 process_result(checker_stdout()),
+                process_result(json.dumps(OBJECTIVES)),
                 process_result('"27.0"'),
                 process_result(build),
                 process_result(image_hash),
@@ -518,6 +920,7 @@ class ReviewToolTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(payload["status"], "PASS")
         self.assertEqual(payload["image_hash"], image_hash)
+        self.assertEqual(payload["objectives"], OBJECTIVES)
         self.assertEqual(
             [tier["status"] for tier in payload["tiers"]],
             ["PASS", "PASS", "PASS"],
@@ -546,6 +949,7 @@ class ReviewToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result, payload = self.run_verifier_main(Path(tmp), [
                 process_result(checker_stdout()),
+                process_result(json.dumps(OBJECTIVES)),
                 process_result("", returncode=1, stderr="daemon unavailable"),
             ])
 

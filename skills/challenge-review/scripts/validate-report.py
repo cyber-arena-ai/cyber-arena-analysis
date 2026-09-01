@@ -9,17 +9,26 @@ from pathlib import Path
 
 from _contracts import (
     ACTIVE_STAGES, ANTIPATTERNS, CHECK_STATUSES, CHECKS, CONTEXT_KEYS,
-    EVIDENCE_KINDS, ORCHESTRATOR_COMMIT, SEVERITY_ORDER, STAGE_ORDER, STAGE_STATUSES,
-    VERDICT_EFFECTS, VERDICTS, WIP_OBSERVATIONS,
+    EVIDENCE_KINDS, OBJECTIVE_ORACLES, OBJECTIVE_OUTCOMES, ORCHESTRATOR_COMMIT,
+    SCHEMA_VERSION, SEVERITY_ORDER, STAGE_ORDER, STAGE_STATUSES, VERDICT_EFFECTS,
+    VERDICTS, WIP_OBSERVATIONS,
 )
 
 
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
+IMAGE_HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
 EVIDENCE = re.compile(r"^(source|verifier|dynamic):\s+(.+?)\s+—\s+(.+)$")
-ACCEPTED = re.compile(r"\bACCEPTED\b|[\"']?accepted[\"']?\s*[:=]\s*true", re.IGNORECASE)
 TOP_LEVEL_KEYS = {
-    "schema_version", "scope", "context", "stages", "checks", "findings",
-    "unresolved", "wip_observations", "verdict",
+    "schema_version", "scope", "context", "objectives", "stages", "checks",
+    "findings", "unresolved", "wip_observations", "verdict",
+}
+MISSING = object()
+VERIFIER_CHECK_TIERS = {
+    "VERIFY-INTERFACE": {0},
+    "VERIFY-BUILD": {1},
+    "VERIFY-HEALTH": {2},
+    "VERIFY-FLAG": {1, 2},
+    "VERIFY-RESTART": {2},
 }
 
 
@@ -51,6 +60,8 @@ def validate_evidence(
     errors: list[str],
     *,
     stage: str | None = None,
+    report_dir: Path | None = None,
+    verifier_artifact: dict | None = None,
 ) -> list[tuple[str, str, str]]:
     if not string_list(value):
         errors.append(f"{path}: expected an array of non-empty strings")
@@ -71,36 +82,289 @@ def validate_evidence(
             errors.append(f"{path}[{index}]: static evidence must use source")
         if stage == "verifier" and kind != "verifier":
             errors.append(f"{path}[{index}]: verifier evidence must use verifier")
+        if kind == "dynamic" and read_artifact_line(locator, report_dir) is None:
+            errors.append(
+                f"{path}[{index}]: dynamic locator must name an existing "
+                "run-relative artifact line"
+            )
+        if kind == "verifier":
+            resolved = resolve_verifier_pointer(locator, verifier_artifact)
+            if resolved is MISSING:
+                errors.append(
+                    f"{path}[{index}]: verifier locator must resolve a JSON Pointer "
+                    "inside verifier.json"
+                )
         parsed.append((kind, locator, fact))
     return parsed
 
 
+def read_artifact_line(locator: str, report_dir: Path | None) -> str | None:
+    if report_dir is None:
+        return None
+    if ":" not in locator:
+        return None
+    artifact_text, line_text = locator.rsplit(":", 1)
+    artifact = Path(artifact_text)
+    if (
+        artifact.is_absolute()
+        or ".." in artifact.parts
+        or not line_text.isdigit()
+        or int(line_text) < 1
+    ):
+        return None
+    resolved = confined_artifact(report_dir, artifact)
+    if resolved is None:
+        return None
+    try:
+        return resolved.read_text(encoding="utf-8").splitlines()[
+            int(line_text) - 1
+        ]
+    except (OSError, IndexError):
+        return None
+
+
+def confined_artifact(report_dir: Path, artifact: Path) -> Path | None:
+    try:
+        root = report_dir.resolve(strict=True)
+        resolved = (root / artifact).resolve(strict=True)
+    except OSError:
+        return None
+    if not resolved.is_relative_to(root) or not resolved.is_file():
+        return None
+    return resolved
+
+
+def resolve_verifier_pointer(locator: str, artifact: dict | None) -> object:
+    if artifact is None or not locator.startswith("verifier.json#/"):
+        return MISSING
+    value: object = artifact
+    for raw_part in locator.removeprefix("verifier.json#/").split("/"):
+        part = raw_part.replace("~1", "/").replace("~0", "~")
+        if isinstance(value, dict) and part in value:
+            value = value[part]
+        elif isinstance(value, list) and part.isdigit() and int(part) < len(value):
+            value = value[int(part)]
+        else:
+            return MISSING
+    return value
+
+
+def verifier_evidence_supports(
+    evidence: list[tuple[str, str, str]], status: str, artifact: dict | None,
+    check_id: str,
+) -> bool:
+    required = {
+        f"verifier.json#/tiers/{index}/status"
+        for index in VERIFIER_CHECK_TIERS.get(check_id, set())
+    }
+    matching: set[str] = set()
+    for kind, locator, _fact in evidence:
+        if kind != "verifier" or locator not in required:
+            continue
+        value = resolve_verifier_pointer(locator, artifact)
+        observed = value.get("status") if isinstance(value, dict) else value
+        if isinstance(observed, str) and observed.upper() == status:
+            matching.add(locator)
+    if status == "PASS":
+        return required <= matching
+    return bool(matching)
+
+
 def has_direct_acceptance(
     evidence: list[tuple[str, str, str]], report_dir: Path | None,
+    context: dict, objectives: list[dict],
 ) -> bool:
-    if report_dir is None:
-        return False
+    declared = {
+        (item["store"], item["outcome"], item["scope"], item["oracle"])
+        for item in objectives
+        if isinstance(item, dict)
+        and set(item) == {"store", "outcome", "scope", "oracle"}
+    }
     for kind, locator, _fact in evidence:
-        if kind != "dynamic" or ":" not in locator:
+        if kind != "dynamic":
             continue
-        artifact_text, line_text = locator.rsplit(":", 1)
-        artifact = Path(artifact_text)
-        if (
-            artifact.is_absolute()
-            or ".." in artifact.parts
-            or not line_text.isdigit()
-            or int(line_text) < 1
-        ):
+        line = read_artifact_line(locator, report_dir)
+        if line is None:
             continue
         try:
-            line = (report_dir / artifact).read_text(encoding="utf-8").splitlines()[
-                int(line_text) - 1
-            ]
-        except (OSError, IndexError):
+            event = json.loads(line)
+        except json.JSONDecodeError:
             continue
-        if ACCEPTED.search(line):
+        if not isinstance(event, dict) or event.get("type") != "FLAG_SUBMITTED":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        actor = payload.get("submitter_team_id")
+        victim = payload.get("victim_team_id")
+        phase = event.get("phase")
+        round_id = event.get("round_id")
+        objective = (
+            payload.get("store"), payload.get("outcome"),
+            payload.get("scope"), payload.get("oracle"),
+        )
+        if not all(nonempty(value) for value in objective):
+            continue
+        if (
+            payload.get("accepted") is True
+            and payload.get("reason") == "ACCEPTED"
+            and isinstance(actor, str) and bool(actor)
+            and event.get("team_id") == actor
+            and isinstance(victim, str) and bool(victim)
+            and actor != victim
+            and isinstance(round_id, int) and not isinstance(round_id, bool)
+            and round_id >= 0
+            and isinstance(phase, str) and phase in {"ATTACK", "LIVE"}
+            and payload.get("phase") == phase
+            and payload.get("service") == context.get("challenge_id")
+            and objective in declared
+        ):
             return True
     return False
+
+
+def validate_objectives(value: object, errors: list[str]) -> list[dict]:
+    if not isinstance(value, list):
+        errors.append("$.objectives: expected array")
+        return []
+    valid: list[dict] = []
+    required = {"store", "outcome", "scope", "oracle"}
+    for index, item in enumerate(value):
+        path = f"$.objectives[{index}]"
+        if not exact_keys(item, required, path, errors):
+            continue
+        assert isinstance(item, dict)
+        store = item["store"]
+        outcome = item["outcome"]
+        scope = item["scope"]
+        oracle = item["oracle"]
+        if not nonempty(store):
+            errors.append(f"{path}.store: expected non-empty string")
+        if not isinstance(outcome, str) or outcome not in OBJECTIVE_OUTCOMES:
+            errors.append(f"{path}.outcome: unknown outcome {outcome!r}")
+        elif oracle != OBJECTIVE_ORACLES[outcome]:
+            errors.append(
+                f"{path}.oracle: expected {OBJECTIVE_ORACLES[outcome]!r} "
+                f"for {outcome!r}"
+            )
+        if scope is not None and not isinstance(scope, str):
+            errors.append(f"{path}.scope: expected string or null")
+        if nonempty(store) and isinstance(outcome, str) and outcome in OBJECTIVE_OUTCOMES and (
+            oracle == OBJECTIVE_ORACLES[outcome]
+        ) and (scope is None or isinstance(scope, str)):
+            valid.append(item)
+    return valid
+
+
+def load_verifier_artifact(
+    report_dir: Path | None, errors: list[str],
+) -> dict | None:
+    if report_dir is None:
+        errors.append("verifier.json: report directory is unavailable")
+        return None
+    artifact_path = confined_artifact(report_dir, Path("verifier.json"))
+    if artifact_path is None:
+        errors.append("verifier.json: expected a run-relative regular file")
+        return None
+    try:
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"verifier.json: {exc}")
+        return None
+    if not isinstance(artifact, dict):
+        errors.append("verifier.json: expected object")
+        return None
+    return artifact
+
+
+def validate_verifier_artifact(
+    artifact: dict | None,
+    context: dict,
+    stage_status: dict[str, str],
+    objectives: list[dict],
+    errors: list[str],
+) -> None:
+    if artifact is None:
+        return
+    if artifact.get("mode") != "execute":
+        errors.append("verifier.json.mode: expected 'execute'")
+    for key in ("challenge_id", "orchestrator_commit", "warehouse_path", "run_id"):
+        if artifact.get(key) != context.get(key):
+            errors.append(f"verifier.json.{key}: does not match report context")
+
+    artifact_status = artifact.get("status")
+    if not isinstance(artifact_status, str) or artifact_status not in {
+        "PASS", "FAIL", "BLOCKED",
+    }:
+        errors.append("verifier.json.status: expected PASS, FAIL, or BLOCKED")
+    elif stage_status.get("verifier") != artifact_status:
+        errors.append(
+            "$.stages[verifier].status: does not match verifier.json status"
+        )
+
+    tiers = artifact.get("tiers")
+    if not isinstance(tiers, list) or [
+        tier.get("name") for tier in tiers if isinstance(tier, dict)
+    ] != ["static", "build", "game"]:
+        errors.append("verifier.json.tiers: expected static, build, and game tiers")
+        tiers = []
+    tier_statuses: list[str] = []
+    for index, tier in enumerate(tiers):
+        if not isinstance(tier, dict):
+            errors.append(f"verifier.json.tiers[{index}]: expected object")
+            continue
+        status = tier.get("status")
+        if not isinstance(status, str) or status not in {
+            "PASS", "FAIL", "BLOCKED", "NOT_RUN",
+        }:
+            errors.append(f"verifier.json.tiers[{index}].status: invalid status")
+            continue
+        tier_statuses.append(status)
+        if status == "PASS":
+            parsed = tier.get("parsed_json")
+            if not (
+                isinstance(parsed, dict)
+                and parsed.get("ok") is True
+                and isinstance(parsed.get("checks"), list)
+                and bool(parsed["checks"])
+            ):
+                errors.append(
+                    f"verifier.json.tiers[{index}]: PASS requires successful checker JSON"
+                )
+
+    if artifact_status == "PASS" and tier_statuses != ["PASS", "PASS", "PASS"]:
+        errors.append("verifier.json.status: PASS requires all tiers to pass")
+    if artifact_status == "FAIL" and "FAIL" not in tier_statuses and not nonempty(
+        artifact.get("error")
+    ):
+        errors.append("verifier.json.status: FAIL requires a failed tier or error")
+    if artifact_status == "BLOCKED" and "BLOCKED" not in tier_statuses and not nonempty(
+        artifact.get("error")
+    ):
+        errors.append("verifier.json.status: BLOCKED requires blocked evidence")
+
+    image_hash = artifact.get("image_hash")
+    if image_hash is not None and (
+        not isinstance(image_hash, str) or not IMAGE_HASH.fullmatch(image_hash)
+    ):
+        errors.append("verifier.json.image_hash: expected immutable Docker image ID or null")
+    if artifact_status == "PASS" and not (
+        isinstance(image_hash, str) and IMAGE_HASH.fullmatch(image_hash)
+    ):
+        errors.append("verifier.json.image_hash: PASS requires immutable Docker image ID")
+    if context.get("image_hash") != image_hash:
+        errors.append("$.context.image_hash: does not match verifier.json")
+
+    artifact_objectives = artifact.get("objectives")
+    if artifact_objectives is not None:
+        artifact_errors: list[str] = []
+        frozen = validate_objectives(artifact_objectives, artifact_errors)
+        if artifact_errors:
+            errors.append("verifier.json.objectives: invalid frozen objective contract")
+        elif frozen != objectives:
+            errors.append("$.objectives: does not match verifier.json")
+    elif artifact_status == "PASS":
+        errors.append("verifier.json.objectives: PASS requires frozen objective contract")
 
 
 def expected_verdict(report: dict) -> str:
@@ -142,8 +406,8 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
         return errors
     assert isinstance(report, dict)
 
-    if report["schema_version"] != "5.0":
-        errors.append("$.schema_version: expected '5.0'")
+    if report["schema_version"] != SCHEMA_VERSION:
+        errors.append(f"$.schema_version: expected {SCHEMA_VERSION!r}")
     scope = report["scope"]
     if scope not in ACTIVE_STAGES:
         errors.append(f"$.scope: expected one of {sorted(ACTIVE_STAGES)}")
@@ -151,29 +415,41 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
     else:
         active = ACTIVE_STAGES[scope]
 
-    context = report["context"]
-    if exact_keys(context, set(CONTEXT_KEYS), "$.context", errors):
-        assert isinstance(context, dict)
+    context_value = report["context"]
+    if exact_keys(context_value, set(CONTEXT_KEYS), "$.context", errors):
+        assert isinstance(context_value, dict)
         for key in CONTEXT_KEYS:
-            if not nonempty(context.get(key)):
+            if key == "image_hash":
+                continue
+            if not nonempty(context_value.get(key)):
                 errors.append(f"$.context.{key}: expected non-empty string")
         if (
-            isinstance(context.get("orchestrator_commit"), str)
-            and not COMMIT.fullmatch(context["orchestrator_commit"])
+            isinstance(context_value.get("orchestrator_commit"), str)
+            and not COMMIT.fullmatch(context_value["orchestrator_commit"])
         ):
             errors.append(
                 "$.context.orchestrator_commit: expected 40-character lowercase commit"
             )
-        if context.get("orchestrator_commit") != ORCHESTRATOR_COMMIT:
+        if context_value.get("orchestrator_commit") != ORCHESTRATOR_COMMIT:
             errors.append(
                 "$.context.orchestrator_commit: expected pinned commit "
                 f"{ORCHESTRATOR_COMMIT}"
             )
         if (
-            isinstance(context.get("warehouse_path"), str)
-            and not Path(context["warehouse_path"]).is_absolute()
+            isinstance(context_value.get("warehouse_path"), str)
+            and not Path(context_value["warehouse_path"]).is_absolute()
         ):
             errors.append("$.context.warehouse_path: expected absolute path")
+        image_hash = context_value.get("image_hash")
+        if image_hash is not None and (
+            not isinstance(image_hash, str) or not IMAGE_HASH.fullmatch(image_hash)
+        ):
+            errors.append("$.context.image_hash: expected immutable Docker image ID or null")
+        if "verifier" not in active and image_hash is not None:
+            errors.append("$.context.image_hash: stage scope did not run verifier")
+    context = context_value if isinstance(context_value, dict) else {}
+
+    objectives = validate_objectives(report["objectives"], errors)
 
     stages = report["stages"]
     stage_status: dict[str, str] = {}
@@ -198,6 +474,27 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
             stage_status[stage] = status
             if stage not in active and status != "NOT_RUN":
                 errors.append(f"{path}.status: stage outside scope must be NOT_RUN")
+
+    verifier_gate = stage_status.get("verifier")
+    for stage in active:
+        if stage_status.get(stage) != "NOT_RUN":
+            continue
+        gated = stage != "verifier" and verifier_gate in {"FAIL", "BLOCKED"}
+        if not gated:
+            errors.append(f"$.stages[{stage}].status: selected stage must run")
+    if verifier_gate in {"FAIL", "BLOCKED"}:
+        for stage in active - {"verifier"}:
+            if stage_status.get(stage) != "NOT_RUN":
+                errors.append(
+                    f"$.stages[{stage}].status: must be NOT_RUN behind verifier gate"
+                )
+
+    verifier_artifact = None
+    if "verifier" in active:
+        verifier_artifact = load_verifier_artifact(report_dir, errors)
+        validate_verifier_artifact(
+            verifier_artifact, context, stage_status, objectives, errors,
+        )
 
     expected_checks = [(check_id, stage) for check_id, stage in CHECKS if stage in active]
     checks = report["checks"]
@@ -227,17 +524,56 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
             errors.append(f"{path}.summary: expected non-empty string")
         parsed_evidence = validate_evidence(
             item["evidence"], f"{path}.evidence", errors, stage=stage,
+            report_dir=report_dir, verifier_artifact=verifier_artifact,
         )
         if status in {"PASS", "FAIL", "UNKNOWN"} and not item["evidence"]:
             errors.append(f"{path}.evidence: {status} requires concise evidence")
+        if status == "NOT_RUN" and item["evidence"]:
+            errors.append(f"{path}.evidence: NOT_RUN cannot carry evidence")
+        if stage == "verifier" and status == "UNKNOWN":
+            errors.append(f"{path}.status: verifier checks cannot be UNKNOWN")
+        if stage == "verifier" and status in {"PASS", "FAIL"} and not (
+            verifier_evidence_supports(
+                parsed_evidence, status, verifier_artifact, check_id,
+            )
+        ):
+            errors.append(
+                f"{path}.evidence: verifier evidence must point to this check's "
+                "matching tier status"
+            )
+        if check_id == "STATIC-FLAG" and status == "PASS":
+            stores = [item["store"] for item in objectives]
+            if not stores:
+                errors.append(f"{path}: PASS requires at least one objective")
+            if len(stores) != len(set(stores)):
+                errors.append(f"{path}: PASS requires unique objective stores")
+            if any(not nonempty(item["scope"]) for item in objectives):
+                errors.append(f"{path}: PASS requires a scope for every objective")
+            missing = sorted(
+                item["store"]
+                for item in objectives
+                if not any(
+                    fact.startswith(
+                        f"store={item['store']}; outcome={item['outcome']}; "
+                        f"scope={item['scope']}; oracle={item['oracle']};"
+                    )
+                    for _kind, _locator, fact in parsed_evidence
+                )
+            )
+            if missing:
+                errors.append(
+                    f"{path}.evidence: missing per-store evidence for {missing}"
+                )
         if (
             check_id == "EXPLOIT-ACCEPT"
             and status == "PASS"
-            and not has_direct_acceptance(parsed_evidence, report_dir)
+            and not has_direct_acceptance(
+                parsed_evidence, report_dir, context, objectives,
+            )
         ):
             errors.append(
                 f"{path}.evidence: EXPLOIT-ACCEPT PASS requires direct dynamic "
-                "ACCEPTED evidence from a run-relative artifact line"
+                "accepted FLAG_SUBMITTED evidence matching one objective"
             )
         if status == "UNKNOWN":
             if not nonempty(item["next_check"]):
@@ -250,6 +586,22 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
             errors.append(f"{path}.status: PASS stage cannot contain {status}")
         if status == "FAIL" and stage_status.get(stage) != "FAIL":
             errors.append(f"{path}.status: failed check requires failed stage")
+
+    for stage, status in stage_status.items():
+        if stage in active and status == "FAIL" and not any(
+            check_stage == stage and check_status.get(check_id) == "FAIL"
+            for check_id, check_stage in CHECKS
+        ):
+            errors.append(f"$.stages[{stage}].status: FAIL requires a failed check")
+    if verifier_artifact is not None and verifier_artifact.get("status") == "PASS":
+        missing = [
+            check_id for check_id, stage in CHECKS
+            if stage == "verifier" and check_status.get(check_id) != "PASS"
+        ]
+        if missing:
+            errors.append(
+                f"$.checks: passing verifier requires PASS for {missing}"
+            )
 
     findings = report["findings"]
     if not isinstance(findings, list):
@@ -285,6 +637,7 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
                 errors.append(f"{path}.{key}: expected non-empty string")
         parsed_evidence = validate_evidence(
             item["evidence"], f"{path}.evidence", errors, stage=item["stage"],
+            report_dir=report_dir, verifier_artifact=verifier_artifact,
         )
         if not parsed_evidence:
             errors.append(f"{path}.evidence: finding requires concise evidence")
@@ -327,6 +680,7 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
                 errors.append(f"{path}.{key}: expected non-empty string")
         parsed_evidence = validate_evidence(
             item["evidence"], f"{path}.evidence", errors, stage=item["stage"],
+            report_dir=report_dir, verifier_artifact=verifier_artifact,
         )
         if not parsed_evidence:
             errors.append(f"{path}.evidence: concern requires concise evidence")
@@ -354,6 +708,7 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
             errors.append(f"{path}.note: expected non-empty string")
         parsed_evidence = validate_evidence(
             item["evidence"], f"{path}.evidence", errors,
+            report_dir=report_dir, verifier_artifact=verifier_artifact,
         )
         if not parsed_evidence:
             errors.append(f"{path}.evidence: observation requires concise evidence")

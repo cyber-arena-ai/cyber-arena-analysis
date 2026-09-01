@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from _contracts import ACTIVE_STAGES, CHECKS, CONTEXT_KEYS, STAGE_ORDER
+from _contracts import ACTIVE_STAGES, CHECKS, CONTEXT_KEYS, SCHEMA_VERSION, STAGE_ORDER
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,9 +31,10 @@ def main(argv: list[str] | None = None) -> int:
 
     active = ACTIVE_STAGES[args.scope]
     report = {
-        "schema_version": "5.0",
+        "schema_version": SCHEMA_VERSION,
         "scope": args.scope,
         "context": {key: raw_context[key] for key in CONTEXT_KEYS},
+        "objectives": [],
         "stages": [
             {
                 "stage": stage,

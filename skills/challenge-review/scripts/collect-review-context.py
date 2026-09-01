@@ -95,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
         "run_id": run_id,
         "orchestrator_commit": orchestrator_commit,
         "warehouse_path": str(warehouse),
+        "image_hash": None,
         "challenge_package": package,
         "recommended_output_dir": str(
             args.review_root.resolve() / args.challenge_id / run_id

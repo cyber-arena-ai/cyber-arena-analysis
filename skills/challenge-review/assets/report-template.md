@@ -4,6 +4,10 @@
 
 {context}
 
+## Objectives
+
+{objectives}
+
 ## Verdict
 
 {verdict}

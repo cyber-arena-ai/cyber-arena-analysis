@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 ORCHESTRATOR_COMMIT = "5952ef5d7a1924789da86640665e2cbd6500a8ec"
+SCHEMA_VERSION = "6.0"
 
 STAGE_ORDER = ("verifier", "static", "cheat", "exploitability")
 
@@ -38,7 +39,7 @@ ACTIVE_STAGES = {
     "all": set(STAGE_ORDER),
 }
 
-CHECK_STATUSES = {"PASS", "FAIL", "UNKNOWN", "NOT_APPLICABLE", "NOT_RUN"}
+CHECK_STATUSES = {"PASS", "FAIL", "UNKNOWN", "NOT_RUN"}
 STAGE_STATUSES = {"PASS", "FAIL", "BLOCKED", "NOT_RUN"}
 SEVERITY_ORDER = {"BLOCKER": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
 VERDICT_EFFECTS = {"NONE", "REVISE", "REJECT"}
@@ -46,6 +47,8 @@ VERDICTS = {
     "ACCEPT", "REVISE", "REJECT", "BLOCKED", "PARTIAL",
 }
 EVIDENCE_KINDS = {"source", "verifier", "dynamic"}
+OBJECTIVE_OUTCOMES = {"read", "write", "execute"}
+OBJECTIVE_ORACLES = {"read": "submit", "write": "claim", "execute": "submit"}
 
 ANTIPATTERNS = {
     "AP-VULN-DEAD", "AP-VULN-COMPILED-OUT", "AP-SCOPE-INVALID",
@@ -71,5 +74,5 @@ WIP_OBSERVATIONS = {
 
 CONTEXT_KEYS = (
     "challenge_id", "challenge_dir", "timestamp", "run_id",
-    "orchestrator_commit", "warehouse_path",
+    "orchestrator_commit", "warehouse_path", "image_hash",
 )

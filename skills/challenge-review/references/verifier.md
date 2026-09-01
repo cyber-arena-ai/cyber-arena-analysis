@@ -32,11 +32,15 @@ Do not use `--dry-run`, `--allow-network`, `--keep`, `--sync`, or `--all` for
 acceptance. Preserve `verifier.json`; do not paste its full output into the
 human report.
 
-`verifier.json` records the pinned orchestrator commit and selected warehouse
-path. After the build tier, the wrapper also resolves the image reference
+`verifier.json` records the review run ID, pinned orchestrator commit, and
+selected warehouse path. After the build tier, the wrapper also resolves the
+image reference
 reported by the canonical checker and records Docker's immutable image ID as
 `image_hash`. A passing verifier requires `sha256:<64 lowercase hex>`; a mutable
-tag alone is not provenance.
+tag alone is not provenance. After the static tier, the wrapper also freezes
+the selected package's authoritative objective matrix as `{store, outcome,
+scope, oracle}` rows. Copy that matrix and the image hash into `review.json`;
+the report validator binds both back to this artifact.
 
 ## Checklist
 

@@ -8,10 +8,8 @@ import sys
 from pathlib import Path
 
 
-MARK = {
-    "PASS": "[x]", "FAIL": "[!]", "UNKNOWN": "[~]",
-    "NOT_APPLICABLE": "[-]", "NOT_RUN": "[-]", "BLOCKED": "[!]",
-}
+def status_label(status: str) -> str:
+    return f"[{status}]"
 
 
 def render(report: dict, template: str) -> str:
@@ -21,21 +19,32 @@ def render(report: dict, template: str) -> str:
         f"- Scope: `{report['scope']}`",
         f"- Orchestrator: `{context['orchestrator_commit']}`",
         f"- Warehouse: `{context['warehouse_path']}`",
+        f"- Image: `{context['image_hash'] or 'NOT BUILT'}`",
         f"- Run: `{context['run_id']}` at `{context['timestamp']}`",
     ])
+    objectives = "\n".join(
+        f"- `{item['store']}` — `{item['outcome']}` / "
+        f"`{item['scope'] or 'UNDECLARED'}` / `{item['oracle']}`"
+        for item in report["objectives"]
+    ) or "None recorded."
     verdict = report["verdict"]
     verdict_label = verdict["value"].replace("_", " ")
     verdict_text = f"**{verdict_label}** — {verdict['summary']}"
     stages = "\n".join(
-        f"- {MARK[item['status']]} **{item['stage']}** — {item['summary']}"
+        f"- {status_label(item['status'])} **{item['stage']}** — {item['summary']}"
         for item in report["stages"]
     )
 
     check_lines: list[str] = []
     for item in report["checks"]:
-        line = f"- {MARK[item['status']]} `{item['check_id']}` — {item['summary']}"
+        line = (
+            f"- {status_label(item['status'])} `{item['check_id']}` — "
+            f"{item['summary']}"
+        )
         if item["next_check"]:
             line += f" Next: {item['next_check']}"
+        for evidence in item["evidence"]:
+            line += f"\n  - Evidence: {evidence}"
         check_lines.append(line)
     checks = "\n".join(check_lines) or "No checks selected."
 
@@ -63,9 +72,9 @@ def render(report: dict, template: str) -> str:
     ) or "None."
 
     return template.format(
-        slug=context["challenge_id"], context=context_text, verdict=verdict_text,
-        stages=stages, checks=checks, findings=findings, unresolved=unresolved,
-        wip_observations=wip,
+        slug=context["challenge_id"], context=context_text, objectives=objectives,
+        verdict=verdict_text, stages=stages, checks=checks, findings=findings,
+        unresolved=unresolved, wip_observations=wip,
     ).rstrip() + "\n"
 
 

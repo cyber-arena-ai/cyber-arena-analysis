@@ -12,11 +12,18 @@ import sys
 import time
 from pathlib import Path
 
-from _contracts import ORCHESTRATOR_COMMIT
+from _contracts import OBJECTIVE_ORACLES, OBJECTIVE_OUTCOMES, ORCHESTRATOR_COMMIT
 from _warehouse import WAREHOUSE_ENV, selected_warehouse
 
 
 IMAGE_HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
+OBJECTIVE_CONTRACT_CODE = (
+    "import json, sys\n"
+    "from challenges.registry import build_challenge\n"
+    "specs = build_challenge(sys.argv[1]).flag_store_specs()\n"
+    "print(json.dumps([{'store': spec.name, 'outcome': spec.kind.value, "
+    "'scope': spec.scope, 'oracle': spec.kind.oracle} for spec in specs]))\n"
+)
 
 
 def command_result(command: list[str], cwd: Path, timeout: float) -> dict:
@@ -93,6 +100,33 @@ def checker_result(command: list[str], cwd: Path, timeout: float) -> dict:
         result["status"] = "FAIL"
         result["stderr"] = (
             f"{result['stderr']}\nchecker did not return successful JSON"
+        ).lstrip()
+    return result
+
+
+def objective_contract_result(command: list[str], cwd: Path, timeout: float) -> dict:
+    """Freeze the selected package's authoritative objective declarations."""
+    result = command_result(command, cwd, timeout)
+    parsed = result["parsed_json"]
+    valid = (
+        result["status"] == "PASS"
+        and isinstance(parsed, list)
+        and bool(parsed)
+        and all(
+            isinstance(item, dict)
+            and set(item) == {"store", "outcome", "scope", "oracle"}
+            and isinstance(item["store"], str)
+            and bool(item["store"].strip())
+            and item["outcome"] in OBJECTIVE_OUTCOMES
+            and item["oracle"] == OBJECTIVE_ORACLES[item["outcome"]]
+            and (item["scope"] is None or isinstance(item["scope"], str))
+            for item in parsed
+        )
+    )
+    if not valid:
+        result["status"] = "FAIL"
+        result["stderr"] = (
+            f"{result['stderr']}\nobjective contract did not return valid JSON"
         ).lstrip()
     return result
 
@@ -197,10 +231,13 @@ def main(argv: list[str] | None = None) -> int:
     payload = {
         "mode": "dry-run" if args.dry_run else "execute",
         "challenge_id": args.challenge_id,
+        "run_id": context["run_id"],
         "orchestrator_commit": context["orchestrator_commit"],
         "warehouse_path": context["warehouse_path"],
         "image_reference": None,
         "image_hash": None,
+        "objectives": None,
+        "objective_contract": None,
         "status": "NOT_RUN",
         "worktree": str(worktree),
         "tiers": tiers,
@@ -285,6 +322,20 @@ def main(argv: list[str] | None = None) -> int:
                     executed.append(result)
                     if result["status"] != "PASS":
                         break
+                    if tier["name"] == "static":
+                        contract = objective_contract_result(
+                            [
+                                sys.executable, "-c", OBJECTIVE_CONTRACT_CODE,
+                                args.challenge_id,
+                            ],
+                            worktree,
+                            args.tier_timeout,
+                        )
+                        payload["objective_contract"] = contract
+                        if contract["status"] != "PASS":
+                            payload["error"] = "could not freeze objective contract"
+                            break
+                        payload["objectives"] = contract["parsed_json"]
                     if tier["name"] == "build":
                         image_reference = built_image_reference(result)
                         payload["image_reference"] = image_reference

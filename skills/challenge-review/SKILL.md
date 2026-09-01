@@ -59,7 +59,7 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    The collector prints known IDs when auto-discovery fails. Discovery is setup
    only; do not treat it as verifier evidence. Create the collector's
    `recommended_output_dir`, move the context to `context.json`, and initialize
-   `review.json`:
+   the schema-v6 `review.json`; its objective matrix starts empty:
 
    ```text
    python3 <skill-root>/scripts/init-report.py \
@@ -79,9 +79,12 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    [verifier.md](references/verifier.md) from the master context and populate
    the verifier checks from its authoritative output. Do not delegate or
    substitute this command. Require the pinned orchestrator and a built-image
-   `sha256:<64 hex>` ID. For `ALL`, verifier `FAIL` is a hard `REJECT`: mark the
-   other stages `NOT_RUN` and skip to reporting. Treat unavailable external
-   verifier infrastructure as `BLOCKED`. Continue only after verifier `PASS`.
+   `sha256:<64 hex>` ID. Copy its `image_hash` into report context and its frozen
+   `{store, outcome, scope, oracle}` rows into the report objective matrix. Use
+   real `verifier.json#/...` JSON Pointers for verifier evidence. For `ALL`,
+   verifier `FAIL` is a hard `REJECT`: mark the other stages `NOT_RUN` and skip
+   to reporting. Treat unavailable external verifier infrastructure as
+   `BLOCKED`. Continue only after verifier `PASS`.
 5. Dispatch specialists:
 
    - For `STATIC`, `CHEAT`, or `EXPLOITABILITY`, dispatch the selected specialist.
@@ -104,13 +107,19 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    evidence, one exact `next_check`, and a matching unresolved concern. Static
    review may require a later runtime check but never executes it. Keep each
    stage and checklist summary to one conclusion sentence; put supporting facts
-   only in its `evidence` field or surviving finding. Use `BLOCKED` only for
-   external infrastructure.
+   only in its `evidence` field or surviving finding. For a static-only review,
+   fill the objective matrix directly from the selected package. A passing
+   `STATIC-FLAG` conclusion includes at least one source evidence fact beginning
+   `store=<store>; outcome=<outcome>; scope=<scope>; oracle=<oracle>;` for
+   every matrix row. Use `BLOCKED` only for external
+   infrastructure.
 9. Persist only `context.json`, `review.json`, `review.md`, canonical verifier
    output, and the minimum raw dynamic artifacts needed to substantiate a cheat
    or exploit result. Dynamic artifacts contain the exact command or request and
-   observed output, not a reconstructed narrative. Keep specialist transcripts
-   and scratch work ephemeral.
+   observed output, not a reconstructed narrative. Preserve the exact
+   authoritative `FLAG_SUBMITTED` JSON line used by `EXPLOIT-ACCEPT`; prose or
+   exploit stdout is not acceptance evidence. Keep specialist transcripts and
+   scratch work ephemeral.
 10. Validate and render once:
 
    ```text

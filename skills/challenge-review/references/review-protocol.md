@@ -73,11 +73,27 @@ Use `source` only for source inspection, `verifier` only for canonical
 `verifier.json`, and `dynamic` for a run-relative raw artifact with an exact
 line. Static evidence must be `source`; verifier evidence must be `verifier`.
 `EXPLOIT-ACCEPT=PASS` requires `dynamic` evidence pointing to an authoritative
-`ACCEPTED` result for at least one declared objective from the PoV run. The
-evidence must identify its store, outcome, oracle, and declared scope.
+`FLAG_SUBMITTED` JSON event for at least one declared objective from the PoV
+run. The event must record `accepted: true`, `reason: ACCEPTED`, distinct
+attacker and victim teams, the current round and live phase, and a store,
+outcome, oracle, and scope that exactly match the objective matrix.
 
-Keep checklist and stage summaries to one conclusion sentence. Put detailed
-evidence only in findings and unresolved concerns.
+Verifier locators use JSON Pointers inside the fixed `verifier.json` artifact,
+for example `verifier.json#/tiers/0/status`. Dynamic locators name an exact line
+in a run-relative retained artifact. Keep checklist and stage summaries to one
+conclusion sentence and checklist evidence concise; put analysis only in
+findings and unresolved concerns.
+
+## Objective matrix
+
+Record exactly `{store, outcome, scope, oracle}` for every authoritative
+`flag_store_specs()` row. When the verifier runs, copy the frozen matrix from
+`verifier.json`; for a static-only review, derive it directly from the selected
+package. `STATIC-FLAG=PASS` requires unique stores, a nonempty scope for every
+row, and source evidence whose fact begins `store=<store>; outcome=<outcome>;
+scope=<scope>; oracle=<oracle>;` for every row. The
+matrix describes every objective, but exploitability still requires an accepted
+PoV for only one objective.
 
 ## Master adjudication
 
@@ -101,7 +117,7 @@ persist the disposition ledger or specialist transcripts.
 
 Use only:
 
-- Check: `PASS`, `FAIL`, `UNKNOWN`, `NOT_APPLICABLE`, `NOT_RUN`
+- Check: `PASS`, `FAIL`, `UNKNOWN`, `NOT_RUN`
 - Stage: `PASS`, `FAIL`, `BLOCKED`, `NOT_RUN`
 - Severity: `BLOCKER`, `HIGH`, `MEDIUM`, `LOW`
 - Finding effect: `NONE`, `REVISE`, `REJECT`
@@ -111,6 +127,9 @@ Use `PASS` when the selected procedure completes without a conclusive defect,
 `FAIL` when evidence proves a defect or required proof is missing, `BLOCKED`
 only for external infrastructure, and `NOT_RUN` outside scope or behind a hard
 gate. Broken or omitted challenge dependencies are failures, not blockers.
+A selected stage may remain `NOT_RUN` only behind a failed or blocked verifier
+gate. Static may pass with runtime-dependent `UNKNOWN` checks, but each requires
+a matching unresolved concern and prevents whole-review acceptance.
 
 Create a finding only for a surviving evidence-backed issue. Use `NONE` for an
 actionable issue that does not affect acceptance, `REVISE` for a correctable

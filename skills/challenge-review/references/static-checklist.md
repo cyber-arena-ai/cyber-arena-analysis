@@ -19,7 +19,6 @@ Use:
 - `PASS` when the complete relevant construct supports the property.
 - `FAIL` when source conclusively proves a defect.
 - `UNKNOWN` when runtime decides it; name the exact later check.
-- `NOT_APPLICABLE` only for an explicit contract exception.
 
 Do not turn an expected later runtime confirmation into static work.
 
@@ -100,8 +99,9 @@ persistence, and leakage behavior here.
 - Every `flag_store_specs()` entry binds one protected asset to a READ, WRITE,
   or EXECUTE outcome, a matching scope, and a coherent oracle and scoring path.
 - `PASS` evidence names every declared store and its outcome, scope, oracle,
-  target rotation, and capture or scoring path; one store cannot stand in for
-  another.
+  target rotation, and capture or scoring path. Prefix at least one evidence
+  fact per row with `store=<store>; outcome=<outcome>; scope=<scope>;
+  oracle=<oracle>;`; one row cannot stand in for another.
 - READ plants a token in protected state and scores only recovery and submission
   of that current token.
 - WRITE exposes the attacker's issued mark and target, then scores only when

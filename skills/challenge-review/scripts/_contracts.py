@@ -70,5 +70,5 @@ WIP_OBSERVATIONS = {
 
 CONTEXT_KEYS = (
     "challenge_id", "challenge_dir", "timestamp", "run_id",
-    "orchestrator_commit", "warehouse_commit",
+    "orchestrator_commit", "warehouse_path",
 )

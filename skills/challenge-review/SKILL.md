@@ -17,22 +17,22 @@ repository as `<analysis-root>` and default persistence to its `artifacts/`
 directory. Otherwise stop and ask the user where artifacts should be persisted;
 do not default to a plugin installation or cache directory. Locate the separate
 `cyber-arena-orche` checkout as `<orche-root>`; do not persist review artifacts
-there.
+there. Use the required warehouse-path input for every review operation.
 
 ## Input
 
 Treat `$ARGUMENTS`, or the explicit arguments supplied by the client, as
-exactly two positional arguments:
+exactly three positional arguments:
 
 ```text
-<challenge-id> <VERIFIER|STATIC|CHEAT|EXPLOITABILITY|ALL>
+<challenge-id> <VERIFIER|STATIC|CHEAT|EXPLOITABILITY|ALL> <absolute-warehouse-path>
 ```
 
 Reject missing or extra arguments and reject any other stage value. Do not
-choose a challenge or infer a stage. Normalize the stage to lowercase when
-passing it to bundled scripts. `CHEAT`, `EXPLOITABILITY`, and `ALL` begin with
-the verifier gate. A single-stage review reports `PARTIAL`; `ALL` produces an
-overall verdict.
+choose a challenge, infer a stage, or infer a warehouse. Require the warehouse
+path to be absolute. Normalize the stage to lowercase when passing it to bundled
+scripts. `CHEAT`, `EXPLOITABILITY`, and `ALL` begin with the verifier gate. A
+single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
 
 ## Execute in this order
 
@@ -42,13 +42,15 @@ overall verdict.
    evidence, not as the Technical Impact proved by a flag.
    Resolve the challenge's upstream `OWNER/PROJECT` from its maintainer record
    and require the corresponding `artifacts/projects/OWNER__PROJECT/` directory.
-2. Initialize deterministic context; this validates registry membership and
-   records the challenge path, timestamp, run ID, and exact orchestrator and
-   warehouse commits. The collector pins orchestration commit
+2. Initialize deterministic context; this validates registry membership in the
+   explicitly selected warehouse and records its absolute path, the challenge
+   path, timestamp, run ID, and exact orchestrator commit. The collector pins
+   orchestration commit
    `e1d0389bc435d973c35b2c988c63e452822af28c`, matching challenge creation:
 
    ```text
    python3 <skill-root>/scripts/collect-review-context.py <challenge-id> \
+     --warehouse <absolute-warehouse-path> \
      --repo-root <orche-root> \
      --review-root <analysis-root>/artifacts/projects/OWNER__PROJECT/review \
      --output <temporary-context.json>
@@ -76,7 +78,7 @@ overall verdict.
 4. For `VERIFIER`, `CHEAT`, `EXPLOITABILITY`, or `ALL`, run the exact wrapper in
    [verifier.md](references/verifier.md) from the master context and populate
    the verifier checks from its authoritative output. Do not delegate or
-   substitute this command. Require pinned source commits and a built-image
+   substitute this command. Require the pinned orchestrator and a built-image
    `sha256:<64 hex>` ID. For `ALL`, verifier `FAIL` is a hard `REJECT`: mark the
    other stages `NOT_RUN` and skip to reporting. Treat unavailable external
    verifier infrastructure as `BLOCKED`. Continue only after verifier `PASS`.

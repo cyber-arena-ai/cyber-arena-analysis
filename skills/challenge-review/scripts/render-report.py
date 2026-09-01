@@ -20,7 +20,7 @@ def render(report: dict, template: str) -> str:
         f"- Challenge: `{context['challenge_id']}`",
         f"- Scope: `{report['scope']}`",
         f"- Orchestrator: `{context['orchestrator_commit']}`",
-        f"- Warehouse: `{context['warehouse_commit']}`",
+        f"- Warehouse: `{context['warehouse_path']}`",
         f"- Run: `{context['run_id']}` at `{context['timestamp']}`",
     ])
     verdict = report["verdict"]

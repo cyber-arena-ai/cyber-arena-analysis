@@ -38,10 +38,11 @@ The framework auto-discovers challenge packages; do not add a manual registry
 entry to orchestration.
 
 Do not assume the standalone warehouse checkout and the orchestrator submodule
-point to the same commit. Record both SHAs when verifying or reviewing a
-challenge, and test the exact warehouse revision intended for submission.
-Updating the warehouse and advancing the orchestrator's submodule pointer are
-separate changes.
+point to the same commit. Creation and PR handoff record both SHAs and test the
+exact warehouse revision intended for submission. Review instead requires an
+explicit warehouse path argument and tests that filesystem directly. Updating
+the warehouse and advancing the orchestrator's submodule pointer are separate
+changes.
 
 ## Sources of truth
 
@@ -126,13 +127,16 @@ From `cyber-arena`:
 python3 -m pytest -q skills/*/tests
 ```
 
-For one challenge, run the orchestrator's canonical gates against the intended
-warehouse revision:
+For one challenge, run the orchestrator's canonical gates against the explicitly
+selected warehouse checkout:
 
 ```bash
-python -m challenges.check <challenge> --json
-python -m challenges.check <challenge> --build --ready-timeout 150 --json
-python -m challenges.check <challenge> --game --ready-timeout 150 --json
+CYBERARENA_CHALLENGE_WAREHOUSE=/absolute/path/to/challenge-warehouse \
+  python -m challenges.check <challenge> --json
+CYBERARENA_CHALLENGE_WAREHOUSE=/absolute/path/to/challenge-warehouse \
+  python -m challenges.check <challenge> --build --ready-timeout 150 --json
+CYBERARENA_CHALLENGE_WAREHOUSE=/absolute/path/to/challenge-warehouse \
+  python -m challenges.check <challenge> --game --ready-timeout 150 --json
 ```
 
 The static gate does not prove the image, live handlers, restart, health,

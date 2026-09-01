@@ -11,6 +11,7 @@ Run this wrapper once in execution mode from the master context:
 
 ```text
 python3 <skill-root>/scripts/run-verifier.py <challenge-id> \
+  --warehouse <absolute-warehouse-path> \
   --context <run-dir>/context.json \
   --repo-root <orche-root> \
   --output <run-dir>/verifier.json \
@@ -18,8 +19,8 @@ python3 <skill-root>/scripts/run-verifier.py <challenge-id> \
 ```
 
 The wrapper creates an isolated worktree at the recorded orchestrator commit,
-pins the warehouse commit, serializes shared Docker access, and cleans up
-afterward. It runs these canonical tiers in order:
+passes the selected warehouse to orchestration before startup, serializes shared
+Docker access, and cleans up afterward. It runs these canonical tiers in order:
 
 ```text
 python -m challenges.check <challenge-id> --json
@@ -31,11 +32,11 @@ Do not use `--dry-run`, `--allow-network`, `--keep`, `--sync`, or `--all` for
 acceptance. Preserve `verifier.json`; do not paste its full output into the
 human report.
 
-`verifier.json` records the pinned orchestrator and warehouse commits. After
-the build tier, the wrapper also resolves the image reference reported by the
-canonical checker and records Docker's immutable image ID as `image_hash`. A
-passing verifier requires `sha256:<64 lowercase hex>`; a mutable tag alone is
-not provenance.
+`verifier.json` records the pinned orchestrator commit and selected warehouse
+path. After the build tier, the wrapper also resolves the image reference
+reported by the canonical checker and records Docker's immutable image ID as
+`image_hash`. A passing verifier requires `sha256:<64 lowercase hex>`; a mutable
+tag alone is not provenance.
 
 ## Checklist
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -44,17 +45,27 @@ def check_evidence(check_id: str, stage: str) -> str:
     return f"dynamic: exploit.log:1 — {check_id} was observed in band"
 
 
+def make_warehouse(root: Path) -> Path:
+    warehouse = root / "selected-warehouse"
+    (warehouse / "_registry").mkdir(parents=True)
+    (warehouse / "_registry" / "index.json").write_text("{}", encoding="utf-8")
+    challenge_dir = warehouse / "example" / "package"
+    challenge_dir.mkdir(parents=True)
+    (challenge_dir / "challenge.py").write_text("# challenge\n", encoding="utf-8")
+    return warehouse
+
+
 def valid_report() -> dict:
     return {
-        "schema_version": "3.0",
+        "schema_version": "4.0",
         "scope": "all",
         "context": {
             "challenge_id": "example",
-            "challenge_dir": "challenge-warehouse/example/example",
+            "challenge_dir": "example/package",
             "timestamp": "2026-07-13T12:00:00Z",
             "run_id": "20260713T120000Z-a1b2c3d4",
             "orchestrator_commit": ORCHESTRATOR_COMMIT,
-            "warehouse_commit": "2" * 40,
+            "warehouse_path": "/tmp/selected-warehouse",
         },
         "stages": [
             {"stage": stage, "status": "PASS", "summary": f"{stage} passed."}
@@ -82,41 +93,32 @@ class ReviewToolTests(unittest.TestCase):
     def run_script(self, name: str, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(SCRIPTS / name), *args],
-            text=True,
-            capture_output=True,
-            check=False,
+            text=True, capture_output=True, check=False,
         )
 
     def test_context_collector_routes_output_under_review_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "orche"
-            warehouse = root / "challenge-warehouse"
-            challenge_dir = warehouse / "example" / "package"
-            challenge_dir.mkdir(parents=True)
-            (root / ".git").mkdir()
+            warehouse = make_warehouse(Path(tmp))
+            (root / ".git").mkdir(parents=True)
             output = Path(tmp) / "context.json"
             review_root = Path(tmp) / "analysis" / "artifacts" / "review"
 
             def fake_git(repo: Path, *args: str) -> str:
-                if args[0] == "status" or args[0] == "cat-file":
+                if args[0] == "cat-file":
                     return ""
                 if args == ("rev-parse", f"{ORCHESTRATOR_COMMIT}^{{commit}}"):
                     return ORCHESTRATOR_COMMIT
-                if args == ("rev-parse", "HEAD"):
-                    return "2" * 40
                 raise AssertionError((repo, args))
 
             with (
+                patch.dict(os.environ, {}, clear=False),
                 patch.object(_CONTEXT_MODULE, "registry_package", return_value="package"),
-                patch.object(
-                    _CONTEXT_MODULE,
-                    "resolve_challenge_dir",
-                    return_value=challenge_dir,
-                ),
                 patch.object(_CONTEXT_MODULE, "git", side_effect=fake_git),
             ):
                 result = _CONTEXT_MODULE.main([
                     "example",
+                    "--warehouse", str(warehouse),
                     "--repo-root", str(root),
                     "--review-root", str(review_root),
                     "--output", str(output),
@@ -124,9 +126,29 @@ class ReviewToolTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             context = json.loads(output.read_text(encoding="utf-8"))
-            expected = review_root / ("2" * 40) / context["run_id"]
+            expected = review_root / "example" / context["run_id"]
             self.assertEqual(Path(context["recommended_output_dir"]), expected)
             self.assertEqual(context["orchestrator_commit"], ORCHESTRATOR_COMMIT)
+            self.assertEqual(context["warehouse_path"], str(warehouse))
+            self.assertEqual(context["challenge_dir"], "example/package")
+
+    def test_context_collector_requires_valid_explicit_warehouse(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "orche"
+            (root / ".git").mkdir(parents=True)
+            cases = ([], ["--warehouse", "relative/path"], [
+                "--warehouse", str(Path(tmp) / "missing"),
+            ])
+            for warehouse_args in cases:
+                with self.subTest(warehouse_args=warehouse_args):
+                    result = self.run_script(
+                        "collect-review-context.py", "example",
+                        *warehouse_args,
+                        "--repo-root", str(root),
+                        "--review-root", str(Path(tmp) / "review"),
+                        "--output", str(Path(tmp) / "context.json"),
+                    )
+                    self.assertNotEqual(result.returncode, 0)
 
     def test_valid_report_validates_and_renders_compact_markdown(self) -> None:
         report = valid_report()
@@ -355,7 +377,7 @@ class ReviewToolTests(unittest.TestCase):
             self.assertNotEqual(checked.returncode, 0)
             self.assertIn("UNKNOWN requires next_check", checked.stderr)
 
-    def test_initializer_uses_compact_v3_shape(self) -> None:
+    def test_initializer_uses_compact_v4_shape(self) -> None:
         context = valid_report()["context"]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -368,7 +390,7 @@ class ReviewToolTests(unittest.TestCase):
             )
             self.assertEqual(initialized.returncode, 0, initialized.stderr)
             report = json.loads(report_path.read_text(encoding="utf-8"))
-            self.assertEqual(report["schema_version"], "3.0")
+            self.assertEqual(report["schema_version"], "4.0")
             self.assertEqual(set(report), {
                 "schema_version", "scope", "context", "stages", "checks",
                 "findings", "unresolved", "wip_observations", "verdict",
@@ -382,11 +404,14 @@ class ReviewToolTests(unittest.TestCase):
         context = valid_report()["context"]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            warehouse = make_warehouse(root)
+            context["warehouse_path"] = str(warehouse)
             context_path = root / "context.json"
             output_path = root / "verifier.json"
             context_path.write_text(json.dumps(context), encoding="utf-8")
             result = self.run_script(
-                "run-verifier.py", "example", "--context", str(context_path),
+                "run-verifier.py", "example", "--warehouse", str(warehouse),
+                "--context", str(context_path),
                 "--repo-root", str(SKILL_DIR.parents[1]),
                 "--output", str(output_path), "--dry-run",
             )
@@ -400,6 +425,16 @@ class ReviewToolTests(unittest.TestCase):
             self.assertIn("--game", payload["tiers"][2]["command"])
             self.assertIsNone(payload["image_reference"])
             self.assertIsNone(payload["image_hash"])
+            self.assertEqual(payload["warehouse_path"], str(warehouse))
+
+            other_warehouse = make_warehouse(root / "other")
+            mismatch = self.run_script(
+                "run-verifier.py", "example", "--warehouse", str(other_warehouse),
+                "--context", str(context_path),
+                "--repo-root", str(SKILL_DIR.parents[1]),
+                "--output", str(root / "mismatch.json"), "--dry-run",
+            )
+            self.assertNotEqual(mismatch.returncode, 0)
 
     def test_verifier_extracts_the_single_successful_built_image(self) -> None:
         tier_result = {

@@ -143,8 +143,8 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
         return errors
     assert isinstance(report, dict)
 
-    if report["schema_version"] != "3.0":
-        errors.append("$.schema_version: expected '3.0'")
+    if report["schema_version"] != "4.0":
+        errors.append("$.schema_version: expected '4.0'")
     scope = report["scope"]
     if scope not in ACTIVE_STAGES:
         errors.append(f"$.scope: expected one of {sorted(ACTIVE_STAGES)}")
@@ -158,14 +158,23 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
         for key in CONTEXT_KEYS:
             if not nonempty(context.get(key)):
                 errors.append(f"$.context.{key}: expected non-empty string")
-        for key in ("orchestrator_commit", "warehouse_commit"):
-            if isinstance(context.get(key), str) and not COMMIT.fullmatch(context[key]):
-                errors.append(f"$.context.{key}: expected 40-character lowercase commit")
+        if (
+            isinstance(context.get("orchestrator_commit"), str)
+            and not COMMIT.fullmatch(context["orchestrator_commit"])
+        ):
+            errors.append(
+                "$.context.orchestrator_commit: expected 40-character lowercase commit"
+            )
         if context.get("orchestrator_commit") != ORCHESTRATOR_COMMIT:
             errors.append(
                 "$.context.orchestrator_commit: expected pinned commit "
                 f"{ORCHESTRATOR_COMMIT}"
             )
+        if (
+            isinstance(context.get("warehouse_path"), str)
+            and not Path(context["warehouse_path"]).is_absolute()
+        ):
+            errors.append("$.context.warehouse_path: expected absolute path")
 
     stages = report["stages"]
     stage_status: dict[str, str] = {}

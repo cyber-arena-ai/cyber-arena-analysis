@@ -5,6 +5,7 @@ import argparse
 import fcntl
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import time
 from pathlib import Path
 
 from _contracts import ORCHESTRATOR_COMMIT
+from _warehouse import WAREHOUSE_ENV, selected_warehouse
 
 
 IMAGE_HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -99,6 +101,7 @@ def built_image_reference(tier_result: dict) -> str | None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the frozen canonical challenge verifier.")
     parser.add_argument("challenge_id")
+    parser.add_argument("--warehouse", type=Path, required=True)
     parser.add_argument("--context", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--output", type=Path, required=True)
@@ -111,6 +114,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.tier_timeout <= 0 or args.lock_timeout <= 0:
         parser.error("timeouts must be positive")
 
+    try:
+        warehouse = selected_warehouse(args.warehouse)
+    except ValueError as exc:
+        return fail(str(exc))
+    os.environ[WAREHOUSE_ENV] = str(warehouse)
     repo = args.repo_root.resolve()
     try:
         context = json.loads(args.context.read_text(encoding="utf-8"))
@@ -118,11 +126,13 @@ def main(argv: list[str] | None = None) -> int:
         return fail(str(exc))
     if context.get("challenge_id") != args.challenge_id:
         return fail("challenge id does not match review context")
-    required = ["orchestrator_commit", "warehouse_commit", "run_id"]
+    required = ["orchestrator_commit", "warehouse_path", "run_id"]
     if any(not context.get(key) for key in required):
         return fail(f"context missing one of {required}")
     if context["orchestrator_commit"] != ORCHESTRATOR_COMMIT:
         return fail(f"context must use pinned orchestrator commit {ORCHESTRATOR_COMMIT}")
+    if context["warehouse_path"] != str(warehouse):
+        return fail("selected warehouse does not match review context")
 
     worktree = Path("/tmp") / f"cyberarena-verifier-{context['run_id']}"
     tier_args = [[], ["--build", "--ready-timeout", "150"], ["--game", "--ready-timeout", "150"]]
@@ -148,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         "mode": "dry-run" if args.dry_run else "execute",
         "challenge_id": args.challenge_id,
         "orchestrator_commit": context["orchestrator_commit"],
-        "warehouse_commit": context["warehouse_commit"],
+        "warehouse_path": context["warehouse_path"],
         "image_reference": None,
         "image_hash": None,
         "worktree": str(worktree),
@@ -191,41 +201,9 @@ def main(argv: list[str] | None = None) -> int:
                     payload["error"] = "git worktree add failed"
 
             if payload["error"] is None:
-                submodule = subprocess.run(
-                    [
-                        "git", "-C", str(worktree), "-c", "protocol.file.allow=always",
-                        "-c", f"submodule.challenge-warehouse.url={repo / 'challenge-warehouse'}",
-                        "submodule", "update", "--init", "challenge-warehouse",
-                    ],
-                    text=True, capture_output=True, timeout=300, check=False,
-                )
-                payload["setup"].append({
-                    "command": ["git", "submodule", "update", "--init", "challenge-warehouse"],
-                    "exit_code": submodule.returncode,
-                    "stdout": submodule.stdout,
-                    "stderr": submodule.stderr,
-                })
-                if submodule.returncode != 0:
-                    payload["error"] = "submodule initialization failed"
-
-            if payload["error"] is None:
-                checkout = git(worktree / "challenge-warehouse", "checkout", "--detach", context["warehouse_commit"])
-                payload["setup"].append({
-                    "command": ["git", "checkout", "--detach", context["warehouse_commit"]],
-                    "exit_code": checkout.returncode,
-                    "stdout": checkout.stdout,
-                    "stderr": checkout.stderr,
-                })
-                if checkout.returncode != 0:
-                    payload["error"] = "warehouse checkout failed"
-
-            if payload["error"] is None:
                 orchestrator_head = git(worktree, "rev-parse", "HEAD")
-                warehouse_head = git(worktree / "challenge-warehouse", "rev-parse", "HEAD")
                 if orchestrator_head.stdout.strip() != context["orchestrator_commit"]:
                     payload["error"] = "orchestrator worktree commit mismatch"
-                elif warehouse_head.stdout.strip() != context["warehouse_commit"]:
-                    payload["error"] = "warehouse worktree commit mismatch"
 
             if payload["error"] is None:
                 executed: list[dict] = []

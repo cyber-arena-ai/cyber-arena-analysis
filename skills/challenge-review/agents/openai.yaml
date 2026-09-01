@@ -1,4 +1,4 @@
 interface:
   display_name: "Challenge Review"
   short_description: "Adversarially review one arena challenge"
-  default_prompt: "Use $challenge-review <challenge-id> <VERIFIER|STATIC|CHEAT|EXPLOITABILITY|ALL> to review one registered arena challenge."
+  default_prompt: "Use $challenge-review <challenge-id> <VERIFIER|STATIC|CHEAT|EXPLOITABILITY|ALL> <absolute-warehouse-path> to review one registered arena challenge."

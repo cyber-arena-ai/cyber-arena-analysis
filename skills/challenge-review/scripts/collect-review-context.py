@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from _contracts import ORCHESTRATOR_COMMIT
+from _warehouse import WAREHOUSE_ENV, selected_warehouse
 
 
 def fail(message: str) -> NoReturn:
@@ -46,8 +48,7 @@ def registry_package(repo: Path, challenge_id: str) -> str:
     return type(challenge).__module__.split(".")[1]
 
 
-def resolve_challenge_dir(repo: Path, package: str) -> Path:
-    warehouse = repo / "challenge-warehouse"
+def resolve_challenge_dir(warehouse: Path, package: str) -> Path:
     candidates = sorted(
         path for path in warehouse.glob(f"*/{package}")
         if path.is_dir() and (path / "challenge.py").is_file()
@@ -60,6 +61,7 @@ def resolve_challenge_dir(repo: Path, package: str) -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Initialize deterministic review context.")
     parser.add_argument("challenge_id")
+    parser.add_argument("--warehouse", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--review-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -67,6 +69,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.challenge_id or any(char.isspace() for char in args.challenge_id):
         fail("provide exactly one challenge id without whitespace")
+    try:
+        warehouse = selected_warehouse(args.warehouse)
+    except ValueError as exc:
+        fail(str(exc))
+    os.environ[WAREHOUSE_ENV] = str(warehouse)
     repo = args.repo_root.resolve()
     if not (repo / ".git").exists():
         fail(f"not a repository root: {repo}")
@@ -74,35 +81,23 @@ def main(argv: list[str] | None = None) -> int:
         fail(f"refusing to overwrite {args.output}")
 
     package = registry_package(repo, args.challenge_id)
-    challenge_dir = resolve_challenge_dir(repo, package)
-    warehouse = repo / "challenge-warehouse"
-    challenge_relative = challenge_dir.relative_to(warehouse)
-    dirty = git(
-        warehouse, "status", "--porcelain", "--untracked-files=all", "--",
-        challenge_relative.as_posix(),
-    )
-    if dirty:
-        fail(
-            "target challenge has uncommitted files; commit or stash them before review:\n"
-            f"{dirty}"
-        )
+    challenge_dir = resolve_challenge_dir(warehouse, package)
 
     orchestrator_commit = git(repo, "rev-parse", f"{ORCHESTRATOR_COMMIT}^{{commit}}")
-    warehouse_commit = git(warehouse, "rev-parse", "HEAD")
     git(repo, "cat-file", "-e", f"{orchestrator_commit}:challenges/check/__main__.py")
     now = datetime.now(timezone.utc).replace(microsecond=0)
     timestamp = now.isoformat().replace("+00:00", "Z")
     run_id = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(4)}"
     payload = {
         "challenge_id": args.challenge_id,
-        "challenge_dir": challenge_dir.relative_to(repo).as_posix(),
+        "challenge_dir": challenge_dir.relative_to(warehouse).as_posix(),
         "timestamp": timestamp,
         "run_id": run_id,
         "orchestrator_commit": orchestrator_commit,
-        "warehouse_commit": warehouse_commit,
+        "warehouse_path": str(warehouse),
         "challenge_package": package,
         "recommended_output_dir": str(
-            args.review_root.resolve() / warehouse_commit / run_id
+            args.review_root.resolve() / args.challenge_id / run_id
         ),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -127,11 +127,10 @@ def expected_verdict(report: dict) -> str:
         "REVISE" in effects
         or statuses.get("static") in {"FAIL", "NOT_RUN"}
         or statuses.get("cheat") in {"FAIL", "NOT_RUN"}
-        or bool(unresolved_stages - {"exploitability"})
+        or statuses.get("exploitability") in {"FAIL", "NOT_RUN"}
+        or bool(unresolved_stages)
     ):
         return "REVISE"
-    if statuses.get("exploitability") != "PASS" or "exploitability" in unresolved_stages:
-        return "ACCEPT_WITH_CAVEATS"
     if all(statuses.get(stage) == "PASS" for stage in STAGE_ORDER):
         return "ACCEPT"
     return "BLOCKED"
@@ -143,8 +142,8 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
         return errors
     assert isinstance(report, dict)
 
-    if report["schema_version"] != "4.0":
-        errors.append("$.schema_version: expected '4.0'")
+    if report["schema_version"] != "5.0":
+        errors.append("$.schema_version: expected '5.0'")
     scope = report["scope"]
     if scope not in ACTIVE_STAGES:
         errors.append(f"$.scope: expected one of {sorted(ACTIVE_STAGES)}")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-ORCHESTRATOR_COMMIT = "e1d0389bc435d973c35b2c988c63e452822af28c"
+ORCHESTRATOR_COMMIT = "5952ef5d7a1924789da86640665e2cbd6500a8ec"
 
 STAGE_ORDER = ("verifier", "static", "cheat", "exploitability")
 
@@ -42,7 +42,7 @@ STAGE_STATUSES = {"PASS", "FAIL", "BLOCKED", "NOT_RUN"}
 SEVERITY_ORDER = {"BLOCKER": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
 VERDICT_EFFECTS = {"NONE", "REVISE", "REJECT"}
 VERDICTS = {
-    "ACCEPT", "ACCEPT_WITH_CAVEATS", "REVISE", "REJECT", "BLOCKED", "PARTIAL",
+    "ACCEPT", "REVISE", "REJECT", "BLOCKED", "PARTIAL",
 }
 EVIDENCE_KINDS = {"source", "verifier", "dynamic"}
 

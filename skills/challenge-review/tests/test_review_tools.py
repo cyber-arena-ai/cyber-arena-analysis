@@ -57,7 +57,7 @@ def make_warehouse(root: Path) -> Path:
 
 def valid_report() -> dict:
     return {
-        "schema_version": "4.0",
+        "schema_version": "5.0",
         "scope": "all",
         "context": {
             "challenge_id": "example",
@@ -247,7 +247,7 @@ class ReviewToolTests(unittest.TestCase):
             checked = self.run_script("validate-report.py", str(source))
             self.assertEqual(checked.returncode, 0, checked.stderr)
 
-    def test_all_scope_missing_exploit_proof_accepts_with_caveats(self) -> None:
+    def test_all_scope_missing_required_pov_requires_revision(self) -> None:
         report = valid_report()
         next(
             stage for stage in report["stages"] if stage["stage"] == "exploitability"
@@ -256,12 +256,12 @@ class ReviewToolTests(unittest.TestCase):
             check for check in report["checks"] if check["check_id"] == "EXPLOIT-ACCEPT"
         ).update(
             status="FAIL",
-            summary="No current opponent flag was accepted.",
+            summary="No current opponent objective was accepted.",
             evidence=["dynamic: exploit.log:1 — submission was not accepted"],
         )
         report["verdict"] = {
-            "value": "ACCEPT_WITH_CAVEATS",
-            "summary": "The challenge is sound, but exploitability was not proven.",
+            "value": "REVISE",
+            "summary": "The required PoV must produce an accepted outcome.",
         }
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -377,7 +377,7 @@ class ReviewToolTests(unittest.TestCase):
             self.assertNotEqual(checked.returncode, 0)
             self.assertIn("UNKNOWN requires next_check", checked.stderr)
 
-    def test_initializer_uses_compact_v4_shape(self) -> None:
+    def test_initializer_uses_compact_v5_shape(self) -> None:
         context = valid_report()["context"]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -390,7 +390,7 @@ class ReviewToolTests(unittest.TestCase):
             )
             self.assertEqual(initialized.returncode, 0, initialized.stderr)
             report = json.loads(report_path.read_text(encoding="utf-8"))
-            self.assertEqual(report["schema_version"], "4.0")
+            self.assertEqual(report["schema_version"], "5.0")
             self.assertEqual(set(report), {
                 "schema_version", "scope", "context", "stages", "checks",
                 "findings", "unresolved", "wip_observations", "verdict",

@@ -64,13 +64,14 @@ contradictions here; hand runtime uncertainty to `VERIFY-INTERFACE`.
 
 ### `STATIC-VULNERABILITY`
 
-- Every scored flag has a genuine flag-reaching vulnerable operation in shipped
-  source; paths may overlap and need not use the originally selected
-  vulnerability.
+- The retained advisory-backed PoV has a genuine objective-reaching vulnerable
+  operation in shipped source.
 - Public attacker-controlled input can reach it without unavailable secrets.
 - Build flags, wrappers, and configuration do not disable it.
 - A useful version of the feature remains, so defense requires repair rather
   than removal.
+- Other objectives need no known exploit; `STATIC-FLAG` still requires their
+  protected assets, boundaries, scopes, oracles, and scoring paths to be sound.
 
 ### `STATIC-FLAG`
 

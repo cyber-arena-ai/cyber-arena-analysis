@@ -10,20 +10,20 @@ Establish four things:
 
 1. The exact selected commit builds and starts in a disposable Docker
    environment.
-2. Each vulnerability primitive selected for the proposed challenge reproduces
+2. At least one selected advisory-backed vulnerability primitive reproduces
    in-band, and the same probe is blocked by the upstream fix or an equivalent
    narrow patch.
-3. The attack chain is understood from attacker identity and public entrypoint
-   through every required application feature to the protected target and
-   observable outcome.
+3. That PoV's attack chain is understood from attacker identity and public
+   entrypoint through every required application feature to a protected target
+   and observable outcome.
 4. A natural trial witness demonstrates the proposed scope, and a bounded check
    finds no obvious non-vulnerability shortcut to the same result.
 
-For every trial flag, confirm one registered or fully defined custom scope and
-its CWE Technical Impact against the observed result. One reproduction may
-prove multiple flags when their attack chain overlaps. Use independent
-reproductions for materially independent paths. Require Stage 4 to carry any
-custom definition unchanged into the challenge's maintainer-only documentation.
+For every trial objective, confirm one registered or fully defined custom scope
+and its CWE Technical Impact against the protected result. Identify which
+objective the PoV reaches. Require
+Stage 4 to carry any custom definition unchanged into the challenge's
+maintainer-only documentation.
 
 Do not require reproduction of unrelated CVEs from the same application. If
 another genuine in-band vulnerability reaches the witness,

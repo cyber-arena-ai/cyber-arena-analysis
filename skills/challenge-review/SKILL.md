@@ -42,11 +42,11 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    evidence, not as the Technical Impact proved by a flag.
    Resolve the challenge's upstream `OWNER/PROJECT` from its maintainer record
    and require the corresponding `artifacts/projects/OWNER__PROJECT/` directory.
-2. Initialize deterministic context; this validates registry membership in the
-   explicitly selected warehouse and records its absolute path, the challenge
-   path, timestamp, run ID, and exact orchestrator commit. The collector pins
-   orchestration commit
-   `e1d0389bc435d973c35b2c988c63e452822af28c`, matching challenge creation:
+2. Initialize deterministic context; this validates runtime auto-discovery from
+   the explicitly selected warehouse and records its absolute path, the
+   challenge path, timestamp, run ID, and exact orchestrator commit. The
+   collector pins orchestration commit
+   `5952ef5d7a1924789da86640665e2cbd6500a8ec`, matching challenge creation:
 
    ```text
    python3 <skill-root>/scripts/collect-review-context.py <challenge-id> \
@@ -56,8 +56,8 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
      --output <temporary-context.json>
    ```
 
-   The collector prints known IDs when membership fails. Registry membership is
-   setup only; do not treat it as verifier evidence. Create the collector's
+   The collector prints known IDs when auto-discovery fails. Discovery is setup
+   only; do not treat it as verifier evidence. Create the collector's
    `recommended_output_dir`, move the context to `context.json`, and initialize
    `review.json`:
 
@@ -130,10 +130,10 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
   verifier, mutate a deployment, or submit a flag.
 - **Cheat:** act as an authorized adversary. Seek the cheapest arena-specific
   in-band shortcut and trivial defense before evaluating normal behavior.
-- **Exploitability:** prove an attacker-visible, in-band path obtains and
-  submits every current opponent flag and realizes its declared attack scope
-  through any genuine vulnerability that is not specific to the arena
-  environment.
+- **Exploitability:** reproduce the advisory-backed PoV through an
+  attacker-visible, in-band path and obtain an authoritative accepted outcome
+  for at least one current opponent objective. Other objectives require sound
+  declarations and scoring rails, not known exploits.
 
 Never use host Docker access, victim files or databases, facility secrets,
 private handler state, or flag ground truth as attacker proof. Never launch

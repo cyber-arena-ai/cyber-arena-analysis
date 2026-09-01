@@ -334,7 +334,7 @@ packages and validates it without changing its objective, scope, oracle,
 boundary, or witness.
 
 Use orchestration commit
-`e1d0389bc435d973c35b2c988c63e452822af28c` and one exact warehouse base
+`5952ef5d7a1924789da86640665e2cbd6500a8ec` and one exact warehouse base
 commit. Do not substitute a branch tip. Give both hashes to every implementation
 agent. Before authoring a batch at a new locked pair, smoke-test external
 warehouse selection once. Run every framework-facing experiment and verifier
@@ -345,7 +345,8 @@ challenge worktree from the locked warehouse base at
 Stage 4 is atomic: intermediate fixes live only in the worktree. Write the
 fixed-schema `stage4/result.json` only after the final clean warehouse commit
 passes registration, the canonical static/build/game gates, the defense
-controls, and an accepted attacker-container PoV. Then hand the registered
+controls, and the retained advisory-backed PoV receives an accepted
+current-opponent outcome for at least one objective. Then hand the registered
 challenge to `$challenge-review`; do not review your own implementation through
 this skill.
 
@@ -383,9 +384,8 @@ exactly four headings:
   evidence instead of copying a large payload.
 - **Flags and capabilities:** name every objective store, its registered
   capability and CWE Technical Impact, assigned oracle, public target when
-  applicable, and the evidence or observed region that receives credit. One PoC
-  may prove objectives on an overlapping attack chain; materially independent
-  paths need independent PoCs.
+  applicable, and the evidence or observed region that receives credit. State
+  which objective the accepted PoV reaches.
 
 Reuse Stage 1–4 evidence and current upstream facts. Cite repository paths or
 direct links, date mutable popularity data, state unknowns instead of guessing,

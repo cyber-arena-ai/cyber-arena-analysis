@@ -89,7 +89,8 @@ new workflow requirements.
 Against the final warehouse commit and the locked orchestration commit, run the
 canonical static, build, and game commands in order. Then run the packaged PoV
 inside the attacker container using only attacker-visible inputs and require a
-current-opponent submission or capability claim with outcome `ACCEPTED`.
+current-opponent submission or capability claim with outcome `ACCEPTED` for at
+least one objective.
 
 The generic game gate verifies deployment, cross-team reachability, and scoring
 rails; it does not solve the challenge. It never replaces the accepted PoV.

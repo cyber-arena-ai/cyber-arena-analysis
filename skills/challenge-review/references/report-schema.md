@@ -8,6 +8,9 @@ arrays using the contracts below.
 Use the evidence syntax and stage restrictions from
 [review-protocol.md](review-protocol.md#evidence).
 
+Keep each stage and check summary to one conclusion sentence and its evidence
+concise. Put supporting analysis only in findings and unresolved concerns.
+
 ## Objectives
 
 Each `objectives` entry has exactly these keys:

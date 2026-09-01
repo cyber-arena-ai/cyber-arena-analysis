@@ -106,9 +106,10 @@ corruption and the future public/private attack-scope split remain `WIP-*`
 observations. They do not create findings unless they directly produce an
 attacker-visible shortcut under the current contract.
 
-Temporarily record a concern that requires deliberate checker or orchestration
-targeting as `WIP-ADVERSARIAL-HARNESS`; do not recommend action or fail the
-stage for it.
+Use `WIP-ADVERSARIAL-HARNESS` only for artificial review-harness behavior that
+is unavailable to participants and cannot be used through their arena action
+surface. A participant-visible or in-band defense that selectively recognizes
+the functionality checker violates the SLA and remains a finding.
 
 ## Stage conclusion
 
@@ -116,6 +117,6 @@ stage for it.
   controls fail functionality, and narrow hardening preserves functionality
   while blocking the intended exploit.
 - `FAIL`: an arena-specific shortcut scores or any required defense control has
-  the wrong result, except for the temporary adversarial-harness boundary above.
+  the wrong result, except for the WIP boundary above.
 - `BLOCKED`: external runtime infrastructure prevents the controls.
 - `NOT_RUN`: the verifier prerequisite fails.

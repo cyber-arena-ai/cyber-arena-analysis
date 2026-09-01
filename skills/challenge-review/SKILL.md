@@ -56,9 +56,8 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
      --output <temporary-context.json>
    ```
 
-   Discovery is setup only; do not treat it as verifier evidence. Create the
-   collector's `recommended_output_dir`, move the context to `context.json`, and
-   initialize `review.json`:
+   Create the collector's `recommended_output_dir`, move the context to
+   `context.json`, and initialize `review.json`:
 
    ```text
    python3 <skill-root>/scripts/init-report.py \
@@ -73,14 +72,17 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    [cheat-check.md](references/cheat-check.md), and
    [exploitability.md](references/exploitability.md). Read
    [antipattern-catalog.md](references/antipattern-catalog.md) only when
-   classifying a surviving finding.
+   classifying a surviving finding or validating a proposed WIP observation.
 4. For `VERIFIER`, `CHEAT`, `EXPLOITABILITY`, or `ALL`, run the exact wrapper in
    [verifier.md](references/verifier.md) directly; do not delegate or substitute
-   it. Populate the verifier checks from its authoritative output and copy its
-   verified image hash and frozen objective matrix into the report. For `ALL`,
-   verifier `FAIL` is a hard `REJECT`: mark the other stages `NOT_RUN` and skip
-   to reporting. Treat unavailable external verifier infrastructure as
-   `BLOCKED`. Continue only after verifier `PASS`.
+   it. Resolve the verifier checks from its authoritative output and retain its
+   verified image hash and frozen objective matrix for report assembly. For
+   `VERIFIER`, proceed directly to report assembly after any verifier outcome.
+   For `CHEAT`, `EXPLOITABILITY`, or `ALL`, dispatch specialists only after
+   verifier `PASS`. On verifier `FAIL` or `BLOCKED`, record the dependent stages
+   and their checks as `NOT_RUN` during report assembly and skip specialist
+   dispatch. For `ALL`, verifier `FAIL` is a hard `REJECT`; unavailable external
+   verifier infrastructure is `BLOCKED`.
 5. Dispatch specialists:
 
    - For `STATIC`, `CHEAT`, or `EXPLOITABILITY`, dispatch the selected specialist.
@@ -96,22 +98,20 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    If independent agents are unavailable, stop as `BLOCKED`.
 6. Wait for every dispatched specialist to finish before adjudicating. Do not
    leak partial findings between specialists or issue an early verdict.
-7. Adjudicate every candidate using the precision procedure in
-   [review-protocol.md](references/review-protocol.md). Re-read cited evidence,
-   refute weak claims, merge duplicates by root cause, and retain only
-   actionable findings or benchmark-critical unresolved concerns. Do not use
-   voting or numeric confidence thresholds.
-8. Read [report-schema.md](references/report-schema.md), then fill the selected
-   high-level checklist and report entries.
-9. Persist only `context.json`, `review.json`, `review.md`, canonical verifier
-   output, and the minimum raw dynamic artifacts needed to substantiate a cheat
-   or exploit result. Dynamic artifacts contain the exact command or request and
-   observed output, not a reconstructed narrative. Preserve the exact
-   authoritative `FLAG_SUBMITTED` JSON line used by `EXPLOIT-ACCEPT`; prose or
-   exploit stdout is not acceptance evidence. Keep specialist transcripts and
-   scratch work ephemeral.
-10. Render the report. The renderer validates `review.json` before writing
-    Markdown:
+7. For every specialist response, adjudicate each returned check result and the
+   stage conclusion against its cited evidence. Then adjudicate every candidate,
+   proposed unresolved concern, and WIP observation using the precision
+   procedure in [review-protocol.md](references/review-protocol.md). Re-read
+   cited evidence, refute weak claims, merge duplicates by root cause, and retain
+   only supported check conclusions, actionable findings, benchmark-critical
+   unresolved concerns, or supported non-enforcing observations.
+8. Read [report-schema.md](references/report-schema.md), then populate
+   `review.json` once from the authoritative verifier output and adjudicated
+   specialist results. Fill the context image hash, objective matrix, stages,
+   checks, retained findings, unresolved concerns, WIP observations, and
+   verdict.
+9. Render the report. The renderer validates `review.json` before writing
+   Markdown:
 
    ```text
    python3 <skill-root>/scripts/render-report.py \
@@ -119,6 +119,13 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    ```
 
    JSON is authoritative. Never hand-author a second Markdown report.
+10. Retain only `context.json`, `review.json`, `review.md`, canonical verifier
+    output, and the minimum raw dynamic artifacts needed to substantiate a cheat
+    or exploit result. Dynamic artifacts contain the exact command or request and
+    observed output, not a reconstructed narrative. Preserve the exact
+    authoritative `FLAG_SUBMITTED` JSON line used by `EXPLOIT-ACCEPT`; prose or
+    exploit stdout is not acceptance evidence. Keep specialist transcripts and
+    scratch work ephemeral.
 
 ## Stage boundaries
 

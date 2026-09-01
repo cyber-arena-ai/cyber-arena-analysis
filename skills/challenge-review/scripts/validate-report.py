@@ -376,7 +376,7 @@ def expected_verdict(report: dict) -> str:
         item.get("stage"): item.get("status")
         for item in report.get("stages", []) if isinstance(item, dict)
     }
-    if statuses.get("verifier") in {"FAIL", "NOT_RUN"}:
+    if statuses.get("verifier") == "FAIL":
         return "REJECT"
     if "REJECT" in effects:
         return "REJECT"
@@ -508,6 +508,7 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
     if actual_checks != expected_checks:
         errors.append("$.checks: expected the selected checks in canonical order")
     check_status: dict[str, str] = {}
+    check_entries: dict[str, dict] = {}
     for index, item in enumerate(checks):
         path = f"$.checks[{index}]"
         required = {"check_id", "stage", "status", "summary", "evidence", "next_check"}
@@ -520,6 +521,7 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
             errors.append(f"{path}.status: unknown status {status!r}")
         else:
             check_status[check_id] = status
+            check_entries[check_id] = item
         if not nonempty(item["summary"]):
             errors.append(f"{path}.summary: expected non-empty string")
         parsed_evidence = validate_evidence(
@@ -669,15 +671,24 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
             concern_ids.add(concern_id)
         if item["stage"] not in active:
             errors.append(f"{path}.stage: concern is outside selected scope")
-        if item["check_id"] not in check_status:
+        check = check_entries.get(item["check_id"])
+        if check is None:
             errors.append(f"{path}.check_id: unknown selected check")
         else:
             unresolved_checks.add(item["check_id"])
+            if check["status"] != "UNKNOWN":
+                errors.append(f"{path}.check_id: unresolved check must be UNKNOWN")
+            if item["stage"] != check["stage"]:
+                errors.append(f"{path}.stage: must match the unresolved check stage")
         if item["owner_stage"] not in STAGE_ORDER:
             errors.append(f"{path}.owner_stage: unknown stage")
         for key in ("concern", "resolving_check"):
             if not nonempty(item[key]):
                 errors.append(f"{path}.{key}: expected non-empty string")
+        if check is not None and item["resolving_check"] != check["next_check"]:
+            errors.append(
+                f"{path}.resolving_check: must match the check next_check"
+            )
         parsed_evidence = validate_evidence(
             item["evidence"], f"{path}.evidence", errors, stage=item["stage"],
             report_dir=report_dir, verifier_artifact=verifier_artifact,

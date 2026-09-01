@@ -36,11 +36,11 @@ def check_evidence(check_id: str, stage: str) -> str:
     if stage == "static":
         if check_id == "STATIC-FLAG":
             return (
-                "source: challenge-warehouse/example/example/challenge.py:20 — "
+                "source: warehouse:example/package/challenge.py:20 — "
                 "store=default; outcome=read; scope=app.cross_boundary.read; "
                 "oracle=submit; declaration and scoring path agree"
             )
-        return "source: challenge-warehouse/example/example/challenge.py:10 — behavior is wired"
+        return "source: warehouse:example/package/challenge.py:10 — behavior is wired"
     if stage == "verifier":
         tier = {
             "VERIFY-INTERFACE": 0,
@@ -352,7 +352,7 @@ class ReviewToolTests(unittest.TestCase):
             "severity": "LOW",
             "antipattern_id": "UNCLASSIFIED",
             "title": "Minor actionable issue",
-            "evidence": ["source: challenge-warehouse/example/example/challenge.py:10 — issue exists"],
+            "evidence": ["source: warehouse:example/package/challenge.py:10 — issue exists"],
             "impact": "Limited benchmark impact.",
             "required_action": "Clarify the implementation.",
             "verdict_effect": "NONE",
@@ -419,7 +419,7 @@ class ReviewToolTests(unittest.TestCase):
             "check_id": "STATIC-BUILD",
             "concern": "Runtime build behavior remains undecided.",
             "evidence": check["evidence"],
-            "resolving_check": "Run VERIFY-BUILD.",
+            "resolving_check": "Run VERIFY-BUILD against the selected warehouse.",
             "owner_stage": "verifier",
         }]
         with tempfile.TemporaryDirectory() as tmp:
@@ -740,7 +740,7 @@ class ReviewToolTests(unittest.TestCase):
         failed.update(
             status="FAIL",
             summary="Build provenance is missing; see F-001.",
-            evidence=["source: image/Dockerfile:1 — base image is mutable"],
+            evidence=["source: warehouse:example/package/image/Dockerfile:1 — base image is mutable"],
         )
         next(item for item in report["stages"] if item["stage"] == "static")["status"] = "FAIL"
         report["findings"] = [{
@@ -749,7 +749,7 @@ class ReviewToolTests(unittest.TestCase):
             "severity": "MEDIUM",
             "antipattern_id": "AP-VERSION-UNPINNED",
             "title": "Build input is mutable",
-            "evidence": ["source: image/Dockerfile:1 — base image is mutable"],
+            "evidence": ["source: warehouse:example/package/image/Dockerfile:1 — base image is mutable"],
             "impact": "Rebuild behavior can drift.",
             "required_action": "Pin the behavior-changing build input.",
             "verdict_effect": "REVISE",
@@ -767,7 +767,7 @@ class ReviewToolTests(unittest.TestCase):
             self.assertEqual(rendered.returncode, 0, rendered.stderr)
             text = output.read_text(encoding="utf-8")
             self.assertIn("[FAIL] `STATIC-BUILD`", text)
-            self.assertIn("source: image/Dockerfile:1", text)
+            self.assertIn("source: warehouse:example/package/image/Dockerfile:1", text)
 
     def test_renderer_preserves_literal_not_run_status(self) -> None:
         report = static_report()
@@ -792,7 +792,7 @@ class ReviewToolTests(unittest.TestCase):
             "severity": "HIGH",
             "antipattern_id": "AP-VULN-DEAD",
             "title": "Vulnerability is absent",
-            "evidence": ["source: challenge.py:20 — vulnerable operation is absent"],
+            "evidence": ["source: warehouse:example/package/challenge.py:20 — vulnerable operation is absent"],
             "impact": "The intended benchmark cannot be exercised.",
             "required_action": "Ship the intended vulnerable implementation.",
             "verdict_effect": "REJECT",
@@ -836,6 +836,30 @@ class ReviewToolTests(unittest.TestCase):
             checked = self.run_script("validate-report.py", str(source))
             self.assertNotEqual(checked.returncode, 0)
             self.assertIn("UNKNOWN requires next_check", checked.stderr)
+
+    def test_unresolved_concern_requires_matching_unknown_check(self) -> None:
+        report = static_report()
+        report["unresolved"] = [{
+            "concern_id": "U-001",
+            "stage": "static",
+            "check_id": "STATIC-BUILD",
+            "concern": "Runtime build behavior remains undecided.",
+            "evidence": [
+                "source: warehouse:example/package/challenge.py:10 — "
+                "runtime build behavior is not established"
+            ],
+            "resolving_check": "Run VERIFY-BUILD.",
+            "owner_stage": "verifier",
+        }]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_artifacts(root, report, include_acceptance=False)
+            source = root / "review.json"
+            source.write_text(json.dumps(report), encoding="utf-8")
+            checked = self.run_script("validate-report.py", str(source))
+
+        self.assertNotEqual(checked.returncode, 0)
+        self.assertIn("unresolved check must be UNKNOWN", checked.stderr)
 
     def test_initializer_uses_compact_v6_shape(self) -> None:
         context = valid_report()["context"]

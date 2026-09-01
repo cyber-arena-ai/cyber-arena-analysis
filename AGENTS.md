@@ -68,7 +68,7 @@ maintained material instead of copying it between repositories.
 - Use `skills/challenge-create/SKILL.md` for the staged discovery-to-handoff
   workflow. Read every required reference and the complete orchestrator
   authoring SOP before authoring.
-- Retain curation and review evidence under this repository's ignored
+- Retain challenge-creation evidence under this repository's ignored
   `artifacts/projects/<OWNER>__<PROJECT>/` tree. Put disposable clones, build
   trees, containers, and failed experiments in `/tmp`.
 - During parallel challenge work, assign each challenge one owning write agent,
@@ -97,6 +97,9 @@ maintained material instead of copying it between repositories.
 - Use `skills/challenge-review/SKILL.md` for exactly one registered challenge
   and one requested stage, or `ALL`. A review gathers and adjudicates evidence;
   it does not fix the reviewed challenge.
+- Retain review evidence under the ignored
+  `artifacts/reviews/<challenge-id>/<run-id>/` tree. Provenance does not
+  determine the review artifact path.
 - Treat the canonical verifier as a gate, then keep static, cheat, and
   exploitability evidence independent as the review protocol requires.
 - Never use host Docker access, victim files or databases, facility secrets,

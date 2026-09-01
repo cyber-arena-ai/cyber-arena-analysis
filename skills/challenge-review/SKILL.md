@@ -13,9 +13,10 @@ isolated runtime state.
 
 Resolve the directory containing this file as `<skill-root>`. If the current
 working directory is inside the `cyber-arena-analysis` checkout, use that
-repository as `<analysis-root>` and default persistence to its `artifacts/`
-directory. Otherwise stop and ask the user where artifacts should be persisted;
-do not default to a plugin installation or cache directory. Locate the separate
+repository as `<analysis-root>`. Otherwise stop and ask the user to identify the
+`cyber-arena-analysis` checkout; do not default to a plugin installation or
+cache directory. Persist reviews under `<analysis-root>/artifacts/reviews/`.
+Locate the separate
 `cyber-arena-orche` checkout as `<orche-root>`; do not persist review artifacts
 there. Use the required warehouse-path input for every review operation.
 
@@ -40,8 +41,10 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    `<analysis-root>/skills/challenge-create/references/attack-scopes.json`.
    Treat advisory CWE weakness labels as root-cause
    evidence, not as the Technical Impact proved by an objective outcome.
-   Resolve the challenge's upstream `OWNER/PROJECT` from its maintainer record
-   and require the corresponding `artifacts/projects/OWNER__PROJECT/` directory.
+   Do not resolve upstream project identity during setup. When static review is
+   selected, inspect provenance directly in the selected challenge package;
+   missing or ambiguous immutable origin is `AP-PROVENANCE-MISSING` and requires
+   revision, not a context-collection failure.
 2. Initialize deterministic context; this validates runtime auto-discovery from
    the explicitly selected warehouse and records its absolute path, the
    challenge path, timestamp, run ID, and exact orchestrator commit. The
@@ -52,7 +55,7 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    python3 <skill-root>/scripts/collect-review-context.py <challenge-id> \
      --warehouse <absolute-warehouse-path> \
      --repo-root <orche-root> \
-     --review-root <analysis-root>/artifacts/projects/OWNER__PROJECT/review \
+     --review-root <analysis-root>/artifacts/reviews \
      --output <temporary-context.json>
    ```
 

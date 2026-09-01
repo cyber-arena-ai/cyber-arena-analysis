@@ -43,17 +43,58 @@ def command_result(command: list[str], cwd: Path, timeout: float) -> dict:
             "parsed_json": parsed,
         }
     except subprocess.TimeoutExpired as exc:
+        stdout = (
+            exc.stdout.decode(errors="replace")
+            if isinstance(exc.stdout, bytes) else exc.stdout or ""
+        )
+        stderr = (
+            exc.stderr.decode(errors="replace")
+            if isinstance(exc.stderr, bytes) else exc.stderr or ""
+        )
         return {
             "command": command,
             "cwd": str(cwd),
             "timeout_seconds": timeout,
-            "status": "BLOCKED",
+            "status": "FAIL",
             "exit_code": None,
             "duration_seconds": round(time.monotonic() - started, 3),
-            "stdout": exc.stdout or "",
-            "stderr": (exc.stderr or "") + f"\ncommand timed out after {timeout:g}s",
+            "stdout": stdout,
+            "stderr": stderr + f"\ncommand timed out after {timeout:g}s",
             "parsed_json": None,
         }
+    except OSError as exc:
+        return {
+            "command": command,
+            "cwd": str(cwd),
+            "timeout_seconds": timeout,
+            "status": "FAIL",
+            "exit_code": None,
+            "duration_seconds": round(time.monotonic() - started, 3),
+            "stdout": "",
+            "stderr": f"{type(exc).__name__}: {exc}",
+            "parsed_json": None,
+        }
+
+
+def checker_result(command: list[str], cwd: Path, timeout: float) -> dict:
+    result = command_result(command, cwd, timeout)
+    if result["status"] != "PASS":
+        return result
+    parsed = result["parsed_json"]
+    valid = (
+        isinstance(parsed, dict)
+        and isinstance(parsed.get("challenge"), str)
+        and bool(parsed["challenge"])
+        and parsed.get("ok") is True
+        and isinstance(parsed.get("checks"), list)
+        and bool(parsed["checks"])
+    )
+    if not valid:
+        result["status"] = "FAIL"
+        result["stderr"] = (
+            f"{result['stderr']}\nchecker did not return successful JSON"
+        ).lstrip()
+    return result
 
 
 def git(repo: Path, *args: str, timeout: float = 180.0) -> subprocess.CompletedProcess[str]:
@@ -133,7 +174,6 @@ def main(argv: list[str] | None = None) -> int:
         return fail(f"context must use pinned orchestrator commit {ORCHESTRATOR_COMMIT}")
     if context["warehouse_path"] != str(warehouse):
         return fail("selected warehouse does not match review context")
-
     worktree = Path("/tmp") / f"cyberarena-verifier-{context['run_id']}"
     tier_args = [[], ["--build", "--ready-timeout", "150"], ["--game", "--ready-timeout", "150"]]
     tiers = []
@@ -161,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
         "warehouse_path": context["warehouse_path"],
         "image_reference": None,
         "image_hash": None,
+        "status": "NOT_RUN",
         "worktree": str(worktree),
         "tiers": tiers,
         "setup": [],
@@ -180,12 +221,16 @@ def main(argv: list[str] | None = None) -> int:
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
-                    return fail(f"dynamic review lock busy: {lock_path}")
+                    payload["status"] = "BLOCKED"
+                    payload["error"] = f"dynamic review lock busy: {lock_path}"
+                    wrote = write_output(args.output, payload)
+                    return wrote if wrote != 0 else 1
                 time.sleep(0.1)
         created_worktree = False
         try:
             if worktree.exists():
                 payload["error"] = f"worktree path already exists: {worktree}"
+                payload["status"] = "BLOCKED"
             if payload["error"] is None:
                 command = ["worktree", "add", "--detach", str(worktree), context["orchestrator_commit"]]
                 result = git(repo, *command)
@@ -199,16 +244,43 @@ def main(argv: list[str] | None = None) -> int:
                     created_worktree = True
                 else:
                     payload["error"] = "git worktree add failed"
+                    payload["status"] = "BLOCKED"
 
             if payload["error"] is None:
                 orchestrator_head = git(worktree, "rev-parse", "HEAD")
                 if orchestrator_head.stdout.strip() != context["orchestrator_commit"]:
                     payload["error"] = "orchestrator worktree commit mismatch"
+                    payload["status"] = "BLOCKED"
 
             if payload["error"] is None:
                 executed: list[dict] = []
                 for tier in tiers:
-                    result = command_result(tier["command"], worktree, args.tier_timeout)
+                    if tier["name"] == "build":
+                        docker = command_result(
+                            [
+                                "docker", "info", "--format",
+                                "{{json .ServerVersion}}",
+                            ],
+                            repo,
+                            min(args.tier_timeout, 60.0),
+                        )
+                        payload["setup"].append(docker)
+                        if docker["status"] != "PASS":
+                            result = dict(tier)
+                            result.update(
+                                status="BLOCKED",
+                                exit_code=docker["exit_code"],
+                                duration_seconds=docker["duration_seconds"],
+                                stdout=docker["stdout"],
+                                stderr=docker["stderr"],
+                            )
+                            executed.append(result)
+                            payload["status"] = "BLOCKED"
+                            break
+
+                    result = checker_result(
+                        tier["command"], worktree, args.tier_timeout,
+                    )
                     result["name"] = tier["name"]
                     executed.append(result)
                     if result["status"] != "PASS":
@@ -235,6 +307,7 @@ def main(argv: list[str] | None = None) -> int:
                 payload["tiers"] = executed + tiers[len(executed):]
         except (OSError, subprocess.TimeoutExpired) as exc:
             payload["error"] = f"{type(exc).__name__}: {exc}"
+            payload["status"] = "BLOCKED"
         finally:
             if created_worktree:
                 cleanup = git(repo, "worktree", "remove", "--force", str(worktree), timeout=180)
@@ -251,10 +324,18 @@ def main(argv: list[str] | None = None) -> int:
                 "stdout": prune.stdout,
                 "stderr": prune.stderr,
             })
+
+    if payload["status"] != "BLOCKED":
+        payload["status"] = (
+            "PASS"
+            if payload["error"] is None
+            and all(tier["status"] == "PASS" for tier in payload["tiers"])
+            else "FAIL"
+        )
     wrote = write_output(args.output, payload)
     if wrote != 0:
         return wrote
-    return 0 if payload["error"] is None and all(tier["status"] == "PASS" for tier in payload["tiers"]) else 1
+    return 0 if payload["status"] == "PASS" else 1
 
 
 if __name__ == "__main__":

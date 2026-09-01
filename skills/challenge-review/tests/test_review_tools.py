@@ -23,7 +23,6 @@ _VERIFIER_SPEC = importlib.util.spec_from_file_location(
 assert _VERIFIER_SPEC and _VERIFIER_SPEC.loader
 _VERIFIER_MODULE = importlib.util.module_from_spec(_VERIFIER_SPEC)
 _VERIFIER_SPEC.loader.exec_module(_VERIFIER_MODULE)
-built_image_reference = _VERIFIER_MODULE.built_image_reference
 
 _CONTEXT_SPEC = importlib.util.spec_from_file_location(
     "challenge_review_collect_context", SCRIPTS / "collect-review-context.py",
@@ -53,6 +52,25 @@ def make_warehouse(root: Path) -> Path:
     challenge_dir.mkdir(parents=True)
     (challenge_dir / "challenge.py").write_text("# challenge\n", encoding="utf-8")
     return warehouse
+
+
+def process_result(
+    stdout: str, returncode: int = 0, stderr: str = "",
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(
+        ["command"], returncode, stdout=stdout, stderr=stderr,
+    )
+
+
+def checker_stdout(*, ok: bool = True, checks: list[dict] | None = None) -> str:
+    if checks is None:
+        checks = [{
+            "group": "import",
+            "name": "instantiate",
+            "status": "pass" if ok else "fail",
+            "detail": "fresh instance" if ok else "failed",
+        }]
+    return json.dumps({"challenge": "package", "ok": ok, "checks": checks})
 
 
 def valid_report() -> dict:
@@ -95,6 +113,50 @@ class ReviewToolTests(unittest.TestCase):
             [sys.executable, str(SCRIPTS / name), *args],
             text=True, capture_output=True, check=False,
         )
+
+    def run_verifier_main(
+        self,
+        root: Path,
+        command_results: list[subprocess.CompletedProcess[str] | BaseException],
+    ) -> tuple[int, dict]:
+        repo = root / "orche"
+        repo.mkdir()
+        warehouse = make_warehouse(root)
+        context = valid_report()["context"]
+        context.update(
+            warehouse_path=str(warehouse),
+            run_id=f"verifier-{root.name}",
+        )
+        context_path = root / "context.json"
+        output_path = root / "verifier.json"
+        context_path.write_text(json.dumps(context), encoding="utf-8")
+
+        def fake_git(
+            repo: Path, *args: str, timeout: float = 180.0,
+        ) -> subprocess.CompletedProcess[str]:
+            stdout = ORCHESTRATOR_COMMIT if args == ("rev-parse", "HEAD") else ""
+            return subprocess.CompletedProcess(
+                ["git", "-C", str(repo), *args], 0, stdout=stdout, stderr="",
+            )
+
+        with (
+            patch.object(_VERIFIER_MODULE, "git", side_effect=fake_git),
+            patch.object(
+                _VERIFIER_MODULE.subprocess,
+                "run",
+                side_effect=command_results,
+            ),
+        ):
+            result = _VERIFIER_MODULE.main([
+                "example",
+                "--warehouse", str(warehouse),
+                "--context", str(context_path),
+                "--repo-root", str(repo),
+                "--output", str(output_path),
+                "--execute",
+            ])
+
+        return result, json.loads(output_path.read_text(encoding="utf-8"))
 
     def test_context_collector_routes_output_under_review_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -436,22 +498,136 @@ class ReviewToolTests(unittest.TestCase):
             )
             self.assertNotEqual(mismatch.returncode, 0)
 
-    def test_verifier_extracts_the_single_successful_built_image(self) -> None:
-        tier_result = {
-            "parsed_json": {
-                "checks": [
-                    {
-                        "group": "build",
-                        "name": "image build",
-                        "status": "pass",
-                        "detail": "cyberarena/example:review",
-                    },
-                ],
-            },
-        }
+    def test_verifier_accepts_valid_checker_outputs(self) -> None:
+        build = checker_stdout(checks=[{
+            "group": "build",
+            "name": "image build",
+            "status": "pass",
+            "detail": "cyberarena/example:review",
+        }])
+        image_hash = f"sha256:{'a' * 64}"
+        with tempfile.TemporaryDirectory() as tmp:
+            result, payload = self.run_verifier_main(Path(tmp), [
+                process_result(checker_stdout()),
+                process_result('"27.0"'),
+                process_result(build),
+                process_result(image_hash),
+                process_result(checker_stdout()),
+            ])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(payload["status"], "PASS")
+        self.assertEqual(payload["image_hash"], image_hash)
         self.assertEqual(
-            built_image_reference(tier_result), "cyberarena/example:review",
+            [tier["status"] for tier in payload["tiers"]],
+            ["PASS", "PASS", "PASS"],
         )
+
+    def test_verifier_rejects_malformed_checker_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result, payload = self.run_verifier_main(
+                Path(tmp), [process_result("not json")],
+            )
+
+        self.assertNotEqual(result, 0)
+        self.assertEqual(payload["status"], "FAIL")
+        self.assertEqual(payload["tiers"][0]["status"], "FAIL")
+
+    def test_verifier_tier_timeout_is_a_failed_artifact(self) -> None:
+        timeout = subprocess.TimeoutExpired(["command"], 1.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            result, payload = self.run_verifier_main(Path(tmp), [timeout])
+
+        self.assertNotEqual(result, 0)
+        self.assertEqual(payload["status"], "FAIL")
+        self.assertEqual(payload["tiers"][0]["status"], "FAIL")
+
+    def test_unavailable_docker_blocks_dynamic_tiers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result, payload = self.run_verifier_main(Path(tmp), [
+                process_result(checker_stdout()),
+                process_result("", returncode=1, stderr="daemon unavailable"),
+            ])
+
+        self.assertNotEqual(result, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        self.assertEqual(payload["tiers"][0]["status"], "PASS")
+        self.assertEqual(payload["tiers"][1]["status"], "BLOCKED")
+        self.assertEqual(payload["tiers"][2]["status"], "NOT_RUN")
+
+    def test_lock_contention_writes_blocked_verifier_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "orche"
+            repo.mkdir()
+            warehouse = make_warehouse(root)
+            context = valid_report()["context"]
+            context.update(
+                warehouse_path=str(warehouse),
+                run_id=f"lock-{root.name}",
+            )
+            context_path = root / "context.json"
+            output_path = root / "verifier.json"
+            context_path.write_text(json.dumps(context), encoding="utf-8")
+            key = _VERIFIER_MODULE.hashlib.sha256(str(repo).encode()).hexdigest()[:16]
+            lock_path = Path("/tmp") / f"cyberarena-challenge-review-{key}.lock"
+
+            try:
+                with lock_path.open("a+", encoding="utf-8") as lock:
+                    _VERIFIER_MODULE.fcntl.flock(
+                        lock,
+                        _VERIFIER_MODULE.fcntl.LOCK_EX
+                        | _VERIFIER_MODULE.fcntl.LOCK_NB,
+                    )
+                    result = _VERIFIER_MODULE.main([
+                        "example",
+                        "--warehouse", str(warehouse),
+                        "--context", str(context_path),
+                        "--repo-root", str(repo),
+                        "--output", str(output_path),
+                        "--execute",
+                        "--lock-timeout", "0.01",
+                    ])
+            finally:
+                lock_path.unlink(missing_ok=True)
+
+            self.assertNotEqual(result, 0)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "BLOCKED")
+            self.assertTrue(payload["error"])
+
+    def test_setup_failure_writes_blocked_verifier_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "orche"
+            repo.mkdir()
+            warehouse = make_warehouse(root)
+            context = valid_report()["context"]
+            context.update(
+                warehouse_path=str(warehouse),
+                run_id=f"setup-{root.name}",
+            )
+            context_path = root / "context.json"
+            output_path = root / "verifier.json"
+            context_path.write_text(json.dumps(context), encoding="utf-8")
+            failed_git = subprocess.CompletedProcess(
+                ["git"], 1, stdout="", stderr="git failed",
+            )
+
+            with patch.object(_VERIFIER_MODULE, "git", return_value=failed_git):
+                result = _VERIFIER_MODULE.main([
+                    "example",
+                    "--warehouse", str(warehouse),
+                    "--context", str(context_path),
+                    "--repo-root", str(repo),
+                    "--output", str(output_path),
+                    "--execute",
+                ])
+
+            self.assertNotEqual(result, 0)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "BLOCKED")
+            self.assertTrue(payload["error"])
 
 
 if __name__ == "__main__":

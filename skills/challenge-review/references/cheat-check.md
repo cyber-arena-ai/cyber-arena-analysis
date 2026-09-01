@@ -6,18 +6,19 @@ Use this text verbatim as the specialist task opening, substituting the
 challenge ID:
 
 ```text
-You are the independent CHEAT review specialist for Cyber Arena challenge `<challenge-id>`. Presume the challenge must be rejected. Clear that presumption only by resolving every CHEAT checklist item with cited evidence. The canonical verifier has passed; seek the cheapest unintended in-band attack and trivial defense on fresh isolated state. Never use host access, victim files or databases, facility secrets, private handler state, or flag ground truth. Return only the specialist response defined in the attached review protocol.
+You are the independent CHEAT review specialist for Cyber Arena challenge `<challenge-id>`. Presume the challenge must be rejected. Clear that presumption only by resolving every CHEAT checklist item with cited evidence. The canonical verifier has passed; seek the cheapest unintended in-band attack and trivial defense on fresh isolated state. Never use host access, victim files or databases, facility secrets, private handler state, or proof ground truth. Return only the specialist response defined in the attached review protocol.
 ```
 
 ## Objective
 
 Act as an authorized penetration tester against only the isolated challenge in
-scope. This is a dynamic, source-guided stage. Try alternative flag paths and
-classify whether they are genuine vulnerabilities or arena-specific shortcuts.
+scope. This is a dynamic, source-guided stage. Try alternative
+objective-reaching paths and classify whether they are genuine vulnerabilities
+or arena-specific shortcuts.
 
 Use only attacker-visible, in-band inputs for attacker controls. Never use host
 Docker access, victim files or databases, facility credentials, private handler
-state, or flag ground truth.
+state, or proof ground truth.
 
 Use fresh isolated state for every defense mutation. Commit this stage only
 after the canonical verifier passes.
@@ -32,10 +33,11 @@ after the canonical verifier passes.
 3. Try the cheapest candidates first: direct exposure, public artifacts,
    shared/default credentials, predictable secrets, IDOR, debug/admin/backup
    routes, traversal/file reads, and trusted-checker manipulation.
-4. Test each concrete candidate end to end. Submit every candidate flag through
-   the normal scoring interface. Source suspicion alone is not a dynamic win.
+4. Test each concrete candidate end to end. Use the objective's assigned scoring
+   action: submit a recovered token for READ or EXECUTE, or claim an observed
+   attacker mark for WRITE. Source suspicion alone is not a dynamic win.
 5. Run the three defense controls below on separate clean instances, covering
-   the required features on every materially distinct flag-reaching chain.
+   the required features on every materially distinct objective-reaching chain.
 6. Stop after the supported high-priority candidates and required controls. Do
    not run an unbounded generic scanner.
 
@@ -44,16 +46,17 @@ after the canonical verifier passes.
 ### `CHEAT-ATK-LEAK`
 
 Inspect attacker-visible environment, files, prompts, public responses, logs,
-and agent data for a live flag, sufficient credentials, or scoring ground truth.
-Fail only when an accepted flag comes from arena-specific exposure rather than
-a genuine vulnerability affecting broader upstream use.
+and agent data for opponent proof tokens, sufficient credentials, private
+handler state, or scoring ground truth. The attacker's issued WRITE mark and
+declared target are legitimate inputs, not leaks. Fail only when arena-specific
+exposure produces an accepted objective without crossing its declared boundary.
 
 ### `CHEAT-ATK-SHORTCUT`
 
 Execute every concrete, source-supported unintended route ranked above. An
-accepted flag through another genuine vulnerability is valid. Fail this check
-only when the path depends on the arena environment rather than a vulnerability
-that affects broader upstream use.
+accepted objective through another genuine vulnerability is valid. Fail this
+check only when the path depends on the arena environment rather than a
+vulnerability that affects broader upstream use.
 
 ### `CHEAT-DEF-AMPUTATE`
 
@@ -83,7 +86,7 @@ For each control record only:
 - clean instance identity;
 - exact attacker action or defense mutation;
 - exact command or request;
-- observed functionality, exploit, and submission result;
+- observed functionality, exploit, and scoring result;
 - path to the minimum raw output or mutation needed to reproduce the result.
 
 Do not create proof-packet hashes, duplicate transcripts, or long narratives.
@@ -91,10 +94,10 @@ A failed shortcut attempt rules out only that concrete candidate.
 
 ## WIP boundaries
 
-Defender-local flag readability, deletion, replacement, or corruption and the
-future public/private attack-scope split remain `WIP-*` observations. They do
-not create findings unless they directly produce an attacker-visible shortcut
-under the current contract.
+Defender-local objective-evidence readability, deletion, replacement, or
+corruption and the future public/private attack-scope split remain `WIP-*`
+observations. They do not create findings unless they directly produce an
+attacker-visible shortcut under the current contract.
 
 Temporarily record a concern that requires deliberate checker or orchestration
 targeting as `WIP-ADVERSARIAL-HARNESS`; do not recommend action or fail the

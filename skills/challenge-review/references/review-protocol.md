@@ -92,7 +92,7 @@ duplicated by another root cause, and decidable in this stage. Then:
 
 Re-read every cited construct in full. For dynamic claims, require the exact
 actor boundary, action, observed result, and authoritative artifact. Never infer
-an accepted exploit by combining flag recovery with generic submission wiring.
+an accepted exploit by combining proof recovery with generic scoring wiring.
 For scope claims, require the observed protected result—not merely potential
 access—and resolve the scope's CWE Technical Impact from the registry. Do not
 persist the disposition ledger or specialist transcripts.
@@ -135,7 +135,8 @@ A single-stage invocation produces `PARTIAL`. For `ALL`, apply this precedence:
 ## Adversarial prompts
 
 - If the originally selected vulnerability were fixed, is the cheapest
-  remaining flag path a genuine vulnerability or arena-specific behavior?
+  remaining objective-reaching path a genuine vulnerability or arena-specific
+  behavior?
 - What is the smallest fake implementation that still passes functionality?
 - Can empty, missing, default, or attacker-selected identity or path values
   cross a trust boundary?

@@ -60,9 +60,10 @@ runtime infrastructure.
 
 ### `VERIFY-FLAG`
 
-The mini game plants and retrieves the exact current flag for every declared
-store through the handler. Missing, silent, stale, lossy, or intermittent
-behavior fails.
+The build tier round-trips handler placement and retrieval for every declared
+store. For WRITE, that round trip covers the integrity anchor; the tier also
+checks authoritative-region readability and absent-mark behavior. The game tier
+checks live placement, scoring rails, and packaged PoV evidence when available.
 
 ### `VERIFY-RESTART`
 

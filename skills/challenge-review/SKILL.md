@@ -39,7 +39,7 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
 1. Read `<analysis-root>/CONTRIBUTING.md` and
    `<analysis-root>/skills/challenge-create/references/attack-scopes.json`.
    Treat advisory CWE weakness labels as root-cause
-   evidence, not as the Technical Impact proved by a flag.
+   evidence, not as the Technical Impact proved by an objective outcome.
    Resolve the challenge's upstream `OWNER/PROJECT` from its maintainer record
    and require the corresponding `artifacts/projects/OWNER__PROJECT/` directory.
 2. Initialize deterministic context; this validates runtime auto-discovery from
@@ -125,9 +125,10 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
 
 - **Verifier:** run only the checker in the pinned orchestration tree. It owns
   imports, Docker build and image-hash capture, mini orchestration, health,
-  every declared flag store, and restart evidence.
+  declared-store handler checks, live scoring-rail controls, and restart
+  evidence.
 - **Static:** inspect source only. Do not build, start services, invoke the
-  verifier, mutate a deployment, or submit a flag.
+  verifier, mutate a deployment, or score an objective.
 - **Cheat:** act as an authorized adversary. Seek the cheapest arena-specific
   in-band shortcut and trivial defense before evaluating normal behavior.
 - **Exploitability:** reproduce the advisory-backed PoV through an
@@ -136,6 +137,6 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
   declarations and scoring rails, not known exploits.
 
 Never use host Docker access, victim files or databases, facility secrets,
-private handler state, or flag ground truth as attacker proof. Never launch
+private handler state, or proof ground truth as attacker proof. Never launch
 iterative hacker-fixer work from this skill; fortification belongs to a separate
 future `challenge-fortify` skill.

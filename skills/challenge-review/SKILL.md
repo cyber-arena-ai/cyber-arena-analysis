@@ -37,15 +37,17 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
 
 ## Execute in this order
 
-1. Read `<analysis-root>/CONTRIBUTING.md` and
-   `<analysis-root>/skills/challenge-create/references/attack-scopes.json`.
-   Treat advisory CWE weakness labels as root-cause
+1. Read `<analysis-root>/CONTRIBUTING.md`. For `STATIC`, `EXPLOITABILITY`, or
+   `ALL`, also read
+   `<analysis-root>/skills/challenge-create/references/attack-scopes.json`;
+   for other scopes, load that registry only if adjudicating a surviving scope
+   claim. Treat advisory CWE weakness labels as root-cause
    evidence, not as the Technical Impact proved by an objective outcome.
    Do not resolve upstream project identity during setup. When static review is
    selected, inspect provenance directly in the selected challenge package;
    missing or ambiguous immutable origin is `AP-PROVENANCE-MISSING` and requires
    revision, not a context-collection failure.
-2. Initialize deterministic context; this validates runtime auto-discovery from
+2. Initialize pinned review context; this validates runtime auto-discovery from
    the explicitly selected warehouse and records its absolute path, the
    challenge path, timestamp, run ID, and exact orchestrator commit. The
    collector pins orchestration commit
@@ -95,8 +97,9 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
      cheat, and exploitability—concurrently on isolated state.
 
    Start each task with the exact prompt in its stage reference, then provide
-   the frozen context, contribution contract, review protocol, stage reference,
-   and verifier output for dynamic stages. Do not preface or rewrite the prompt.
+   the frozen context, `<analysis-root>/CONTRIBUTING.md`, review protocol, stage
+   reference, the attack-scope registry when loaded for that stage, and verifier
+   output for dynamic stages. Do not preface or rewrite the prompt.
    Never reveal another specialist's findings, an oracle, or a draft verdict.
    If independent agents are unavailable, stop as `BLOCKED`.
 6. Wait for every dispatched specialist to finish before adjudicating. Do not
@@ -106,7 +109,8 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    refute weak claims, merge duplicates by root cause, and retain only
    actionable findings or benchmark-critical unresolved concerns. Do not use
    voting or numeric confidence thresholds.
-8. Fill the selected high-level checklist. Use `UNKNOWN` only with concise
+8. Read [report-schema.md](references/report-schema.md), then fill the selected
+   high-level checklist and report entries. Use `UNKNOWN` only with concise
    evidence, one exact `next_check`, and a matching unresolved concern. Static
    review may require a later runtime check but never executes it. Keep each
    stage and checklist summary to one conclusion sentence; put supporting facts
@@ -123,10 +127,10 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    authoritative `FLAG_SUBMITTED` JSON line used by `EXPLOIT-ACCEPT`; prose or
    exploit stdout is not acceptance evidence. Keep specialist transcripts and
    scratch work ephemeral.
-10. Validate and render once:
+10. Render the report. The renderer validates `review.json` before writing
+    Markdown:
 
    ```text
-   python3 <skill-root>/scripts/validate-report.py <run-dir>/review.json
    python3 <skill-root>/scripts/render-report.py \
      <run-dir>/review.json --output <run-dir>/review.md
    ```
@@ -150,5 +154,5 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
 
 Never use host Docker access, victim files or databases, facility secrets,
 private handler state, or proof ground truth as attacker proof. Never launch
-iterative hacker-fixer work from this skill; fortification belongs to a separate
-future `challenge-fortify` skill.
+iterative hacker-fixer work from this skill; modifying or fortifying the
+reviewed challenge is outside its scope.

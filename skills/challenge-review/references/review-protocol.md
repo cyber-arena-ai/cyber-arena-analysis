@@ -40,7 +40,6 @@ Candidates:
   Claim: <one falsifiable issue>
   Evidence: <source|verifier|dynamic>: <locator> — <observed fact>
   Benchmark impact: <what measurement becomes invalid>
-  Confidence: low | medium | high
   Resolving check: <exact check, or "none—evidence is conclusive">
 
 Unresolved:
@@ -53,8 +52,8 @@ PASS evidence.
 
 ## Independence
 
-- Give each specialist the frozen context, contribution contract, this
-  protocol, challenge source, and only its stage reference.
+- Give each specialist the frozen context, `<analysis-root>/CONTRIBUTING.md`,
+  this protocol, challenge source, and only its stage reference.
 - Do not reveal another specialist's findings, suspected defects, oracle
   reports, or expected verdict.
 - Use clean isolated state for every dynamic specialist and cheat mutation.

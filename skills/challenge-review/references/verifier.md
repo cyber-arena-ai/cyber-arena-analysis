@@ -28,9 +28,8 @@ python -m challenges.check <challenge-id> --build --ready-timeout 150 --json
 python -m challenges.check <challenge-id> --game --ready-timeout 150 --json
 ```
 
-Do not use `--dry-run`, `--allow-network`, `--keep`, `--sync`, or `--all` for
-acceptance. Preserve `verifier.json`; do not paste its full output into the
-human report.
+Acceptance uses `--execute`; `--dry-run` output is not evidence. Preserve
+`verifier.json`; do not paste its full output into the human report.
 
 `verifier.json` records the review run ID, pinned orchestrator commit, and
 selected warehouse path. After the build tier, the wrapper also resolves the

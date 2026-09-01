@@ -177,6 +177,8 @@ findings or affect verdicts.
 
 ## Stage conclusion
 
-Return `FAIL` for a conclusive source defect, `BLOCKED` only when required source
-is unavailable, otherwise `PASS` with any runtime-dependent items listed as
-unresolved. A failed imagined exploit is never static proof.
+Return `FAIL` for a conclusive source defect, including required source omitted
+from the selected package. Use `BLOCKED` only when external review
+infrastructure prevents inspection of otherwise available required source.
+Otherwise return `PASS` with any runtime-dependent items listed as unresolved.
+A failed imagined exploit is never static proof.

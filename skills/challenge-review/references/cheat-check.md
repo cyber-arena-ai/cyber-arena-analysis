@@ -118,5 +118,4 @@ stage for it.
 - `FAIL`: an arena-specific shortcut scores or any required defense control has
   the wrong result, except for the temporary adversarial-harness boundary above.
 - `BLOCKED`: external runtime infrastructure prevents the controls.
-- `NOT_RUN`: the verifier prerequisite fails or an earlier conclusive reject
-  closes the gate.
+- `NOT_RUN`: the verifier prerequisite fails.

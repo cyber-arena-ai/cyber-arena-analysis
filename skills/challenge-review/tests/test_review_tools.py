@@ -47,7 +47,7 @@ def check_evidence(check_id: str, stage: str) -> str:
             "VERIFY-BUILD": 1,
             "VERIFY-HEALTH": 2,
             "VERIFY-FLAG": 2,
-            "VERIFY-RESTART": 2,
+            "VERIFY-RESTART": 1,
         }[check_id]
         return f"verifier: verifier.json#/tiers/{tier}/status — canonical tier passed"
     if stage == "cheat":

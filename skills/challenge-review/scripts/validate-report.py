@@ -28,7 +28,7 @@ VERIFIER_CHECK_TIERS = {
     "VERIFY-BUILD": {1},
     "VERIFY-HEALTH": {2},
     "VERIFY-FLAG": {1, 2},
-    "VERIFY-RESTART": {2},
+    "VERIFY-RESTART": {1},
 }
 
 

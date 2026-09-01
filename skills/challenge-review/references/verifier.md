@@ -57,9 +57,9 @@ challenge defect, not an infrastructure blocker.
 
 ### `VERIFY-HEALTH`
 
-The mini game starts and every declared baseline health/functionality leaf
-passes. Distinguish a broken challenge workflow from unavailable external
-runtime infrastructure.
+The mini game starts, probes both teams, and every emitted final
+health/functionality leaf passes. Distinguish a broken challenge workflow from
+unavailable external runtime infrastructure.
 
 ### `VERIFY-FLAG`
 
@@ -70,8 +70,8 @@ checks live placement, scoring rails, and packaged PoV evidence when available.
 
 ### `VERIFY-RESTART`
 
-The mini game exercises the declared restart path successfully, exposes broken
-source or restart failures, and preserves required state.
+The build tier invokes the declared restart handler, reruns functionality, and
+confirms planted flags remain retrievable.
 
 ## Interpretation
 
@@ -80,6 +80,6 @@ source or restart failures, and preserves required state.
   this is a hard `REJECT`; later stages are `NOT_RUN`.
 - `BLOCKED`: external review infrastructure prevents the canonical procedure.
 
-Report the failed tier, exact observed fact, and `verifier.json` location. Do not
-turn omitted challenge dependencies or broken challenge configuration into an
-infrastructure blocker.
+Report the failed or blocked component, exact observed fact, and `verifier.json`
+location. Do not turn omitted challenge dependencies or broken challenge
+configuration into an infrastructure blocker.

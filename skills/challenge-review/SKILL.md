@@ -5,11 +5,13 @@ description: "Review exactly one registered Cyber Arena attack/defense challenge
 
 # Challenge review
 
-Orchestrate one challenge review. When required, run the canonical verifier,
-dispatch independent specialists, wait for their results, and adjudicate their
-evidence into one compact, mechanically rendered report. The root agent does
-not repeat specialist review or modify the selected challenge package; the
-cheat specialist may make disposable mutations only in isolated runtime state.
+Orchestrate one challenge review. The root runs the verifier when selected or
+required as a gate, dispatches independent specialists, and adjudicates their
+evidence into one compact, mechanically rendered report. The root does not
+repeat specialist analysis or modify the selected challenge package. Dynamic
+specialists—the CHEAT and EXPLOITABILITY specialists—use the supplied
+orchestration checkout to run isolated games without modifying either source
+checkout.
 
 Resolve the directory containing this file as `<skill-root>`. Resolve the
 current working directory's enclosing Git checkout as `<analysis-root>` only
@@ -65,11 +67,10 @@ overall verdict.
      --output <run-dir>/review.json
    ```
 
-3. Read the references selected below. For `STATIC`, `CHEAT`,
-   `EXPLOITABILITY`, or `ALL`, also read
-   [review-protocol.md](references/review-protocol.md) only to provide it
-   unchanged to each dispatched specialist; it defines specialist instructions,
-   not root adjudication. A `VERIFIER`-only review does not load it.
+3. Read the references selected below. Attach
+   [review-protocol.md](references/review-protocol.md) unchanged to every
+   specialist; omit it for a `VERIFIER`-only review. It governs specialist
+   responses; use the root-adjudication section below for root decisions.
 
    - `VERIFIER`: [verifier.md](references/verifier.md)
    - `STATIC`: [static-checklist.md](references/static-checklist.md)
@@ -92,33 +93,50 @@ overall verdict.
    and their checks as `NOT_RUN` during report assembly and skip specialist
    dispatch. For `ALL`, verifier `FAIL` is a hard `REJECT`; unavailable external
    verifier infrastructure is `BLOCKED`.
-5. Dispatch specialists:
+5. For `CHEAT`, `EXPLOITABILITY`, or `ALL`, after verifier `PASS`, create a
+   separate writable workspace for each selected dynamic stage under
+   `<run-dir>/exploitability/` or `<run-dir>/cheat/`. Before dispatching either
+   dynamic specialist, confirm that `<orche-root>` still has the
+   `orchestrator_commit` frozen in `context.json`. On mismatch, stop the review
+   and report the drift; do not reset or substitute the supplied checkout.
 
-   - For `STATIC`, `CHEAT`, or `EXPLOITABILITY`, dispatch the selected specialist.
-   - For `ALL`, after verifier `PASS`, dispatch exactly three specialists—static,
-     cheat, and exploitability—concurrently on isolated state.
+6. Dispatch each specialist when its own prerequisites are ready:
 
-   Start each task with the exact prompt in its stage reference, then provide
-   the frozen context, review protocol, stage reference, and verifier output for
-   dynamic stages. Give `<analysis-root>/CONTRIBUTING.md` only to the static
+   - For `STATIC`, dispatch the static specialist.
+   - For `CHEAT` or `EXPLOITABILITY`, dispatch the selected specialist only
+     after verifier `PASS`.
+   - For `ALL`, after verifier `PASS`, dispatch static, cheat, and exploitability
+     concurrently; one dynamic stage must not gate the other.
+
+   Start each task with the exact prompt in its stage reference. Provide the
+   selected warehouse as the `warehouse` source root, identify the challenge
+   package within it, and attach the frozen context, unchanged review protocol,
+   and stage reference. Give `<analysis-root>/CONTRIBUTING.md` only to the static
    specialist; give the attack-scope registry to static and exploitability.
-   Do not preface or rewrite the prompt. Never reveal another specialist's
-   findings, oracle reports, or a draft verdict. If independent agents are
-   unavailable, record the affected selected stages as `BLOCKED`, leave their
-   checks `NOT_RUN`, and continue to report assembly.
-6. Keep specialist inputs and results isolated until every dispatched
-   specialist finishes, then adjudicate.
-7. For every specialist response, adjudicate each returned check result and the
+   Give each dynamic specialist `<orche-root>`, the sanitized verifier status,
+   frozen objective matrix, relevant canonical verifier pointer/value pairs,
+   and their dedicated workspace. Each dynamic specialist owns its isolated
+   game instances and cleanup, uses distinct runtime names and state, and writes
+   review artifacts only to its workspace. Give only the filtered verifier
+   evidence above, and keep each specialist's runtime state, evidence, and
+   results private from the others until adjudication. If independent agents
+   are unavailable, record the affected selected stages as `BLOCKED`, leave
+   their checks `NOT_RUN`, and continue to report assembly.
+7. Keep specialist inputs, runtime state, evidence, and results isolated. Wait
+   until every dispatched specialist has returned and confirm that every dynamic
+   instance is gone. Use its stage-local runtime record and `<orche-root>` to stop
+   and tear down any abandoned instance before adjudication.
+8. For every specialist response, adjudicate each returned check result and the
    stage conclusion against its cited evidence. Then adjudicate every candidate,
    proposed unresolved concern, and WIP observation using the root adjudication
    rules below. Re-read cited evidence, refute weak claims, merge duplicate
    symptoms by root cause, and retain only supported results.
-8. Read [report-schema.md](references/report-schema.md), then populate
+9. Read [report-schema.md](references/report-schema.md), then populate
    `review.json` once from the authoritative verifier output and adjudicated
    specialist results. Fill the context image hash, objective matrix, stages,
    checks, retained findings, unresolved concerns, WIP observations, and
    verdict.
-9. Render the report:
+10. Render the report:
 
    ```text
    python3 <skill-root>/scripts/render-report.py \
@@ -126,7 +144,7 @@ overall verdict.
    ```
 
    JSON is authoritative. Never hand-author a second Markdown report.
-10. Retain only `context.json`, `review.json`, `review.md`, canonical verifier
+11. Retain only `context.json`, `review.json`, `review.md`, canonical verifier
     output, and the minimum raw dynamic artifacts referenced by retained
     evidence. Dynamic artifacts contain the exact command or request and
     observed output, not a reconstructed narrative. Preserve the exact
@@ -198,12 +216,12 @@ precedence:
   declared-store handlers, live scoring rails, and restart evidence.
 - **Static:** the static specialist inspects source without running the
   challenge or scoring objectives.
-- **Cheat:** the cheat specialist tests arena-specific in-band shortcuts and
-  trivial defenses on disposable isolated state.
-- **Exploitability:** the exploitability specialist reproduces the
-  advisory-backed PoV through an attacker-visible path and obtains an accepted
-  current-opponent objective. Other objectives require sound declarations and
-  scoring rails, not known exploits.
+- **Cheat:** the cheat specialist tests replayable arena-specific shortcuts and
+  trivial defenses in isolated game instances.
+- **Exploitability:** the exploitability specialist tests whether a genuine,
+  non-arena-specific vulnerability obtains an accepted current-opponent
+  objective in an isolated game. Other objectives require sound declarations
+  and scoring rails, not known exploits.
 
 Never use host Docker access, victim files or databases, facility secrets,
 private handler state, or proof ground truth as attacker evidence.

@@ -9,9 +9,9 @@ from pathlib import Path
 
 from _contracts import (
     ACTIVE_STAGES, ANTIPATTERNS, CHECK_STATUSES, CHECKS, CONTEXT_KEYS,
-    EVIDENCE_KINDS, OBJECTIVE_ORACLES, OBJECTIVE_OUTCOMES, ORCHESTRATOR_COMMIT,
-    SCHEMA_VERSION, SEVERITY_ORDER, STAGE_ORDER, STAGE_STATUSES, VERDICT_EFFECTS,
-    VERDICTS, WIP_OBSERVATIONS,
+    EVIDENCE_KINDS, OBJECTIVE_ORACLES, OBJECTIVE_OUTCOMES, SCHEMA_VERSION,
+    SEVERITY_ORDER, STAGE_ORDER, STAGE_STATUSES, VERDICT_EFFECTS, VERDICTS,
+    WIP_OBSERVATIONS,
 )
 
 
@@ -429,11 +429,6 @@ def validate(report: object, report_dir: Path | None = None) -> list[str]:
         ):
             errors.append(
                 "$.context.orchestrator_commit: expected 40-character lowercase commit"
-            )
-        if context_value.get("orchestrator_commit") != ORCHESTRATOR_COMMIT:
-            errors.append(
-                "$.context.orchestrator_commit: expected pinned commit "
-                f"{ORCHESTRATOR_COMMIT}"
             )
         if (
             isinstance(context_value.get("warehouse_path"), str)

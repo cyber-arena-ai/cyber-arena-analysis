@@ -6,9 +6,32 @@ Follow only dependencies needed to resolve the selected stage. Do not audit
 unrelated framework code, style, or dependency internals. Resolve every selected
 check with a cited conclusion or one exact later resolving check.
 
-The required PoV must remain advisory-backed. An accepted path through another
-genuine vulnerability is valid free-hunt evidence, but does not replace failure
-to reproduce the packaged PoV. Treat a path as arena-specific only when its
+Analyze the supplied challenge source and any sanitized verifier evidence.
+Dynamic specialists use the supplied orchestration checkout only to run the
+challenge, not as review subject matter, and do not modify orchestration or
+warehouse source. Each dynamic specialist manages and cleans up its own
+isolated game instances and writes artifacts only to its assigned review-local
+workspace.
+
+For a dynamic stage, invoke the absolute `<orche-root>/main.py` from the assigned
+workspace so its `runs/` artifacts stay there. Load any required environment
+from `<orche-root>` into the process without copying secrets into review
+artifacts, and set `CYBERARENA_CHALLENGE_WAREHOUSE` to the supplied warehouse on
+every launch. Follow the checkout's maintained parallel-run requirements. Use
+the verifier's checkout-scoped setup lock:
+`/tmp/cyberarena-challenge-review-<key>.lock`, where `<key>` is the first 16 hex
+characters of SHA-256 over the resolved absolute `<orche-root>` string. Acquire
+an exclusive POSIX `flock` on that file and hold it until the game records
+`SETUP_COMPLETE` or the process exits, then let games run concurrently. Before
+each launch, write its absolute config path, namespace, and host port to
+`<workspace>/runtime.json`; immediately after launch, add the `main.py start`
+process ID. Do not launch another instance until that one is torn down. Delete
+`runtime.json` only after the process exits and teardown succeeds.
+
+When `_exploit.py` exists, it is the required PoV and a different path does not
+replace failure to reproduce it. When it is absent, the exploitability
+specialist explores the challenge and authors the required PoV only in its
+review-local workspace. Treat a path as arena-specific only when its
 boundary-crossing mechanism depends on fixtures, interfaces, secrets, or
 behavior introduced by the challenge environment rather than a vulnerability
 that affects broader upstream use.
@@ -76,11 +99,12 @@ number or symbol, for example
 `warehouse:owner/challenge/challenge.py::Challenge.flag_store_specs` or
 `analysis:skills/challenge-create/references/attack-scopes.json:12`.
 
-Verifier locators use JSON Pointers inside the fixed `verifier.json` artifact,
-for example `verifier.json#/tiers/0/status`. Dynamic locators name an exact line
-in a run-relative retained artifact. A failed dynamic attempt is evidence
-against only that attempt, not the challenge's exploitability or the absence of
-other shortcuts.
+Verifier locators use the canonical JSON pointer/value pairs provided by the
+root from the retained `verifier.json` artifact, for example
+`verifier.json#/tiers/0/status`. Dynamic locators name an exact line in a
+run-relative retained artifact. A failed dynamic attempt is evidence against
+only that attempt, not the challenge's exploitability or the absence of other
+shortcuts.
 
 ## Objective matrix
 

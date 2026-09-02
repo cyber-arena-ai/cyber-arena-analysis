@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-from _contracts import OBJECTIVE_ORACLES, OBJECTIVE_OUTCOMES, ORCHESTRATOR_COMMIT
+from _contracts import OBJECTIVE_ORACLES, OBJECTIVE_OUTCOMES
 from _warehouse import WAREHOUSE_ENV, selected_warehouse
 
 
@@ -206,11 +206,8 @@ def main(argv: list[str] | None = None) -> int:
     required = ["orchestrator_commit", "warehouse_path", "run_id"]
     if any(not context.get(key) for key in required):
         return fail(f"context missing one of {required}")
-    if context["orchestrator_commit"] != ORCHESTRATOR_COMMIT:
-        return fail(f"context must use pinned orchestrator commit {ORCHESTRATOR_COMMIT}")
     if context["warehouse_path"] != str(warehouse):
         return fail("selected warehouse does not match review context")
-    worktree = Path("/tmp") / f"cyberarena-verifier-{context['run_id']}"
     tier_args = [[], ["--build", "--ready-timeout", "150"], ["--game", "--ready-timeout", "150"]]
     tiers = []
     for name, extra in zip(["static", "build", "game"], tier_args, strict=True):
@@ -221,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         tiers.append({
             "name": name,
             "command": command,
-            "cwd": str(worktree),
+            "cwd": str(repo),
             "timeout_seconds": args.tier_timeout,
             "status": "NOT_RUN",
             "exit_code": None,
@@ -241,10 +238,9 @@ def main(argv: list[str] | None = None) -> int:
         "objectives": None,
         "objective_contract": None,
         "status": "NOT_RUN",
-        "worktree": str(worktree),
+        "repo_root": str(repo),
         "tiers": tiers,
         "setup": [],
-        "cleanup": [],
         "error": None,
     }
     if args.dry_run:
@@ -265,31 +261,17 @@ def main(argv: list[str] | None = None) -> int:
                     wrote = write_output(args.output, payload)
                     return wrote if wrote != 0 else 1
                 time.sleep(0.1)
-        created_worktree = False
         try:
-            if worktree.exists():
-                payload["error"] = f"worktree path already exists: {worktree}"
+            orchestrator_head = git(repo, "rev-parse", "HEAD")
+            if orchestrator_head.returncode != 0:
+                payload["error"] = (
+                    orchestrator_head.stderr.strip()
+                    or "could not resolve orchestrator checkout HEAD"
+                )
                 payload["status"] = "BLOCKED"
-            if payload["error"] is None:
-                command = ["worktree", "add", "--detach", str(worktree), context["orchestrator_commit"]]
-                result = git(repo, *command)
-                payload["setup"].append({
-                    "command": ["git", "-C", str(repo), *command],
-                    "exit_code": result.returncode,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                })
-                if result.returncode == 0:
-                    created_worktree = True
-                else:
-                    payload["error"] = "git worktree add failed"
-                    payload["status"] = "BLOCKED"
-
-            if payload["error"] is None:
-                orchestrator_head = git(worktree, "rev-parse", "HEAD")
-                if orchestrator_head.stdout.strip() != context["orchestrator_commit"]:
-                    payload["error"] = "orchestrator worktree commit mismatch"
-                    payload["status"] = "BLOCKED"
+            elif orchestrator_head.stdout.strip() != context["orchestrator_commit"]:
+                payload["error"] = "orchestrator checkout HEAD changed after context collection"
+                payload["status"] = "BLOCKED"
 
             if payload["error"] is None:
                 executed: list[dict] = []
@@ -318,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
                             break
 
                     result = checker_result(
-                        tier["command"], worktree, args.tier_timeout,
+                        tier["command"], repo, args.tier_timeout,
                     )
                     result["name"] = tier["name"]
                     executed.append(result)
@@ -330,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
                                 sys.executable, "-c", OBJECTIVE_CONTRACT_CODE,
                                 args.challenge_id,
                             ],
-                            worktree,
+                            repo,
                             args.tier_timeout,
                         )
                         payload["objective_contract"] = contract
@@ -361,22 +343,6 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, subprocess.TimeoutExpired) as exc:
             payload["error"] = f"{type(exc).__name__}: {exc}"
             payload["status"] = "BLOCKED"
-        finally:
-            if created_worktree:
-                cleanup = git(repo, "worktree", "remove", "--force", str(worktree), timeout=180)
-                payload["cleanup"].append({
-                    "command": ["git", "worktree", "remove", "--force", str(worktree)],
-                    "exit_code": cleanup.returncode,
-                    "stdout": cleanup.stdout,
-                    "stderr": cleanup.stderr,
-                })
-            prune = git(repo, "worktree", "prune")
-            payload["cleanup"].append({
-                "command": ["git", "worktree", "prune"],
-                "exit_code": prune.returncode,
-                "stdout": prune.stdout,
-                "stderr": prune.stderr,
-            })
 
     if payload["status"] != "BLOCKED":
         payload["status"] = (

@@ -3,14 +3,15 @@
 Use only these identifiers. Put a novel pattern under `UNCLASSIFIED`; do not
 invent an identifier during a review.
 
-Apply vulnerability-absence patterns to the retained advisory-backed PoV, not
-to objectives outside that PoV. Apply attacker-shortcut patterns only when the
-accepted path depends on the arena environment.
+Apply vulnerability-absence patterns to the exploitability PoV selected by the
+stage: packaged `_exploit.py` when present, otherwise the review-local exploit.
+Do not apply them to objectives outside that PoV. Apply attacker-shortcut
+patterns only when the accepted path depends on the arena environment.
 
 | ID | Objective trigger | Static suspicion | Dynamic confirmation / boundary | Default |
 |---|---|---|---|---|
-| `AP-VULN-DEAD` | The retained advisory-backed PoV has no genuine reachable operation that reaches any declared objective. | Shipped source contains no objective-reaching behavior for the retained PoV. | Build/runtime confirms only if generated/dependency code is decisive. A failed exploit alone is not confirmation. | `BLOCKER`, `REJECT`. |
-| `AP-VULN-COMPILED-OUT` | Build/config disables the retained advisory-backed PoV's only objective-reaching behavior. | Conditional, hardening flag, wrapper, or guard excludes it. | Inspect produced artifact or exercise branch. Enabled vulnerable behavior is the counterexample. | `BLOCKER`, `REJECT`. |
+| `AP-VULN-DEAD` | The selected PoV has no genuine reachable operation that reaches any declared objective. | Challenge and exploit source contain no objective-reaching behavior for the selected PoV. | Build/runtime confirms only if generated/dependency code is decisive. A failed exploit alone is not confirmation. | `BLOCKER`, `REJECT`. |
+| `AP-VULN-COMPILED-OUT` | Build/config disables the selected PoV's only objective-reaching behavior. | Conditional, hardening flag, wrapper, or guard excludes it. | Inspect produced artifact or exercise branch. Enabled vulnerable behavior is the counterexample. | `BLOCKER`, `REJECT`. |
 | `AP-SCOPE-INVALID` | A scored objective lacks a valid scope/CWE mapping or its oracle does not prove the claimed protected outcome. | Scope is absent, malformed, unanchored, or contradicted by the placement and capture path. | In-band accepted proof of the declared protected outcome is the counterexample. | `HIGH`, `REVISE`; `BLOCKER`, `REJECT` when scoring measures the wrong capability. |
 | `AP-BUILD-STALE-IMAGE` | Built/runtime service ignores the reviewed or defender-edited source. | Build context, copy/install path, or entrypoint selects an older/prebuilt artifact. | Canonical build plus source-identity marker confirms only when generated output is decisive. | `BLOCKER` when defenses cannot reach service; otherwise `HIGH`, `REVISE`. |
 | `AP-START-FAILURE-MASKED` | Build/start failure is reported as success. | Unchecked backgrounding, unconditional success, `|| true`, or wrapper discards child status. | Canonical failed-start test is later confirmation, not required for a source-conclusive defect. | `HIGH`, `REVISE`; `BLOCKER` if baseline cannot start. |

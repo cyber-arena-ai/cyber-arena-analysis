@@ -15,7 +15,7 @@ SKILL_DIR = Path(__file__).resolve().parents[1]
 SCRIPTS = SKILL_DIR / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from _contracts import CHECKS, ORCHESTRATOR_COMMIT, SCHEMA_VERSION, STAGE_ORDER  # noqa: E402
+from _contracts import CHECKS, SCHEMA_VERSION, STAGE_ORDER  # noqa: E402
 
 _VERIFIER_SPEC = importlib.util.spec_from_file_location(
     "challenge_review_run_verifier", SCRIPTS / "run-verifier.py",
@@ -68,6 +68,7 @@ def report_evidence(check_id: str, stage: str) -> list[str]:
 
 
 IMAGE_HASH = f"sha256:{'a' * 64}"
+TEST_ORCHESTRATOR_COMMIT = "a" * 40
 OBJECTIVES = [{
     "store": "default",
     "outcome": "read",
@@ -139,7 +140,7 @@ def valid_report() -> dict:
             "challenge_dir": "example/package",
             "timestamp": "2026-07-13T12:00:00Z",
             "run_id": "20260713T120000Z-a1b2c3d4",
-            "orchestrator_commit": ORCHESTRATOR_COMMIT,
+            "orchestrator_commit": TEST_ORCHESTRATOR_COMMIT,
             "warehouse_path": "/tmp/selected-warehouse",
             "image_hash": IMAGE_HASH,
         },
@@ -249,6 +250,8 @@ class ReviewToolTests(unittest.TestCase):
         self,
         root: Path,
         command_results: list[subprocess.CompletedProcess[str] | BaseException],
+        *,
+        orchestrator_head: str = TEST_ORCHESTRATOR_COMMIT,
     ) -> tuple[int, dict]:
         repo = root / "orche"
         repo.mkdir()
@@ -265,7 +268,10 @@ class ReviewToolTests(unittest.TestCase):
         def fake_git(
             repo: Path, *args: str, timeout: float = 180.0,
         ) -> subprocess.CompletedProcess[str]:
-            stdout = ORCHESTRATOR_COMMIT if args == ("rev-parse", "HEAD") else ""
+            stdout = (
+                orchestrator_head
+                if args == ("rev-parse", "HEAD") else ""
+            )
             return subprocess.CompletedProcess(
                 ["git", "-C", str(repo), *args], 0, stdout=stdout, stderr="",
             )
@@ -294,14 +300,16 @@ class ReviewToolTests(unittest.TestCase):
             root = Path(tmp) / "orche"
             warehouse = make_warehouse(Path(tmp))
             (root / ".git").mkdir(parents=True)
+            (root / "challenges" / "check").mkdir(parents=True)
+            (root / "challenges" / "check" / "__main__.py").write_text(
+                "", encoding="utf-8",
+            )
             output = Path(tmp) / "context.json"
             review_root = Path(tmp) / "analysis" / "artifacts" / "review"
 
             def fake_git(repo: Path, *args: str) -> str:
-                if args[0] == "cat-file":
-                    return ""
-                if args == ("rev-parse", f"{ORCHESTRATOR_COMMIT}^{{commit}}"):
-                    return ORCHESTRATOR_COMMIT
+                if args == ("rev-parse", "HEAD"):
+                    return TEST_ORCHESTRATOR_COMMIT
                 raise AssertionError((repo, args))
 
             with (
@@ -321,7 +329,9 @@ class ReviewToolTests(unittest.TestCase):
             context = json.loads(output.read_text(encoding="utf-8"))
             expected = review_root / "example" / context["run_id"]
             self.assertEqual(Path(context["recommended_output_dir"]), expected)
-            self.assertEqual(context["orchestrator_commit"], ORCHESTRATOR_COMMIT)
+            self.assertEqual(
+                context["orchestrator_commit"], TEST_ORCHESTRATOR_COMMIT,
+            )
             self.assertEqual(context["warehouse_path"], str(warehouse))
             self.assertEqual(context["challenge_dir"], "example/package")
             self.assertIsNone(context["image_hash"])
@@ -838,9 +848,9 @@ class ReviewToolTests(unittest.TestCase):
             self.assertNotEqual(checked.returncode, 0)
             self.assertIn("expected REJECT", checked.stderr)
 
-    def test_validator_rejects_unpinned_orchestrator_commit(self) -> None:
+    def test_validator_rejects_malformed_orchestrator_commit(self) -> None:
         report = valid_report()
-        report["context"]["orchestrator_commit"] = "1" * 40
+        report["context"]["orchestrator_commit"] = "not-a-commit"
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.write_artifacts(root, report)
@@ -848,7 +858,7 @@ class ReviewToolTests(unittest.TestCase):
             source.write_text(json.dumps(report), encoding="utf-8")
             checked = self.run_script("validate-report.py", str(source))
             self.assertNotEqual(checked.returncode, 0)
-            self.assertIn("expected pinned commit", checked.stderr)
+            self.assertIn("expected 40-character lowercase commit", checked.stderr)
 
     def test_unknown_check_requires_matching_unresolved_concern(self) -> None:
         report = valid_report()
@@ -964,7 +974,8 @@ class ReviewToolTests(unittest.TestCase):
         }])
         image_hash = f"sha256:{'a' * 64}"
         with tempfile.TemporaryDirectory() as tmp:
-            result, payload = self.run_verifier_main(Path(tmp), [
+            root = Path(tmp)
+            result, payload = self.run_verifier_main(root, [
                 process_result(checker_stdout()),
                 process_result(json.dumps(OBJECTIVES)),
                 process_result('"27.0"'),
@@ -977,10 +988,23 @@ class ReviewToolTests(unittest.TestCase):
         self.assertEqual(payload["status"], "PASS")
         self.assertEqual(payload["image_hash"], image_hash)
         self.assertEqual(payload["objectives"], OBJECTIVES)
+        self.assertTrue(all(
+            Path(tier["cwd"]) == root / "orche" for tier in payload["tiers"]
+        ))
         self.assertEqual(
             [tier["status"] for tier in payload["tiers"]],
             ["PASS", "PASS", "PASS"],
         )
+
+    def test_verifier_rejects_changed_orchestrator_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result, payload = self.run_verifier_main(
+                Path(tmp), [], orchestrator_head="1" * 40,
+            )
+
+        self.assertNotEqual(result, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        self.assertIn("HEAD changed", payload["error"])
 
     def test_verifier_rejects_malformed_checker_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -6,7 +6,7 @@ Use this text verbatim as the specialist task opening, substituting the
 challenge ID:
 
 ```text
-You are the independent CHEAT review specialist for Cyber Arena challenge `<challenge-id>`. Presume the challenge must be rejected. Clear that presumption only by resolving every CHEAT checklist item with cited evidence. The canonical verifier has passed; seek the cheapest unintended in-band attack and trivial defense on fresh isolated state. Never use host access, victim files or databases, facility secrets, private handler state, or proof ground truth. Return only the specialist response defined in the attached review protocol.
+You are the independent CHEAT review specialist for Cyber Arena challenge `<challenge-id>`. Presume the challenge must be rejected. Clear that presumption only by resolving every CHEAT checklist item with cited evidence. The canonical verifier has passed; use the supplied `<orche-root>` to replay each candidate in an isolated game. Never use host access, victim files or databases, facility secrets, private handler state, or proof ground truth as attacker evidence. Return only the specialist response defined in the attached review protocol.
 ```
 
 ## Objective
@@ -16,11 +16,15 @@ scope. This is a dynamic, source-guided stage. Try alternative
 objective-reaching paths and classify whether they are genuine vulnerabilities
 or arena-specific shortcuts.
 
+Analyze the selected challenge package, not orchestration source. Use the
+supplied `<orche-root>` to run clean game instances against the selected
+warehouse under the dynamic lifecycle in the review protocol.
+
 Use only attacker-visible, in-band inputs for attacker controls. Never use host
 Docker access, victim files or databases, facility credentials, private handler
-state, or proof ground truth.
+state, or proof ground truth as attacker evidence.
 
-Use fresh isolated state for every defense mutation. Commit this stage only
+Use a separate clean instance for every defense mutation. Run this stage only
 after the canonical verifier passes.
 
 ## Procedure
@@ -33,13 +37,21 @@ after the canonical verifier passes.
 3. Try the cheapest candidates first: direct exposure, public artifacts,
    shared/default credentials, predictable secrets, IDOR, debug/admin/backup
    routes, traversal/file reads, and trusted-checker manipulation.
-4. Test each concrete candidate end to end. Use the objective's assigned scoring
-   action: submit a recovered token for READ or EXECUTE, or claim an observed
-   attacker mark for WRITE. Source suspicion alone is not a dynamic win.
-5. Run the three defense controls below on separate clean instances, covering
-   the required features on every materially distinct objective-reaching chain.
-6. Stop after the supported high-priority candidates and required controls. Do
+4. Provision an isolated game for this stage against the selected warehouse.
+   Use fresh state for each replay or mutation that requires it.
+5. Replay each concrete candidate through the attacker interface. Use the
+   objective's assigned scoring action: submit a recovered token for READ or
+   EXECUTE, or claim an observed attacker mark for WRITE. Source suspicion alone
+   is not a dynamic win. Record the exact action, result, and any matching exact
+   accepted-event line in the assigned workspace.
+6. Apply the three defense controls below through the defender editing, rebuild,
+   and restart interface on separate clean instances. Cover the required
+   features on every materially distinct objective-reaching chain, and record
+   the exact mutation and observed functionality, exploit, and scoring results
+   in the assigned workspace.
+7. Stop after the supported high-priority candidates and required controls. Do
    not run an unbounded generic scanner.
+8. Tear down every game instance created for this stage before returning.
 
 ## Checklist
 

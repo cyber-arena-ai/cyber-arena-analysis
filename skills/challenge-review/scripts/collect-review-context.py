@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
 
-from _contracts import ORCHESTRATOR_COMMIT
 from _warehouse import WAREHOUSE_ENV, selected_warehouse
 
 
@@ -85,8 +84,9 @@ def main(argv: list[str] | None = None) -> int:
     package = registry_package(repo, args.challenge_id)
     challenge_dir = resolve_challenge_dir(warehouse, package)
 
-    orchestrator_commit = git(repo, "rev-parse", f"{ORCHESTRATOR_COMMIT}^{{commit}}")
-    git(repo, "cat-file", "-e", f"{orchestrator_commit}:challenges/check/__main__.py")
+    orchestrator_commit = git(repo, "rev-parse", "HEAD")
+    if not (repo / "challenges" / "check" / "__main__.py").is_file():
+        fail(f"not an orchestrator checkout: {repo}")
     now = datetime.now(timezone.utc).replace(microsecond=0)
     timestamp = now.isoformat().replace("+00:00", "Z")
     run_id = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(4)}"

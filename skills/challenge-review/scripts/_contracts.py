@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 
-ORCHESTRATOR_COMMIT = "5952ef5d7a1924789da86640665e2cbd6500a8ec"
 SCHEMA_VERSION = "7.0"
 
 STAGE_ORDER = ("verifier", "static", "cheat", "exploitability")

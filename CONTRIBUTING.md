@@ -13,17 +13,18 @@ self-hostable**. It should be a real network service with meaningful identities,
 data, roles, or trust boundaries and a security history that supports useful
 confidentiality, integrity, privilege, or execution outcomes.
 
-Prefer candidates whose attack **requires exploration** of a complex attack chain and whose defense requires
-understanding and preserving a security invariant. Reject issues that appear obvious and could be blocked with a one-line fix, including availability-only
-failures, default credentials, disabled security options, artificial
-privileges, one-request puzzles, and tasks whose effective defense is a version
-bump, feature removal, configuration toggle, or obvious one-line check.
+Every challenge must preserve a meaningful application-enforced boundary and
+legitimate behavior a defender must preserve. The packaged `_exploit.py` is the
+golden PoV: when run through an attacker-visible path at the pinned revision, it
+must produce an authoritative accepted outcome for at least one objective.
+Advisories, upstream reports, tests, PoCs, and source evidence may support the
+PoV but are not required.
 
-**Counterexample — Gitea 1.16.6, CVE-2022-30781.** This severe repository
-migration vulnerability leads to RCE, but its attack chain is essentially one
-step and the [upstream fix](https://github.com/go-gitea/gitea/pull/19487) is a
-simple option terminator on one `git fetch` call. High impact alone does not
-make a deep challenge.
+A rich attack surface with room for complex paths is desirable because it
+supports game exploration, but no minimum attack complexity, chain length, or
+patch size is required. Availability-only effects are not valid outcomes. The
+required boundary and PoV may not be supplied by default credentials, disabled
+security options, or artificial privileges.
 
 ## 2. Start from one pinned revision
 
@@ -32,7 +33,8 @@ needed to justify that challenge:
 
 - the upstream project and exact immutable revision;
 - the intended security boundary and vulnerable behavior;
-- the relevant advisory and fix reference when known; and
+- the PoV's supporting provenance and evidence, including advisory and
+  source-linked repair or fix references when available; and
 - why the behavior is reachable in the proposed configuration.
 
 ## 3. Describe the challenge scenario
@@ -42,7 +44,7 @@ Before authoring, state:
 - the attacker's starting identity and legitimate access;
 - the public application feature available to them;
 - the protected asset and security boundary they are trying to cross;
-- the tiered capability outcomes a successful attack may achieve;
+- the capability outcomes a successful attack may achieve;
 - the legitimate workflow a defender must preserve; and
 - the privileges and shortcuts that are explicitly unavailable.
 
@@ -72,15 +74,20 @@ security fix.
 
 Each flag represents an observable capability outcome **instead of a CVE or
 exploit path**. In the challenge's `_maintainer/README.md`, map each flag store
-to a scope and tier from the
+to a scope and, when the challenge defines a ladder, a local tier using the
 [attack-scope registry](skills/challenge-create/references/attack-scopes.json), and state the concrete
-evidence that recovering the flag proves in this application.
+evidence that its oracle proves in this application.
 
-| Tier | Registered scopes |
+Prefer a challenge-local progression such as:
+
+| Local tier | Typical registered scopes |
 |---|---|
-| 1 | `app.cross_boundary.read`, `network.internal.access`, `host.file.read` |
+| 1 | `app.cross_boundary.read`, `network.internal.access`, `host.file.read`, `storage.private_object.read` |
 | 2 | `app.cross_boundary.write`, `app.privileged.control`, `host.file.write`, `secret.credential.read` |
 | 3 | `host.command.execute` |
+
+This is a starting point, not a universal severity ordering. Adjust local tiers
+when the application's actual boundary and capability progression differ.
 
 Each flag must be **independently** scored so each capability can be observed
 separately.
@@ -134,8 +141,6 @@ In `_maintainer/README.md`, record:
 - the upstream fix commit or pull request, when published;
 - immutable base-image and behavior-relevant dependency pins.
 
-For an unknown vulnerability, explicitly state that no advisory ID or upstream
-fix is available and record the source-level evidence supporting the claim.
 Follow the SOP for the exact build and
 validation procedure.
 

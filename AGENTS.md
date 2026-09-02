@@ -110,14 +110,25 @@ maintained material instead of copying it between repositories.
 
 When maintaining the challenge-review skill:
 
+- Review each file in two ordered passes. First, reconcile its contract against
+  the normative challenge model, live orchestration implementation, and the
+  rest of `challenge-review` and the other challenge skills. Identify the owner
+  of each mismatch; fix it only when that repository is in scope, otherwise
+  record the conflict explicitly before proceeding. Second, polish the file
+  using the maintenance principles below.
 - Keep `SKILL.md` as the root-agent entrypoint: initialize context, run the
   verifier gate first, and dispatch static, cheat, and exploitability
   specialists only after it passes.
 - Give each reference one clear consumer and only its stage-specific procedure.
-- Retain an instruction only when it tells the agent what to do, defines a
-  pattern to evaluate, or provides clearly necessary support.
+- Do not optimize for line count. Preserve instructions that define workflow
+  shape, required inputs and outputs, consumer ownership, sequencing and gates,
+  evidence or verdict contracts, or non-obvious invariants.
+- Prefer moving consumer-specific detail to the correct file over deleting it.
+- Remove advice only when it changes no consumer decision. Mechanical
+  enforcement alone is not a reason to omit a contract the agent must satisfy
+  or understand.
 - Remove obvious guards, generic advice, implementation narration,
-  duplication, stale references, and rules already enforced mechanically.
+  duplication, and stale references.
 - Center `verifier.md` on the exact wrapper command, artifact transfer,
   check-to-tier evidence mapping, and accurate interpretation of canonical
   behavior without overclaiming.

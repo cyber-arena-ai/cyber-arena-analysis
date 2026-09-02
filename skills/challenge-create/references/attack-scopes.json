@@ -137,7 +137,7 @@
       "target": "service_process",
       "boundary": "code_execution_authority",
       "capability": "Run an attacker-selected command in the service execution context.",
-      "proof_requirement": "The verifier observes a challenge nonce transformed by an attacker-selected server-side command; file read alone is insufficient.",
+      "proof_requirement": "The submitted evidence is the current token released only when an attacker-selected command invokes the execution proof operation from the victim service context; file read alone is insufficient.",
       "non_examples": ["Reading or writing a file without executing a command.", "Triggering a fixed server-side operation with no attacker-selected command behavior."]
     }
   ]

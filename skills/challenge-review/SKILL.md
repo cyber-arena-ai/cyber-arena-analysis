@@ -5,35 +5,36 @@ description: "Review exactly one registered Cyber Arena attack/defense challenge
 
 # Challenge review
 
-Act as a lightweight reviewer and orchestrator. When required, run the canonical
-verifier, dispatch independent specialists, wait for their results, and
-adjudicate their evidence into one compact, mechanically rendered report. Do
-not redo specialist reviews or modify the challenge, except for disposable
-cheat mutations in isolated runtime state.
+Orchestrate one challenge review. When required, run the canonical verifier,
+dispatch independent specialists, wait for their results, and adjudicate their
+evidence into one compact, mechanically rendered report. The root agent does
+not repeat specialist review or modify the selected challenge package; the
+cheat specialist may make disposable mutations only in isolated runtime state.
 
-Resolve the directory containing this file as `<skill-root>`. If the current
-working directory is inside the `cyber-arena-analysis` checkout, use that
-repository as `<analysis-root>`. Otherwise stop and ask the user to identify the
-`cyber-arena-analysis` checkout; do not default to a plugin installation or
+Resolve the directory containing this file as `<skill-root>`. Resolve the
+current working directory's enclosing Git checkout as `<analysis-root>` only
+when its origin identifies `cyber-arena-analysis`. Otherwise stop and ask the
+user to identify that checkout; do not default to a plugin installation or
 cache directory. Persist reviews under `<analysis-root>/artifacts/reviews/`.
-Locate the separate
-`cyber-arena-orche` checkout as `<orche-root>`; do not persist review artifacts
-there.
 
 ## Input
 
 Treat `$ARGUMENTS`, or the explicit arguments supplied by the client, as
-exactly three positional arguments:
+exactly four positional arguments:
 
 ```text
-<challenge-id> <VERIFIER|STATIC|CHEAT|EXPLOITABILITY|ALL> <absolute-warehouse-path>
+<challenge-id> <VERIFIER|STATIC|CHEAT|EXPLOITABILITY|ALL> \
+  <absolute-warehouse-path> <absolute-orche-root>
 ```
 
 Reject missing or extra arguments and reject any other stage value. Do not
-choose a challenge, infer a stage, or infer a warehouse. Require the warehouse
-path to be absolute. Normalize the stage to lowercase when passing it to bundled
-scripts. `CHEAT`, `EXPLOITABILITY`, and `ALL` begin with the verifier gate. A
-single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
+choose a challenge, infer a stage, or infer either path. Require the warehouse
+and orchestrator paths to be absolute. Treat the supplied orchestrator path as
+`<orche-root>`; do not search for or substitute another checkout, and do not
+persist review artifacts there. Normalize the stage to lowercase when passing
+it to bundled scripts. `CHEAT`, `EXPLOITABILITY`, and `ALL` begin with the
+verifier gate. A single-stage review reports `PARTIAL`; `ALL` produces an
+overall verdict.
 
 ## Execute in this order
 
@@ -42,16 +43,14 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    `<analysis-root>/skills/challenge-create/references/attack-scopes.json`;
    for other scopes, load that registry only if adjudicating a surviving scope
    claim. Do not resolve upstream project identity during setup.
-2. Initialize pinned review context; this validates runtime auto-discovery from
-   the explicitly selected warehouse and records its absolute path, the
-   challenge path, timestamp, run ID, and exact orchestrator commit. The
-   collector pins orchestration commit
-   `5952ef5d7a1924789da86640665e2cbd6500a8ec`, matching challenge creation:
+2. Initialize review context. The collector validates challenge discovery from
+   the selected warehouse and records its absolute path, the challenge path,
+   timestamp, run ID, and pinned orchestrator commit:
 
    ```text
    python3 <skill-root>/scripts/collect-review-context.py <challenge-id> \
      --warehouse <absolute-warehouse-path> \
-     --repo-root <orche-root> \
+     --repo-root <absolute-orche-root> \
      --review-root <analysis-root>/artifacts/reviews \
      --output <temporary-context.json>
    ```
@@ -66,11 +65,21 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
      --output <run-dir>/review.json
    ```
 
-3. Read [review-protocol.md](references/review-protocol.md) and the references
-   for the selected scope. `ALL` uses [verifier.md](references/verifier.md),
-   [static-checklist.md](references/static-checklist.md),
-   [cheat-check.md](references/cheat-check.md), and
-   [exploitability.md](references/exploitability.md). Read
+3. Read the references selected below. For `STATIC`, `CHEAT`,
+   `EXPLOITABILITY`, or `ALL`, also read
+   [review-protocol.md](references/review-protocol.md) only to provide it
+   unchanged to each dispatched specialist; it defines specialist instructions,
+   not root adjudication. A `VERIFIER`-only review does not load it.
+
+   - `VERIFIER`: [verifier.md](references/verifier.md)
+   - `STATIC`: [static-checklist.md](references/static-checklist.md)
+   - `CHEAT`: [verifier.md](references/verifier.md) and
+     [cheat-check.md](references/cheat-check.md)
+   - `EXPLOITABILITY`: [verifier.md](references/verifier.md) and
+     [exploitability.md](references/exploitability.md)
+   - `ALL`: all four stage references above
+
+   Read
    [antipattern-catalog.md](references/antipattern-catalog.md) only when
    classifying a surviving finding or validating a proposed WIP observation.
 4. For `VERIFIER`, `CHEAT`, `EXPLOITABILITY`, or `ALL`, run the exact wrapper in
@@ -92,26 +101,24 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
    Start each task with the exact prompt in its stage reference, then provide
    the frozen context, review protocol, stage reference, and verifier output for
    dynamic stages. Give `<analysis-root>/CONTRIBUTING.md` only to the static
-   specialist; give the attack-scope registry to static and exploitability. Do
-   not preface or rewrite the prompt. Never reveal another specialist's
-   findings, oracle reports, or a draft verdict.
-   If independent agents are unavailable, stop as `BLOCKED`.
-6. Wait for every dispatched specialist to finish before adjudicating. Do not
-   leak partial findings between specialists or issue an early verdict.
+   specialist; give the attack-scope registry to static and exploitability.
+   Do not preface or rewrite the prompt. Never reveal another specialist's
+   findings, oracle reports, or a draft verdict. If independent agents are
+   unavailable, record the affected selected stages as `BLOCKED`, leave their
+   checks `NOT_RUN`, and continue to report assembly.
+6. Keep specialist inputs and results isolated until every dispatched
+   specialist finishes, then adjudicate.
 7. For every specialist response, adjudicate each returned check result and the
    stage conclusion against its cited evidence. Then adjudicate every candidate,
-   proposed unresolved concern, and WIP observation using the precision
-   procedure in [review-protocol.md](references/review-protocol.md). Re-read
-   cited evidence, refute weak claims, merge duplicates by root cause, and retain
-   only supported check conclusions, actionable findings, benchmark-critical
-   unresolved concerns, or supported non-enforcing observations.
+   proposed unresolved concern, and WIP observation using the root adjudication
+   rules below. Re-read cited evidence, refute weak claims, merge duplicate
+   symptoms by root cause, and retain only supported results.
 8. Read [report-schema.md](references/report-schema.md), then populate
    `review.json` once from the authoritative verifier output and adjudicated
    specialist results. Fill the context image hash, objective matrix, stages,
    checks, retained findings, unresolved concerns, WIP observations, and
    verdict.
-9. Render the report. The renderer validates `review.json` before writing
-   Markdown:
+9. Render the report:
 
    ```text
    python3 <skill-root>/scripts/render-report.py \
@@ -120,29 +127,83 @@ single-stage review reports `PARTIAL`; `ALL` produces an overall verdict.
 
    JSON is authoritative. Never hand-author a second Markdown report.
 10. Retain only `context.json`, `review.json`, `review.md`, canonical verifier
-    output, and the minimum raw dynamic artifacts needed to substantiate a cheat
-    or exploit result. Dynamic artifacts contain the exact command or request and
+    output, and the minimum raw dynamic artifacts referenced by retained
+    evidence. Dynamic artifacts contain the exact command or request and
     observed output, not a reconstructed narrative. Preserve the exact
     authoritative `FLAG_SUBMITTED` JSON line used by `EXPLOIT-ACCEPT`; prose or
     exploit stdout is not acceptance evidence. Keep specialist transcripts and
     scratch work ephemeral.
 
+## Root adjudication
+
+For each candidate and proposed unresolved concern, determine whether it is
+inside the selected stage, proven by the cited evidence, material to benchmark
+validity or reproducibility, duplicated by another root cause, and decidable in
+that stage. Then:
+
+- Retain a conclusive material issue as one finding.
+- Merge duplicate symptoms under the strongest root cause.
+- Record a material but inconclusive concern as unresolved with one exact next
+  check.
+- Discard speculation, out-of-scope claims, style issues, and refuted claims.
+
+Validate each proposed WIP observation against its stage boundary, allowed
+identifier, and cited evidence. Discard unsupported observations; retained WIP
+observations never affect a check, finding, stage, or verdict.
+
+Re-read every cited construct in full. For dynamic claims, require the exact
+actor boundary, action, observed result, and authoritative artifact. Never infer
+an accepted exploit by combining proof recovery with generic scoring wiring.
+Accept a cited evidence entry only when its `source`, `verifier`, or `dynamic`
+kind matches the underlying artifact and its locator resolves to the stated
+fact. Static evidence must resolve in a supplied source root, verifier evidence
+in canonical `verifier.json`, and dynamic evidence at an exact line in a
+run-relative retained artifact. Serialize each accepted entry as
+`<source|verifier|dynamic>: <locator> — <observed fact>` and preserve it
+unchanged in the report. Evidence about a declared objective must match one
+frozen objective matrix row.
+For scope claims, require the observed protected result—not merely potential
+access—and resolve the scope's CWE Technical Impact from the registry. Treat an
+advisory's CWE weakness label as root-cause evidence, not as the Technical
+Impact proved by an objective outcome.
+
+Accept only check statuses `PASS`, `FAIL`, `UNKNOWN`, or `NOT_RUN` and stage
+conclusions `PASS`, `FAIL`, `BLOCKED`, or `NOT_RUN`. Refute a specialist's
+`BLOCKED` conclusion unless its evidence identifies unavailable external
+infrastructure; broken or omitted challenge dependencies are failures. A
+selected stage may remain `NOT_RUN` only behind a failed or blocked verifier
+gate. Static may pass with runtime-dependent `UNKNOWN` checks, but each requires
+a matching unresolved concern and prevents whole-review acceptance.
+
+Create a finding only for a surviving evidence-backed issue. Use severity
+`BLOCKER`, `HIGH`, `MEDIUM`, or `LOW`. Use finding effect `NONE` for an
+actionable issue that does not affect acceptance, `REVISE` for a correctable
+benchmark weakness, and `REJECT` when a required measurement or functional gate
+is invalid. WIP observations are not findings and have no verdict effect.
+
+A single-stage invocation produces `PARTIAL`. For `ALL`, apply this verdict
+precedence:
+
+1. Verifier `FAIL` produces `REJECT` and skips later stages.
+2. A surviving `REJECT` finding produces `REJECT`.
+3. External infrastructure preventing a required stage produces `BLOCKED`.
+4. A `REVISE` finding, failed static, cheat, or exploitability stage, or any
+   unresolved concern produces `REVISE`.
+5. All four stages passing without findings or unresolved concerns produces
+   `ACCEPT`.
+
 ## Stage boundaries
 
-- **Verifier:** run only the checker in the pinned orchestration tree. It owns
-  imports, Docker build and image-hash capture, mini orchestration, health,
-  declared-store handler checks, live scoring-rail controls, and restart
-  evidence.
-- **Static:** inspect source only. Do not build, start services, invoke the
-  verifier, mutate a deployment, or score an objective.
-- **Cheat:** act as an authorized adversary. Seek the cheapest arena-specific
-  in-band shortcut and trivial defense before evaluating normal behavior.
-- **Exploitability:** reproduce the advisory-backed PoV through an
-  attacker-visible, in-band path and obtain an authoritative accepted outcome
-  for at least one current opponent objective. Other objectives require sound
-  declarations and scoring rails, not known exploits.
+- **Verifier:** the root runs the canonical gate for imports, build, health,
+  declared-store handlers, live scoring rails, and restart evidence.
+- **Static:** the static specialist inspects source without running the
+  challenge or scoring objectives.
+- **Cheat:** the cheat specialist tests arena-specific in-band shortcuts and
+  trivial defenses on disposable isolated state.
+- **Exploitability:** the exploitability specialist reproduces the
+  advisory-backed PoV through an attacker-visible path and obtains an accepted
+  current-opponent objective. Other objectives require sound declarations and
+  scoring rails, not known exploits.
 
 Never use host Docker access, victim files or databases, facility secrets,
-private handler state, or proof ground truth as attacker proof. Never launch
-iterative hacker-fixer work from this skill; modifying or fortifying the
-reviewed challenge is outside its scope.
+private handler state, or proof ground truth as attacker evidence.

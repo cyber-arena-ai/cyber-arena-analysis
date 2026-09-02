@@ -344,6 +344,38 @@ class ReviewToolTests(unittest.TestCase):
                     )
                     self.assertNotEqual(result.returncode, 0)
 
+    def test_review_tools_require_absolute_orchestrator_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            warehouse = make_warehouse(root)
+            cases = (
+                (
+                    "collect-review-context.py",
+                    [
+                        "--review-root", str(root / "reviews"),
+                        "--output", str(root / "context.json"),
+                    ],
+                ),
+                (
+                    "run-verifier.py",
+                    [
+                        "--context", str(root / "context.json"),
+                        "--output", str(root / "verifier.json"),
+                        "--execute",
+                    ],
+                ),
+            )
+            for script, extra in cases:
+                with self.subTest(script=script):
+                    result = self.run_script(
+                        script, "example",
+                        "--warehouse", str(warehouse),
+                        "--repo-root", "relative/orche",
+                        *extra,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("--repo-root must be absolute", result.stderr)
+
     def test_valid_report_validates_and_renders_compact_markdown(self) -> None:
         report = valid_report()
         report["findings"] = [{

@@ -147,8 +147,8 @@ default for final admission review; Codex is a supported fallback, not an
 acceptance gate.
 
 ```text
-Claude Code: /cyber-arena-analysis:challenge-review <challenge-slug> ALL <absolute-warehouse-path>
-Codex:       $challenge-review <challenge-slug> ALL <absolute-warehouse-path>
+Claude Code: /cyber-arena-analysis:challenge-review <challenge-slug> ALL <absolute-warehouse-path> <absolute-orche-root>
+Codex:       $challenge-review <challenge-slug> ALL <absolute-warehouse-path> <absolute-orche-root>
 ```
 
 Choose **all stages** for the final review. Read the generated

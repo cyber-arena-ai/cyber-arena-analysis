@@ -108,6 +108,20 @@ maintained material instead of copying it between repositories.
   unknowns and unresolved risks explicitly; do not turn assumptions into
   findings or passing claims.
 
+When maintaining the challenge-review skill:
+
+- Keep `SKILL.md` as the root-agent entrypoint: initialize context, run the
+  verifier gate first, and dispatch static, cheat, and exploitability
+  specialists only after it passes.
+- Give each reference one clear consumer and only its stage-specific procedure.
+- Retain an instruction only when it tells the agent what to do, defines a
+  pattern to evaluate, or provides clearly necessary support.
+- Remove obvious guards, generic advice, implementation narration,
+  duplication, stale references, and rules already enforced mechanically.
+- Center `verifier.md` on the exact wrapper command, artifact transfer,
+  check-to-tier evidence mapping, and accurate interpretation of canonical
+  behavior without overclaiming.
+
 ### Infrastructure and documentation
 
 - Make runtime, interface, verifier, network, game-loop, or agent changes in

@@ -67,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
+    if not args.repo_root.is_absolute():
+        parser.error("--repo-root must be absolute")
     if not args.challenge_id or any(char.isspace() for char in args.challenge_id):
         fail("provide exactly one challenge id without whitespace")
     try:

@@ -5,8 +5,8 @@ initializer creates the top-level report, stages, and selected checks. Preserve
 those shapes and replace their draft values; add entries to the initially empty
 arrays using the contracts below.
 
-Use the evidence syntax and stage restrictions from
-[review-protocol.md](review-protocol.md#evidence).
+Preserve the evidence entries accepted during root adjudication; do not rewrite
+their kinds, locators, or observed facts.
 
 Keep each stage and check summary to one conclusion sentence and its evidence
 concise. Put supporting analysis only in findings and unresolved concerns.

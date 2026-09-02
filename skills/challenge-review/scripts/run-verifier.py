@@ -186,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tier-timeout", type=float, default=1200.0)
     parser.add_argument("--lock-timeout", type=float, default=30.0)
     args = parser.parse_args(argv)
+    if not args.repo_root.is_absolute():
+        parser.error("--repo-root must be absolute")
     if args.tier_timeout <= 0 or args.lock_timeout <= 0:
         parser.error("timeouts must be positive")
 

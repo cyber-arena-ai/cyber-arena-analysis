@@ -8,7 +8,7 @@ Run this wrapper once:
 python3 <skill-root>/scripts/run-verifier.py <challenge-id> \
   --warehouse <absolute-warehouse-path> \
   --context <run-dir>/context.json \
-  --repo-root <orche-root> \
+  --repo-root <absolute-orche-root> \
   --output <run-dir>/verifier.json \
   --execute
 ```

@@ -31,6 +31,13 @@ assert _CONTEXT_SPEC and _CONTEXT_SPEC.loader
 _CONTEXT_MODULE = importlib.util.module_from_spec(_CONTEXT_SPEC)
 _CONTEXT_SPEC.loader.exec_module(_CONTEXT_MODULE)
 
+_PARTICIPANT_TOOL_SPEC = importlib.util.spec_from_file_location(
+    "challenge_review_call_participant_tool", SCRIPTS / "call-participant-tool.py",
+)
+assert _PARTICIPANT_TOOL_SPEC and _PARTICIPANT_TOOL_SPEC.loader
+_PARTICIPANT_TOOL_MODULE = importlib.util.module_from_spec(_PARTICIPANT_TOOL_SPEC)
+_PARTICIPANT_TOOL_SPEC.loader.exec_module(_PARTICIPANT_TOOL_MODULE)
+
 
 def check_evidence(check_id: str, stage: str) -> str:
     if stage == "static":
@@ -110,6 +117,73 @@ def make_warehouse(root: Path) -> Path:
     challenge_dir.mkdir(parents=True)
     (challenge_dir / "challenge.py").write_text("# challenge\n", encoding="utf-8")
     return warehouse
+
+
+def make_fake_orchestrator(root: Path) -> Path:
+    repo = root / "orche"
+    for package in (
+        "challenges", "challenges/check", "gamemgr", "orchestrator",
+    ):
+        path = repo / package
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "__init__.py").write_text("", encoding="utf-8")
+    (repo / "main.py").write_text("# fake orchestrator\n", encoding="utf-8")
+    (repo / "challenges" / "check" / "docker_env.py").write_text(
+        "def free_ports(count):\n"
+        "    return [8100, 9100, 9200, 9300][:count]\n",
+        encoding="utf-8",
+    )
+    (repo / "challenges" / "check" / "resolve.py").write_text(
+        "def resolve_challenge(target):\n"
+        "    return target, object(), ''\n",
+        encoding="utf-8",
+    )
+    (repo / "challenges" / "check" / "game_phase.py").write_text(
+        "import json\n"
+        "def _free_subnet_octet(namespace):\n"
+        "    return 150\n"
+        "def build_game_config(name, challenge, *, api_port, flag_port, "
+        "health_port, subnet_octet, mode='async'):\n"
+        "    return {\n"
+        "        'teams': [\n"
+        "            {'id': 'team1', 'token': 'team1-token', "
+        "'agent': {'provider': 'script', 'cli': 'old'}},\n"
+        "            {'id': 'team2', 'token': 'team2-token', "
+        "'agent': {'provider': 'script', 'cli': 'old'}},\n"
+        "        ],\n"
+        "        'nodes': [],\n"
+        "        'networks': {},\n"
+        "        'challenges': [{'name': name, 'type': name, 'port': 80, "
+        "'deploy_on': ['team1', 'team2']}],\n"
+        "        'round_config': {},\n"
+        "    }\n"
+        "def yaml_dump(config):\n"
+        "    return json.dumps(config)\n",
+        encoding="utf-8",
+    )
+    (repo / "gamemgr" / "config.py").write_text(
+        "import json, os\n"
+        "from types import SimpleNamespace\n"
+        "def load(path, env_file=None):\n"
+        "    raw = json.load(open(path))\n"
+        "    challenges = [SimpleNamespace(\n"
+        "        name=item['name'],\n"
+        "        level='easy' if os.environ.get('FAKE_DROP_LEVEL') else "
+        "item.get('level', 'easy'),\n"
+        "    ) for item in raw['challenges']]\n"
+        "    return SimpleNamespace(\n"
+        "        challenges=challenges,\n"
+        "        topology=SimpleNamespace(teams=raw['teams']),\n"
+        "        mcp_gateway=SimpleNamespace(**raw.get('mcp_gateway', {})),\n"
+        "    )\n",
+        encoding="utf-8",
+    )
+    (repo / "orchestrator" / "naming.py").write_text(
+        "def qualify(name, namespace=''):\n"
+        "    return f'{namespace}-{name}' if namespace else name\n",
+        encoding="utf-8",
+    )
+    return repo
 
 
 def process_result(
@@ -353,6 +427,111 @@ class ReviewToolTests(unittest.TestCase):
                         "--output", str(Path(tmp) / "context.json"),
                     )
                     self.assertNotEqual(result.returncode, 0)
+
+    def test_cheat_game_helper_builds_hard_long_running_participant_game(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = make_fake_orchestrator(root)
+            warehouse = make_warehouse(root)
+            output = root / "review" / "game.yaml"
+            runtime_output = root / "review" / "runtime.json"
+
+            result = self.run_script(
+                "prepare-cheat-game.py", "example",
+                "--warehouse", str(warehouse),
+                "--repo-root", str(repo),
+                "--namespace", "review-example",
+                "--output", str(output),
+                "--runtime-output", str(runtime_output),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            config = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(config["challenges"][0]["level"], "hard")
+            self.assertEqual(config["round_config"], {
+                "mode": "async", "round_secs": 86400, "total_rounds": 1,
+            })
+            self.assertEqual(
+                [team["agent"] for team in config["teams"]],
+                [
+                    {"provider": "script", "cli": "exec sleep 86400"},
+                    {"provider": "script", "cli": "exec sleep 86400"},
+                ],
+            )
+            self.assertEqual(config["mcp_gateway"]["agent_url"],
+                             "http://mcp-gateway:8080")
+            self.assertIn("mcp-gateway", [node["id"] for node in config["nodes"]])
+
+            runtime = json.loads(runtime_output.read_text(encoding="utf-8"))
+            self.assertEqual(runtime["config_path"], str(output))
+            self.assertEqual(runtime["namespace"], "review-example")
+            self.assertEqual(runtime["host_port"], 8100)
+            self.assertEqual(
+                runtime["participant_mcp_url"], "http://127.0.0.1:9300/mcp/",
+            )
+            self.assertEqual(
+                runtime["participant_shells"]["team1"][3],
+                "review-example-team1_dev",
+            )
+            self.assertEqual(runtime["start_command"][0], sys.executable)
+            self.assertEqual(runtime["start_command"][1], str(repo / "main.py"))
+            self.assertEqual(
+                runtime["participant_tool_commands"]["team1"][0], sys.executable,
+            )
+
+    def test_participant_tool_helper_uses_selected_team_gateway_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_path = Path(tmp) / "runtime.json"
+            runtime_path.write_text(json.dumps({
+                "participant_mcp_url": "http://127.0.0.1:9300/mcp/",
+                "participant_tokens": {
+                    "team1": "team-one-token", "team2": "team-two-token",
+                },
+            }), encoding="utf-8")
+
+            with patch.object(
+                _PARTICIPANT_TOOL_MODULE, "call_tool",
+                return_value={"content": [{"type": "text", "text": "ok"}]},
+            ) as call:
+                result = _PARTICIPANT_TOOL_MODULE.main([
+                    "restart_service",
+                    "--runtime", str(runtime_path),
+                    "--team", "team2",
+                    "--arguments", '{"service":"example"}',
+                ])
+
+            self.assertEqual(result, 0)
+            call.assert_awaited_once_with(
+                "http://127.0.0.1:9300/mcp/",
+                "team-two-token",
+                "restart_service",
+                {"service": "example"},
+            )
+
+    def test_cheat_game_helper_rejects_orchestrator_that_drops_hard_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = make_fake_orchestrator(root)
+            warehouse = make_warehouse(root)
+            output = root / "review" / "game.yaml"
+            runtime_output = root / "review" / "runtime.json"
+            env = {**os.environ, "FAKE_DROP_LEVEL": "1"}
+
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "prepare-cheat-game.py"), "example",
+                    "--warehouse", str(warehouse),
+                    "--repo-root", str(repo),
+                    "--namespace", "review-example",
+                    "--output", str(output),
+                    "--runtime-output", str(runtime_output),
+                ],
+                text=True, capture_output=True, check=False, env=env,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("did not preserve challenge level 'hard'", result.stderr)
+            self.assertFalse(runtime_output.exists())
 
     def test_review_tools_require_absolute_orchestrator_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

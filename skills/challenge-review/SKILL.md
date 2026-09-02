@@ -115,13 +115,15 @@ overall verdict.
    specialist; give the attack-scope registry to static and exploitability.
    Give each dynamic specialist `<orche-root>`, the sanitized verifier status,
    frozen objective matrix, relevant canonical verifier pointer/value pairs,
-   and their dedicated workspace. Each dynamic specialist owns its isolated
-   game instances and cleanup, uses distinct runtime names and state, and writes
-   review artifacts only to its workspace. Give only the filtered verifier
-   evidence above, and keep each specialist's runtime state, evidence, and
-   results private from the others until adjudication. If independent agents
-   are unavailable, record the affected selected stages as `BLOCKED`, leave
-   their checks `NOT_RUN`, and continue to report assembly.
+   and their dedicated workspace. Also give the CHEAT specialist the resolved
+   `<skill-root>` for its bundled game-preparation helper. Each dynamic
+   specialist owns its isolated game instances and cleanup, uses distinct
+   runtime names and state, and writes review artifacts only to its workspace.
+   Give only the filtered verifier evidence above, and keep each specialist's
+   runtime state, evidence, and results private from the others until
+   adjudication. If independent agents are unavailable, record the affected
+   selected stages as `BLOCKED`, leave their checks `NOT_RUN`, and continue to
+   report assembly.
 7. Keep specialist inputs, runtime state, evidence, and results isolated. Wait
    until every dispatched specialist has returned and confirm that every dynamic
    instance is gone. Use its stage-local runtime record and `<orche-root>` to stop

@@ -61,12 +61,19 @@ The mini game starts, probes both teams, and every emitted final
 health/functionality leaf passes. Distinguish a broken challenge workflow from
 unavailable external runtime infrastructure.
 
-### `VERIFY-FLAG`
+### `VERIFY-ORACLES`
 
-The build tier round-trips handler placement and retrieval for every declared
-store. For WRITE, that round trip covers the integrity anchor; the tier also
-checks authoritative-region readability and absent-mark behavior. The game tier
-checks live placement, scoring rails, and packaged PoV evidence when available.
+The build tier plants every declared store and round-trips its integrity path
+through `retrieve()`. For READ, this checks exact planted-token retrieval. For
+WRITE, it checks the integrity anchor, defender-independent authoritative-region
+readability, and absent-mark behavior. For EXECUTE, the declared retrieval path
+must exercise the same service-context proof operation that releases the token.
+
+The game tier checks live placement, the submit rail shared by READ and EXECUTE,
+the WRITE claim rail, and packaged PoV acceptance for at least one declared
+objective when available. These checks validate oracle mechanics and scoring
+rails; the exploitability stage independently proves the advisory-backed PoV
+through an attacker-visible path.
 
 ### `VERIFY-RESTART`
 

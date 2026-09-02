@@ -46,7 +46,7 @@ def check_evidence(check_id: str, stage: str) -> str:
             "VERIFY-INTERFACE": 0,
             "VERIFY-BUILD": 1,
             "VERIFY-HEALTH": 2,
-            "VERIFY-FLAG": 2,
+            "VERIFY-ORACLES": 2,
             "VERIFY-RESTART": 1,
         }[check_id]
         return f"verifier: verifier.json#/tiers/{tier}/status — canonical tier passed"
@@ -59,7 +59,7 @@ def check_evidence(check_id: str, stage: str) -> str:
 
 def report_evidence(check_id: str, stage: str) -> list[str]:
     evidence = [check_evidence(check_id, stage)]
-    if check_id == "VERIFY-FLAG":
+    if check_id == "VERIFY-ORACLES":
         evidence.insert(
             0,
             "verifier: verifier.json#/tiers/1/status — handler round-trip passed",
@@ -565,10 +565,10 @@ class ReviewToolTests(unittest.TestCase):
         self.assertIn("this check's matching tier status", checked.stderr)
 
         report = valid_report()
-        flag = next(
-            item for item in report["checks"] if item["check_id"] == "VERIFY-FLAG"
+        oracles = next(
+            item for item in report["checks"] if item["check_id"] == "VERIFY-ORACLES"
         )
-        flag["evidence"] = flag["evidence"][:1]
+        oracles["evidence"] = oracles["evidence"][:1]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.write_artifacts(root, report)
@@ -861,7 +861,7 @@ class ReviewToolTests(unittest.TestCase):
         self.assertNotEqual(checked.returncode, 0)
         self.assertIn("unresolved check must be UNKNOWN", checked.stderr)
 
-    def test_initializer_uses_compact_v6_shape(self) -> None:
+    def test_initializer_uses_compact_report_shape(self) -> None:
         context = valid_report()["context"]
         context["image_hash"] = None
         with tempfile.TemporaryDirectory() as tmp:

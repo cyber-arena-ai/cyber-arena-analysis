@@ -9,7 +9,8 @@ import re
 from pathlib import Path
 
 SCHEMA_VERSION = 1
-EVIDENCE_KINDS = {"reproduced", "dynamic"}
+EVIDENCE_KINDS = {"reproduced", "dynamic", "recorded"}
+RAW_KINDS = {"reproduced", "dynamic"}
 STATE_ROLES = {"entry", "objective", "intermediate"}
 LOCATOR = re.compile(r"^(?P<path>[^#]+)#L(?P<line>[1-9][0-9]*)$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
@@ -213,6 +214,25 @@ def analyze(graph: Graph) -> dict:
         "objective_coverage": per_objective,
         "observed_cuts": _observed(graph),
         "frontier": _frontier(graph, per_objective),
+        "evidence_strength": _strength(graph),
+    }
+
+
+def _strength(graph: Graph) -> dict:
+    """Recorded observations are the study's own summary, not raw output.
+
+    A graph resting only on them is still useful, but its claims are weaker
+    than one whose operations cite command transcripts, and the report must
+    say so rather than let the difference disappear.
+    """
+    counts: dict[str, int] = {}
+    for source in (graph.operations, graph.paths):
+        for element in source.values():
+            kind = (element.get("evidence") or {}).get("kind", "unknown")
+            counts[kind] = counts.get(kind, 0) + 1
+    return {
+        "by_kind": counts,
+        "recorded_only": not any(counts.get(k) for k in RAW_KINDS),
     }
 
 
@@ -278,7 +298,9 @@ def evidence_shape(evidence: object, where: str, errors: list[str]) -> None:
             "evidence may enter the graph"
         )
     elif kind not in EVIDENCE_KINDS:
-        errors.append(f"{where}.evidence.kind must be reproduced or dynamic")
+        errors.append(
+            f"{where}.evidence.kind must be reproduced, dynamic, or recorded"
+        )
     observed = evidence.get("observed")
     if not _text(observed) or len(str(observed).strip()) < MIN_OBSERVED:
         errors.append(
@@ -312,16 +334,17 @@ def structural_errors(document: object) -> list[str]:
 
     root = document.get("evidence_root")
     root_parts = Path(str(root)).parts if _text(root) else ()
-    if (
-        not root_parts
-        or Path(str(root)).is_absolute()
-        or ".." in root_parts
-        or root_parts == (".",)
-    ):
-        errors.append(
-            "evidence_root must name a subdirectory of the study; '.' would let "
-            "the study's own prose stand in for reproduced output"
-        )
+    if root is not None:
+        if (
+            not root_parts
+            or Path(str(root)).is_absolute()
+            or ".." in root_parts
+            or root_parts == (".",)
+        ):
+            errors.append(
+                "evidence_root must name a subdirectory of the study; '.' would let "
+                "the study's own prose stand in for raw output"
+            )
 
     graph = Graph(document)
     for key, index in (
@@ -470,10 +493,11 @@ def study_errors(study_dir: Path) -> list[str]:
     """The study directory must be a real Stage 3 study, not a scratch tree."""
     if not study_dir.is_dir():
         return [f"study directory does not exist: {study_dir}"]
-    missing = [n for n in ("STAGE3_STUDY.md", "result.json") if not (study_dir / n).is_file()]
-    if missing:
+    # STAGE3_STUDY.md is the study's semantic handoff and the one artifact every
+    # retained study carries; result.json is the agent's input, not this tool's.
+    if not (study_dir / "STAGE3_STUDY.md").is_file():
         return [
-            f"{study_dir} is not a Stage 3 study; missing {', '.join(missing)}. "
+            f"{study_dir} is not a Stage 3 study; no STAGE3_STUDY.md. "
             "Evidence must resolve against the study that produced it."
         ]
     return []
@@ -497,20 +521,27 @@ def _evidence_entries(graph: Graph) -> list[tuple[str, dict]]:
 def evidence_errors(graph: Graph, study_dir: Path) -> list[str]:
     """Resolve each locator to a real line holding the observed string."""
     errors: list[str] = []
-    root = Path(str(graph.document.get("evidence_root", "")))
-    anchor = (study_dir / root).resolve()
+    declared = graph.document.get("evidence_root")
+    root = Path(str(declared)) if declared is not None else None
     for where, evidence in _evidence_entries(graph):
         match = LOCATOR.match(str(evidence.get("locator", "")))
         if not match:
             continue
+        raw = evidence.get("kind", "reproduced") in RAW_KINDS
+        if raw and root is None:
+            errors.append(f"{where} cites raw evidence but the graph declares no evidence_root")
+            continue
+        # Raw output must sit in the evidence tree; a recorded observation may
+        # be anywhere the study retained it, including the study document.
+        anchor = (study_dir / root).resolve() if raw else study_dir.resolve()
         relative = Path(match.group("path"))
         if relative.is_absolute() or ".." in relative.parts:
-            errors.append(f"{where} locator must stay inside {root}")
+            errors.append(f"{where} locator must stay inside the study")
             continue
         resolved = study_dir / relative
-        # resolve() first: a symlink inside the evidence tree must not read out of it.
+        # resolve() first: a symlink inside the tree must not read out of it.
         if not resolved.resolve().is_relative_to(anchor):
-            errors.append(f"{where} locator resolves outside {root}")
+            errors.append(f"{where} locator resolves outside {anchor.name}")
             continue
         if not resolved.is_file():
             errors.append(f"{where} locator does not exist: {relative}")

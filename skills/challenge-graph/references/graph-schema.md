@@ -3,6 +3,12 @@
 One `graph.json` per challenge. It records the attack structure that was
 *reproduced*, never the complete attack surface.
 
+[example-graph.json](example-graph.json) is a complete, minimal instance. Its
+conventions are the ones to copy: `target.id` is a short kebab-case name for the
+study, `store` names the trial witness in one snake_case token before Stage 4
+declares a real store, and each operation is one link of the attack chain with
+its own evidence line.
+
 ## Document
 
 | Field | Contract |
@@ -30,7 +36,13 @@ Facts an actor holds or observes.
 `entry` and one `objective`. An `objective` declares `store` and `scope`; the
 scope is a registered id from `attack-scopes.json` or a fully defined
 `custom.<challenge_id>.*` scope. Before Stage 4 there is no declared store, so
-`store` names the study's trial witness. Other roles use `title`.
+`store` names the study's trial witness — one short snake_case token, because
+the renderer prints it inside the objective node beside the scope. Other roles
+use `title`.
+
+The attacker's observation of the result is the objective state itself, not an
+operation. The operation that crosses the boundary `produces` it; do not add a
+non-counted operation for reading or submitting the proof.
 
 A line locator proves the cited line holds the text, not which block of a
 structured file it sits in: in a study whose evidence records an authorized and

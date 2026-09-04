@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "target": {
+    "id": "acme-reports-share-token",
+    "repository": "acme/reports",
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "evidence_root": "evidence",
+  "states": [
+    {
+      "id": "ST-entry",
+      "role": "entry",
+      "title": "Baseline principal on the public surface"
+    },
+    {
+      "id": "ST-share-token",
+      "role": "intermediate",
+      "title": "Attacker holds a share token bound to another tenant"
+    },
+    {
+      "id": "ST-obj-report-read",
+      "role": "objective",
+      "store": "report_store",
+      "scope": "app.cross_boundary.read",
+      "title": "Another tenant's report body"
+    }
+  ],
+  "operations": [
+    {
+      "id": "OP-create-share",
+      "title": "create a share link for the attacker's own report",
+      "requires": ["ST-entry"],
+      "produces": ["ST-share-token"],
+      "counts_as_operation": true,
+      "evidence": {
+        "kind": "reproduced",
+        "locator": "evidence/vulnerable.txt#L12",
+        "observed": "201 Created share=7f2a"
+      }
+    },
+    {
+      "id": "OP-resolve-share",
+      "title": "resolve that token against another tenant's report id",
+      "requires": ["ST-share-token"],
+      "produces": ["ST-obj-report-read"],
+      "counts_as_operation": true,
+      "evidence": {
+        "kind": "reproduced",
+        "locator": "evidence/vulnerable.txt#L31",
+        "observed": "recovered victim report body"
+      }
+    }
+  ],
+  "paths": [
+    {
+      "id": "PATH-pov",
+      "objective": "ST-obj-report-read",
+      "operations": ["OP-create-share", "OP-resolve-share"],
+      "advisory_backed": true,
+      "evidence": {
+        "kind": "reproduced",
+        "locator": "evidence/vulnerable.txt#L31",
+        "observed": "recovered victim report body"
+      }
+    }
+  ],
+  "observed_cuts": [
+    {
+      "id": "CUT-upstream",
+      "reference": "upstream_fix",
+      "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "blocked": [
+        {
+          "path": "PATH-pov",
+          "locator": "evidence/fixed.txt#L20",
+          "observed": "403 Forbidden"
+        }
+      ],
+      "survived": []
+    }
+  ]
+}

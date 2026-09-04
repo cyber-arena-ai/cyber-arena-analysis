@@ -552,3 +552,13 @@ def test_duplicate_observed_cut_ids_are_rejected(tmp_path):
     result = _validate(tmp_path, graph)
     assert result.returncode == 1
     assert "unique string id" in result.stderr
+
+
+def test_the_worked_example_is_structurally_valid():
+    """The example SKILL.md tells authors to copy must not rot."""
+    sys.path.insert(0, str(SCRIPTS))
+    from _graph import structural_errors
+
+    example = SCRIPTS.parent / "references/example-graph.json"
+    document = json.loads(example.read_text(encoding="utf-8"))
+    assert structural_errors(document) == []

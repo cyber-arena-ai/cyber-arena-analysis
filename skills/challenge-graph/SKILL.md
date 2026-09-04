@@ -48,14 +48,18 @@ re-reads retained evidence.
 Derived, not supplied:
 
 ```text
-<analysis-root>/artifacts/projects/<REPOSITORY>/graph/<study-name>/
+<analysis-root>/artifacts/projects/<PROJECT>/graph/<study-name>/
 ```
 
-`<REPOSITORY>` is `result.json`'s `repository` with `/` replaced by `__`, and
-`<study-name>` is the study directory's basename. Deriving it from
-`result.json` keeps the default independent of where the study sits. Use
-`--out` only for a one-off. Keep drafts in `/tmp`; never open a file under the
-study directory for writing.
+`<PROJECT>` is copied verbatim from the study's own path — a study at
+`artifacts/projects/<PROJECT>/stage3/...` writes to
+`artifacts/projects/<PROJECT>/graph/...` — and `<study-name>` is the study
+directory's basename. Copy it; do not derive it from `result.json`'s
+`repository`, whose casing and punctuation do not match the directory names and
+which some studies do not retain. Use `--out` only for a one-off.
+
+Create `<out>` and author `graph.json` there. Keep only scratch notes in `/tmp`,
+and never open a file under the study directory for writing.
 
 ## Execute in this order
 
@@ -66,10 +70,22 @@ study directory for writing.
    structured form.
 3. Draft states: one `entry`, one `objective` per confirmed witness and scope,
    and the `intermediate` states the chain requires.
-4. Draft operations. **Open each evidence file and cite a real line plus a
-   string that is actually on it.** Do not write an operation from the study's
-   prose alone. Mark authentication, setup, retries, encoding, reconnaissance,
-   and proof submission as `counts_as_operation: false`.
+4. Draft operations, **one per required link named in the study's attack
+   chain**, each citing its own distinct evidence line. Collapsing a chain into
+   one operation, or splitting one link into two, flips the geometry between
+   `shallow` and everything else, so the rule is not cosmetic: when a link has
+   no evidence line of its own, model it as part of the neighbouring operation
+   rather than inventing a citation for it.
+
+   **Open each evidence file and cite a real line plus a string that is
+   actually on it.** Do not write an operation from the study's prose alone.
+   Mark authentication, setup, retries, encoding, reconnaissance, and proof
+   submission as `counts_as_operation: false`.
+
+   The attacker's observation of the result is not an operation: it is the
+   objective state, produced by the operation that crosses the boundary. Work
+   from [example-graph.json](references/example-graph.json), which fixes this
+   and the `target.id` and `store` conventions.
 5. Draft paths, then `observed_cuts` from the fixed-case evidence. At Stage 3
    the observed cut is the upstream-fixed deployment.
 6. Validate, fix, and repeat until clean:
@@ -88,9 +104,11 @@ study directory for writing.
 
    ```text
    python3 <skill-root>/scripts/graph_analyze.py <out>/graph.json \
-     --out <out>/analysis.json --study-dir <absolute-study-dir>
+     --out <out>/analysis.json --study-dir <absolute-study-dir> \
+     --scope-registry <analysis-root>/skills/challenge-create/references/attack-scopes.json
    python3 <skill-root>/scripts/graph_render.py <out>/graph.json \
-     --out <out>/graph.md --study-dir <absolute-study-dir>
+     --out <out>/graph.md --study-dir <absolute-study-dir> \
+     --scope-registry <analysis-root>/skills/challenge-create/references/attack-scopes.json
    ```
 
    All three revalidate, so neither deliverable can be produced from a graph
@@ -100,13 +118,26 @@ study directory for writing.
    `geometry`, `mincut_all`, `mincut_nontrivial`, `cuts_truncated`,
    `evidence_strength`, and each observed cut's `reading` with what
    `STAGE3_STUDY.md` concluded. When
-   `shallow` appears, read `mincut_nontrivial` rather than `mincut_all`. **On disagreement, report it as a `NOTE`. Never
-   adjust the graph to make it agree** — the disagreement is the finding.
+   `shallow` appears, read `mincut_nontrivial` rather than `mincut_all`.
+
+   Raise a `NOTE` for exactly these disagreements, and no others:
+
+   - the study reports a surviving path but no observed cut reads
+     `contestable_observed`, or the reverse;
+   - the study calls the chain nontrivial but `nontrivial_paths` is false, or
+     the reverse;
+   - a cut the analyzer lists among the cheapest is one the study rules out,
+     for instance as feature amputation. The analyzer has no cost model, so
+     `mincut_all` can understate what a *valid* defense costs.
+
+   The study's `outcome` is a Stage 3 authoring verdict, not a graph property;
+   never report agreement or disagreement with it. **Never adjust the graph to
+   make it agree** — the disagreement is the finding.
 
 ## Deliverable
 
 ```text
-artifacts/projects/<REPOSITORY>/graph/<study-name>/
+artifacts/projects/<PROJECT>/graph/<study-name>/
 ├── graph.json        the IR
 ├── analysis.json     cuts, mincut_all, geometry, coverage, frontier
 └── graph.md          the diagram and summary tables

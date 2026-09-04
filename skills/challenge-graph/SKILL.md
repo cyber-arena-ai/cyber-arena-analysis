@@ -74,21 +74,30 @@ study directory for writing.
 
    ```text
    python3 <skill-root>/scripts/graph_validate.py <out>/graph.json \
-     --study-dir <absolute-study-dir>
+     --study-dir <absolute-study-dir> \
+     --scope-registry <analysis-root>/skills/challenge-create/references/attack-scopes.json
    ```
+
+   A trivial one-operation path is *not* rejected: it validates and the
+   analyzer labels it `shallow`, so a graph over a rejected study still shows
+   why it was rejected.
 
 7. Analyze and render:
 
    ```text
    python3 <skill-root>/scripts/graph_analyze.py <out>/graph.json \
-     --out <out>/analysis.json
+     --out <out>/analysis.json --study-dir <absolute-study-dir>
    python3 <skill-root>/scripts/graph_render.py <out>/graph.json \
-     --out <out>/graph.md
+     --out <out>/graph.md --study-dir <absolute-study-dir>
    ```
 
+   All three revalidate, so neither deliverable can be produced from a graph
+   whose evidence does not resolve.
+
 8. Reconcile the analysis against the study's own recorded decision. Compare
-   `geometry`, `mincut_all`, and each observed cut's `reading` with what
-   `STAGE3_STUDY.md` concluded. **On disagreement, report it as a `NOTE`. Never
+   `geometry`, `mincut_all`, `mincut_nontrivial`, `cuts_truncated`, and each
+   observed cut's `reading` with what `STAGE3_STUDY.md` concluded. When
+   `shallow` appears, read `mincut_nontrivial` rather than `mincut_all`. **On disagreement, report it as a `NOTE`. Never
    adjust the graph to make it agree** — the disagreement is the finding.
 
 ## Deliverable
@@ -101,8 +110,9 @@ artifacts/projects/<REPOSITORY>/graph/<study-name>/
 ```
 
 Report the study and reproduced commit, the geometry and `mincut_all`, whether
-the observed cut left a surviving path, the open frontier, and every `NOTE`
-where the analysis disagreed with the study.
+the observed cut left a surviving path, the open frontier — objectives with no
+recorded path and paths no cut has been run against — and every `NOTE` where
+the analysis disagreed with the study.
 
 ## Cleanup
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import math
 import re
 from pathlib import Path
 
@@ -12,7 +13,9 @@ EVIDENCE_KINDS = {"reproduced", "dynamic"}
 STATE_ROLES = {"entry", "objective", "intermediate"}
 LOCATOR = re.compile(r"^(?P<path>[^#]+)#L(?P<line>[1-9][0-9]*)$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
-MAX_CUT_SIZE = 4
+MAX_LISTED_CUTS = 32
+MAX_COMBINATIONS = 200_000
+MIN_OBSERVED = 8
 
 
 class Graph:
@@ -20,10 +23,10 @@ class Graph:
 
     def __init__(self, document: dict) -> None:
         self.document = document
-        self.states = {s["id"]: s for s in document.get("states", []) if _id(s)}
-        self.operations = {o["id"]: o for o in document.get("operations", []) if _id(o)}
-        self.paths = {p["id"]: p for p in document.get("paths", []) if _id(p)}
-        self.observed_cuts = [c for c in document.get("observed_cuts", []) if _id(c)]
+        self.states = {s["id"]: s for s in _entries(document, "states")}
+        self.operations = {o["id"]: o for o in _entries(document, "operations")}
+        self.paths = {p["id"]: p for p in _entries(document, "paths")}
+        self.observed_cuts = _entries(document, "observed_cuts")
 
     def by_role(self, role: str) -> list[str]:
         return [i for i, s in self.states.items() if s.get("role") == role]
@@ -45,6 +48,11 @@ def _id(entry: object) -> bool:
     return isinstance(entry, dict) and isinstance(entry.get("id"), str)
 
 
+def _entries(document: dict, key: str) -> list[dict]:
+    raw = document.get(key)
+    return [e for e in raw if _id(e)] if isinstance(raw, list) else []
+
+
 def load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -53,78 +61,103 @@ def load(path: Path) -> dict:
 
 
 def minimal_cuts(
-    op_sets: list[frozenset[str]], max_size: int = MAX_CUT_SIZE
-) -> tuple[list[frozenset[str]], bool]:
-    """Minimal hitting sets over the recorded paths' cut-eligible operations.
+    op_sets: list[frozenset[str]], max_listed: int = MAX_LISTED_CUTS
+) -> tuple[list[frozenset[str]], int | None, bool]:
+    """Minimum-cardinality hitting sets over the recorded paths.
 
     Cuts are computed over recorded paths rather than graph reachability, so
-    the result stays a statement about what was actually reproduced.
+    the result stays a statement about what was actually reproduced. Only
+    minimum-size cuts are returned: they are the cheapest defenses, and
+    enumerating every minimal cut is exponential and unreadable.
     """
-    if not op_sets:
-        return [], False
-    if any(not s for s in op_sets):
-        return [], False
+    if not op_sets or any(not op_set for op_set in op_sets):
+        return [], None, False
     universe = sorted(set().union(*op_sets))
-    found: list[frozenset[str]] = []
-    for size in range(1, max_size + 1):
-        for combo in itertools.combinations(universe, size):
-            candidate = frozenset(combo)
-            if any(earlier <= candidate for earlier in found):
+    # One operation per path always hits every path, so a cut exists at or
+    # below len(op_sets); the search never needs to go further.
+    for size in range(1, min(len(universe), len(op_sets)) + 1):
+        if math.comb(len(universe), size) > MAX_COMBINATIONS:
+            return [], None, True
+        found = [
+            frozenset(combo)
+            for combo in itertools.combinations(universe, size)
+            if all(set(combo) & op_set for op_set in op_sets)
+        ]
+        if found:
+            return found[:max_listed], size, len(found) > max_listed
+    return [], None, False
+
+
+def nontrivial(graph: Graph, path_id: str) -> bool:
+    """Two counted operations linked through an intermediate state.
+
+    Contestability anchors nontriviality on a real state dependency, so
+    counting operations alone is not enough: one must create or expose
+    application state a later one consumes.
+    """
+    order = graph.path_operations(path_id)
+    for index, earlier in enumerate(order):
+        if not graph.counting(earlier):
+            continue
+        produced = set(graph.operations[earlier].get("produces", []))
+        for later in order[index + 1 :]:
+            if not graph.counting(later):
                 continue
-            if all(candidate & op_set for op_set in op_sets):
-                found.append(candidate)
-    return found, not found
+            shared = produced & set(graph.operations[later].get("requires", []))
+            if any(graph.states.get(s, {}).get("role") == "intermediate" for s in shared):
+                return True
+    return False
 
 
 def analyze(graph: Graph) -> dict:
     paths = list(graph.paths)
     objectives = graph.by_role("objective")
     op_sets = {p: graph.cut_eligible(p) for p in paths}
+    trivial = [p for p in paths if not nontrivial(graph, p)]
 
     per_objective: dict[str, dict] = {}
     for objective in objectives:
         members = [p for p in paths if graph.paths[p].get("objective") == objective]
-        cuts, truncated = minimal_cuts([op_sets[p] for p in members])
+        cuts, size, truncated = minimal_cuts([op_sets[p] for p in members])
         per_objective[objective] = {
             "scope": graph.states[objective].get("scope"),
             "paths": members,
-            "minimal_cuts": [sorted(c) for c in cuts],
-            "mincut": min((len(c) for c in cuts), default=None),
+            "minimum_cuts": [sorted(c) for c in cuts],
+            "mincut": size,
             "cuts_truncated": truncated,
         }
 
-    all_cuts, all_truncated = minimal_cuts([op_sets[p] for p in paths])
-    mincut_all = min((len(c) for c in all_cuts), default=None)
-
-    nontrivial = {
-        p: sum(1 for o in graph.path_operations(p) if graph.counting(o)) >= 2
-        for p in paths
-    }
+    all_cuts, mincut_all, all_truncated = minimal_cuts([op_sets[p] for p in paths])
+    nontrivial_only = [op_sets[p] for p in paths if p not in trivial]
+    _, mincut_nontrivial, _ = minimal_cuts(nontrivial_only)
 
     labels: list[str] = []
-    if any(not v for v in nontrivial.values()):
+    if trivial:
+        # A reproduced one-operation shortcut dominates every other reading:
+        # it would otherwise inflate mincut_all and manufacture `disjoint`.
         labels.append("shallow")
-    for cut in (c for c in all_cuts if len(c) == 1):
-        spanned = {graph.paths[p].get("objective") for p in paths if cut & op_sets[p]}
-        if len(spanned) >= 2:
+    else:
+        spans = {
+            op: {graph.paths[p].get("objective") for p in paths if op in op_sets[p]}
+            for op in set().union(*op_sets.values())
+        } if paths else {}
+        if any(len(reached) >= 2 for reached in spans.values()):
             labels.append("fan_out")
-            break
-    for detail in per_objective.values():
-        if len(detail["paths"]) >= 2 and detail["mincut"] == 1:
+        if any(len(d["paths"]) >= 2 and d["mincut"] == 1 for d in per_objective.values()):
             labels.append("fan_in")
-            break
-    if mincut_all is not None and mincut_all >= 2:
-        labels.append("disjoint")
-    if len(paths) == 1:
-        labels.append("single_path")
+        if mincut_all is not None and mincut_all >= 2:
+            labels.append("disjoint")
+        if len(paths) == 1:
+            labels.append("single_path")
 
     return {
         "geometry": sorted(set(labels)),
         "mincut_all": mincut_all,
-        "minimal_cuts_all": [sorted(c) for c in all_cuts],
+        "mincut_nontrivial": mincut_nontrivial,
+        "minimum_cuts_all": [sorted(c) for c in all_cuts],
         "cuts_truncated": all_truncated,
-        "max_cut_size": MAX_CUT_SIZE,
-        "nontrivial_paths": nontrivial,
+        "max_listed_cuts": MAX_LISTED_CUTS,
+        "nontrivial_paths": {p: p not in trivial for p in paths},
         "objective_coverage": per_objective,
         "observed_cuts": _observed(graph),
         "frontier": _frontier(graph, per_objective),
@@ -136,19 +169,14 @@ def _observed(graph: Graph) -> list[dict]:
     for cut in graph.observed_cuts:
         blocked = [e["path"] for e in cut.get("blocked", [])]
         survived = [e["path"] for e in cut.get("survived", [])]
-        if not blocked:
-            reading = "no_effect"
-        elif survived:
-            reading = "contestable_observed"
-        else:
-            reading = "terminal_over_recorded_subgraph"
-        implicated = set()
+        reading = "contestable_observed" if survived else "terminal_over_recorded_subgraph"
+        implicated: set[str] = set()
         if blocked:
-            implicated = set.intersection(
-                *(set(graph.path_operations(p)) for p in blocked)
-            )
+            # The extensional root cause: only cut-eligible operations, since
+            # an excluded step such as authentication cannot be a defense.
+            implicated = set.intersection(*(set(graph.cut_eligible(p)) for p in blocked))
             for path_id in survived:
-                implicated -= set(graph.path_operations(path_id))
+                implicated -= set(graph.cut_eligible(path_id))
         results.append(
             {
                 "id": cut["id"],
@@ -172,6 +200,7 @@ def _frontier(graph: Graph, per_objective: dict) -> list[dict]:
         for cut in graph.observed_cuts
         for key in ("blocked", "survived")
         for entry in cut.get(key, [])
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
     }
     for path_id in graph.paths:
         if path_id not in tested:
@@ -198,8 +227,12 @@ def evidence_shape(evidence: object, where: str, errors: list[str]) -> None:
         )
     elif kind not in EVIDENCE_KINDS:
         errors.append(f"{where}.evidence.kind must be reproduced or dynamic")
-    if not _text(evidence.get("observed")):
-        errors.append(f"{where}.evidence.observed must be a non-empty string")
+    observed = evidence.get("observed")
+    if not _text(observed) or len(str(observed).strip()) < MIN_OBSERVED:
+        errors.append(
+            f"{where}.evidence.observed must quote at least {MIN_OBSERVED} characters "
+            "of the cited output"
+        )
     locator = evidence.get("locator")
     if not _text(locator) or not LOCATOR.match(str(locator)):
         errors.append(f"{where}.evidence.locator must look like path/to/file.txt#L12")
@@ -226,8 +259,17 @@ def structural_errors(document: object) -> list[str]:
             errors.append("target.revision must be 40 lowercase hex characters")
 
     root = document.get("evidence_root")
-    if not _text(root) or Path(str(root)).is_absolute() or ".." in Path(str(root)).parts:
-        errors.append("evidence_root must be a relative path inside the study")
+    root_parts = Path(str(root)).parts if _text(root) else ()
+    if (
+        not root_parts
+        or Path(str(root)).is_absolute()
+        or ".." in root_parts
+        or root_parts == (".",)
+    ):
+        errors.append(
+            "evidence_root must name a subdirectory of the study; '.' would let "
+            "the study's own prose stand in for reproduced output"
+        )
 
     graph = Graph(document)
     for key, index in (
@@ -278,18 +320,22 @@ def structural_errors(document: object) -> list[str]:
 def _path_errors(graph: Graph, path_id: str, path: dict) -> list[str]:
     errors: list[str] = []
     objective = path.get("objective")
-    if objective not in graph.states or graph.states.get(objective, {}).get("role") != "objective":
+    if not isinstance(objective, str) or graph.states.get(objective, {}).get("role") != "objective":
         errors.append(f"path {path_id}.objective must name an objective state")
         objective = None
     operations = path.get("operations")
     if not isinstance(operations, list) or not operations:
         return errors + [f"path {path_id}.operations must be a non-empty list"]
-    unknown = [o for o in operations if o not in graph.operations]
+    unknown = [o for o in operations if not isinstance(o, str) or o not in graph.operations]
     if unknown:
-        return errors + [f"path {path_id} has unknown operations: {', '.join(unknown)}"]
+        listed = ", ".join(str(o) for o in unknown)
+        return errors + [f"path {path_id} has unknown operations: {listed}"]
 
     first = graph.operations[operations[0]]
-    if not any(graph.states[s].get("role") == "entry" for s in first.get("requires", [])):
+    requires = first.get("requires")
+    if not isinstance(requires, list):
+        return errors + [f"path {path_id} starts at an operation with a malformed requires"]
+    if not any(graph.states.get(s, {}).get("role") == "entry" for s in requires):
         errors.append(f"path {path_id} must start at an entry state")
     for earlier, later in zip(operations, operations[1:]):
         produced = set(graph.operations[earlier].get("produces", []))
@@ -326,10 +372,11 @@ def _cut_errors(graph: Graph, document: dict) -> list[str]:
             if key == "blocked" and not entries:
                 errors.append(f"cut {cut_id}.blocked must record at least one path")
             for entry in entries:
-                if not isinstance(entry, dict) or entry.get("path") not in graph.paths:
+                path_ref = entry.get("path") if isinstance(entry, dict) else None
+                if not isinstance(path_ref, str) or path_ref not in graph.paths:
                     errors.append(f"cut {cut_id}.{key} has an unknown path")
                     continue
-                path_id = entry["path"]
+                path_id = path_ref
                 if path_id in seen:
                     errors.append(f"cut {cut_id} lists {path_id} twice")
                 seen.add(path_id)
@@ -362,3 +409,99 @@ def _cycle_errors(graph: Graph) -> list[str]:
         if colors.get(node) is None and visit(node):
             return ["graph must be acyclic"]
     return []
+
+
+# --- evidence and study validation ------------------------------------------
+
+
+def study_errors(study_dir: Path) -> list[str]:
+    """The study directory must be a real Stage 3 study, not a scratch tree."""
+    if not study_dir.is_dir():
+        return [f"study directory does not exist: {study_dir}"]
+    missing = [n for n in ("STAGE3_STUDY.md", "result.json") if not (study_dir / n).is_file()]
+    if missing:
+        return [
+            f"{study_dir} is not a Stage 3 study; missing {', '.join(missing)}. "
+            "Evidence must resolve against the study that produced it."
+        ]
+    return []
+
+
+def _evidence_entries(graph: Graph) -> list[tuple[str, dict]]:
+    entries: list[tuple[str, dict]] = []
+    for op_id, operation in graph.operations.items():
+        entries.append((f"operation {op_id}", operation.get("evidence", {})))
+    for path_id, path in graph.paths.items():
+        entries.append((f"path {path_id}", path.get("evidence", {})))
+    for cut in graph.observed_cuts:
+        for key in ("blocked", "survived"):
+            raw = cut.get(key, [])
+            for entry in raw if isinstance(raw, list) else []:
+                if isinstance(entry, dict):
+                    entries.append((f"cut {cut['id']} {key} {entry.get('path')}", entry))
+    return entries
+
+
+def evidence_errors(graph: Graph, study_dir: Path) -> list[str]:
+    """Resolve each locator to a real line holding the observed string."""
+    errors: list[str] = []
+    root = Path(str(graph.document.get("evidence_root", "")))
+    anchor = (study_dir / root).resolve()
+    for where, evidence in _evidence_entries(graph):
+        match = LOCATOR.match(str(evidence.get("locator", "")))
+        if not match:
+            continue
+        relative = Path(match.group("path"))
+        if relative.is_absolute() or ".." in relative.parts:
+            errors.append(f"{where} locator must stay inside {root}")
+            continue
+        resolved = study_dir / relative
+        # resolve() first: a symlink inside the evidence tree must not read out of it.
+        if not resolved.resolve().is_relative_to(anchor):
+            errors.append(f"{where} locator resolves outside {root}")
+            continue
+        if not resolved.is_file():
+            errors.append(f"{where} locator does not exist: {relative}")
+            continue
+        lines = resolved.read_text(encoding="utf-8", errors="replace").split("\n")
+        number = int(match.group("line"))
+        if number > len(lines):
+            errors.append(f"{where} locator points past the end of {relative}")
+            continue
+        if str(evidence.get("observed", "")) not in lines[number - 1]:
+            errors.append(f"{where} observed string is not on {relative} line {number}")
+    return errors
+
+
+def scope_errors(graph: Graph, registry_path: Path) -> list[str]:
+    """Objective scopes must be registered or explicitly challenge-local."""
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    scopes = registry.get("scopes", registry) if isinstance(registry, dict) else registry
+    known = {s.get("id") for s in scopes if isinstance(s, dict)} if isinstance(scopes, list) else set()
+    errors = []
+    for state_id in graph.by_role("objective"):
+        scope = graph.states[state_id].get("scope")
+        if scope not in known and not str(scope).startswith("custom."):
+            errors.append(f"objective {state_id} scope {scope} is not registered")
+    return errors
+
+
+def validate(document: object, study_dir: Path, registry: Path | None = None) -> list[str]:
+    """Every check, in the order that produces the most useful first message."""
+    errors = structural_errors(document)
+    if errors:
+        return errors
+    graph = Graph(document)
+    errors = study_errors(study_dir) or evidence_errors(graph, study_dir)
+    if not errors and registry is not None:
+        errors = scope_errors(graph, registry)
+    return errors
+
+
+def read_graph(path: Path) -> tuple[dict | None, list[str]]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8")), []
+    except FileNotFoundError:
+        return None, [f"graph does not exist: {path}"]
+    except json.JSONDecodeError as exc:
+        return None, [f"{path} is not valid JSON: {exc}"]

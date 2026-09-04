@@ -108,11 +108,13 @@ def _graph():
 
 
 def _study(tmp_path):
-    evidence_dir = tmp_path / "study" / "evidence"
-    evidence_dir.mkdir(parents=True)
+    study = tmp_path / "study"
+    (study / "evidence").mkdir(parents=True, exist_ok=True)
     for name, body in EVIDENCE.items():
-        (evidence_dir / name).write_text(body, encoding="utf-8")
-    return tmp_path / "study"
+        (study / "evidence" / name).write_text(body, encoding="utf-8")
+    (study / "STAGE3_STUDY.md").write_text("recovered victim report body\n", encoding="utf-8")
+    (study / "result.json").write_text('{"repository": "acme/reports"}\n', encoding="utf-8")
+    return study
 
 
 def _write(tmp_path, graph):
@@ -132,10 +134,11 @@ def _validate(tmp_path, graph):
 
 
 def _analyze(tmp_path, graph):
-    out = tmp_path / "analysis.json"
+    out = tmp_path / "derived" / "analysis.json"
+    study = _study(tmp_path)
     result = subprocess.run(
         [sys.executable, str(SCRIPTS / "graph_analyze.py"), str(_write(tmp_path, graph)),
-         "--out", str(out)],
+         "--out", str(out), "--study-dir", str(study)],
         capture_output=True,
         text=True,
     )
@@ -173,10 +176,16 @@ def test_path_operations_must_chain(tmp_path):
 
 def test_locator_cannot_leave_the_evidence_root(tmp_path):
     graph = _graph()
-    graph["operations"][0]["evidence"]["locator"] = "../secret.txt#L1"
+    graph["operations"][0]["evidence"]["locator"] = "elsewhere/secret.txt#L1"
     result = _validate(tmp_path, graph)
     assert result.returncode == 1
-    assert "stay inside" in result.stderr
+    assert "evidence" in result.stderr
+
+
+def test_locator_cannot_traverse_out_of_the_study(tmp_path):
+    graph = _graph()
+    graph["operations"][0]["evidence"]["locator"] = "../secret.txt#L1"
+    assert _validate(tmp_path, graph).returncode == 1
 
 
 def test_path_must_terminate_at_its_objective(tmp_path):
@@ -217,17 +226,23 @@ def test_shallow_path_is_labelled_rather_than_rejected(tmp_path):
 
 def test_survived_cut_leaves_a_solid_route_in_the_diagram(tmp_path):
     out = tmp_path / "graph.md"
+    study = _study(tmp_path)
     result = subprocess.run(
         [sys.executable, str(SCRIPTS / "graph_render.py"), str(_write(tmp_path, _graph())),
-         "--out", str(out)],
+         "--out", str(out), "--study-dir", str(study)],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stderr
     rendered = out.read_text(encoding="utf-8")
     assert "```mermaid" in rendered
-    assert "linkStyle" in rendered
     assert "contestable_observed" in rendered
+    # Only the blocked route is dashed: the surviving route must stay solid,
+    # which is the whole point of the picture.
+    edges = [l for l in rendered.splitlines() if "-->" in l]
+    dashed = [l for l in rendered.splitlines() if l.strip().startswith("linkStyle")]
+    assert len(edges) == 8
+    assert len(dashed) == 4
 
 
 def test_untested_path_appears_on_the_frontier(tmp_path):
@@ -236,3 +251,206 @@ def test_untested_path_appears_on_the_frontier(tmp_path):
     analysis = _analyze(tmp_path, graph)
     assert {"kind": "untested_path", "target": "PATH-alt"} in analysis["frontier"]
     assert analysis["observed_cuts"][0]["reading"] == "terminal_over_recorded_subgraph"
+
+
+# --- guards the first round of review found unproven -------------------------
+
+
+def _fails(tmp_path, mutate, needle):
+    graph = _graph()
+    mutate(graph)
+    result = _validate(tmp_path, graph)
+    assert result.returncode == 1, result.stdout
+    assert needle in result.stderr, result.stderr
+
+
+def test_study_dir_must_be_a_real_stage3_study(tmp_path):
+    scratch = tmp_path / "scratch" / "evidence"
+    scratch.mkdir(parents=True)
+    for name, body in EVIDENCE.items():
+        (scratch / name).write_text(body, encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "graph_validate.py"), str(_write(tmp_path, _graph())),
+         "--study-dir", str(tmp_path / "scratch")],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "not a Stage 3 study" in result.stderr
+
+
+def test_evidence_root_cannot_be_the_study_itself(tmp_path):
+    def mutate(graph):
+        graph["evidence_root"] = "."
+        graph["operations"][0]["evidence"]["locator"] = "STAGE3_STUDY.md#L1"
+        graph["operations"][0]["evidence"]["observed"] = "recovered victim report body"
+    _fails(tmp_path, mutate, "evidence_root")
+
+
+def test_observed_must_quote_enough_to_identify_the_output(tmp_path):
+    _fails(tmp_path, lambda g: g["operations"][0]["evidence"].update(observed="2"), "at least")
+
+
+def test_symlinked_evidence_cannot_read_outside_the_study(tmp_path):
+    study = _study(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("recovered victim report body\n", encoding="utf-8")
+    (study / "evidence" / "link.txt").symlink_to(outside)
+    graph = _graph()
+    graph["operations"][0]["evidence"] = _evidence(
+        "reproduced", "evidence/link.txt#L1", "recovered victim"
+    )
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "graph_validate.py"), str(_write(tmp_path, graph)),
+         "--study-dir", str(study)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "outside" in result.stderr
+
+
+def test_unknown_state_id_reports_an_error_rather_than_crashing(tmp_path):
+    result = _validate(tmp_path, {**_graph(), "operations": [
+        {**op, "requires": ["ST-typo"]} if op["id"] == "OP-create-share" else op
+        for op in _graph()["operations"]
+    ]})
+    assert result.returncode == 1
+    assert "unknown state" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_malformed_requires_reports_an_error_rather_than_crashing(tmp_path):
+    result = _validate(tmp_path, {**_graph(), "operations": [
+        {**op, "requires": "ST-entry"} if op["id"] == "OP-create-share" else op
+        for op in _graph()["operations"]
+    ]})
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+
+
+def test_cycles_are_rejected(tmp_path):
+    def mutate(graph):
+        graph["operations"][0]["produces"] = ["ST-token", "ST-entry"]
+    _fails(tmp_path, mutate, "acyclic")
+
+
+def test_duplicate_ids_are_rejected(tmp_path):
+    _fails(tmp_path, lambda g: g["states"].append(g["states"][0]), "unique string id")
+
+
+def test_objective_must_declare_its_scope(tmp_path):
+    _fails(tmp_path, lambda g: g["states"][3].pop("scope"), "must declare scope")
+
+
+def test_cut_must_record_a_blocked_path(tmp_path):
+    _fails(tmp_path, lambda g: g["observed_cuts"][0].update(blocked=[]), "at least one path")
+
+
+def test_cut_cannot_list_one_path_as_both_blocked_and_survived(tmp_path):
+    def mutate(graph):
+        graph["observed_cuts"][0]["survived"] = [
+            {"path": "PATH-pov", "locator": "evidence/fixed-alt.txt#L1", "observed": "recovered victim"}
+        ]
+    _fails(tmp_path, mutate, "twice")
+
+
+def test_fabricated_cut_evidence_is_rejected(tmp_path):
+    def mutate(graph):
+        graph["observed_cuts"][0]["blocked"][0]["observed"] = "500 Internal Server Error"
+    _fails(tmp_path, mutate, "observed string is not on")
+
+
+def test_unregistered_objective_scope_is_rejected(tmp_path):
+    registry = tmp_path / "scopes.json"
+    registry.write_text(json.dumps([{"id": "app.cross_boundary.write"}]), encoding="utf-8")
+    graph = _graph()
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "graph_validate.py"), str(_write(tmp_path, graph)),
+         "--study-dir", str(_study(tmp_path)), "--scope-registry", str(registry)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "not registered" in result.stderr
+
+
+def test_two_counted_operations_need_an_intermediate_state_between_them(tmp_path):
+    """One request split in two is not a nontrivial chain."""
+    graph = _graph()
+    graph["states"][1]["role"] = "entry"
+    analysis = _analyze(tmp_path, graph)
+    assert analysis["nontrivial_paths"]["PATH-pov"] is False
+    assert "shallow" in analysis["geometry"]
+
+
+def test_shallow_path_cannot_manufacture_disjoint_geometry(tmp_path):
+    graph = _graph()
+    graph["operations"].append({
+        "id": "OP-direct", "title": "direct read", "requires": ["ST-entry"],
+        "produces": ["ST-obj"], "counts_as_operation": True,
+        "evidence": _evidence("reproduced", "evidence/alt.txt#L2", "recovered victim"),
+    })
+    graph["paths"].append({
+        "id": "PATH-short", "objective": "ST-obj", "operations": ["OP-direct"],
+        "evidence": _evidence("reproduced", "evidence/alt.txt#L2", "recovered victim"),
+    })
+    analysis = _analyze(tmp_path, graph)
+    assert analysis["geometry"] == ["shallow"]
+    assert analysis["mincut_nontrivial"] == 2
+
+
+def test_a_wide_disjoint_graph_still_reports_its_mincut(tmp_path):
+    """Five disjoint paths must not fall off the end of the cut search."""
+    graph = _graph()
+    graph["states"] = graph["states"][:1] + [graph["states"][3]]
+    graph["operations"] = []
+    graph["paths"] = []
+    graph["observed_cuts"] = []
+    for index in range(5):
+        mid = f"ST-mid-{index}"
+        graph["states"].append({"id": mid, "role": "intermediate", "title": f"step {index}"})
+        graph["operations"] += [
+            {"id": f"OP-a{index}", "requires": ["ST-entry"], "produces": [mid],
+             "counts_as_operation": True,
+             "evidence": _evidence("reproduced", "evidence/alt.txt#L1", "201 Created template")},
+            {"id": f"OP-b{index}", "requires": [mid], "produces": ["ST-obj"],
+             "counts_as_operation": True,
+             "evidence": _evidence("reproduced", "evidence/alt.txt#L2", "recovered victim")},
+        ]
+        graph["paths"].append({
+            "id": f"PATH-{index}", "objective": "ST-obj",
+            "operations": [f"OP-a{index}", f"OP-b{index}"],
+            "evidence": _evidence("reproduced", "evidence/alt.txt#L2", "recovered victim"),
+        })
+    analysis = _analyze(tmp_path, graph)
+    assert analysis["mincut_all"] == 5
+    assert "disjoint" in analysis["geometry"]
+
+
+def test_implicated_operations_exclude_uncuttable_steps(tmp_path):
+    graph = _graph()
+    graph["operations"].insert(0, {
+        "id": "OP-login", "title": "authenticate", "requires": ["ST-entry"],
+        "produces": ["ST-session"], "counts_as_operation": False,
+        "evidence": _evidence("reproduced", "evidence/pov.txt#L1", "201 Created share"),
+    })
+    graph["states"].append({"id": "ST-session", "role": "intermediate", "title": "session"})
+    graph["operations"][1]["requires"] = ["ST-session"]
+    graph["paths"][0]["operations"] = ["OP-login", "OP-create-share", "OP-resolve-share"]
+    analysis = _analyze(tmp_path, graph)
+    assert "OP-login" not in analysis["observed_cuts"][0]["implicated_operations"]
+
+
+def test_malformed_json_reports_an_error_rather_than_crashing(tmp_path):
+    bad = tmp_path / "graph.json"
+    bad.write_text("{not json", encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "graph_validate.py"), str(bad),
+         "--study-dir", str(_study(tmp_path))],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "not valid JSON" in result.stderr
+    assert "Traceback" not in result.stderr

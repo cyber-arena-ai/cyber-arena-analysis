@@ -88,25 +88,45 @@ analysis output, never here.
 {"kind": "reproduced", "locator": "<path>#L<line>", "observed": "<exact text>"}
 ```
 
-`kind` is `reproduced` or `dynamic`. `hypothesis` is rejected with a specific
-message: an asserted path is not evidence. `locator` resolves against the study
-directory, must stay inside `evidence_root`, and `observed` must appear on that
-exact line. This is the guard that makes fabricating an edge require
-fabricating command output.
+`kind` is `reproduced` for a Stage 3 observation, or `dynamic` for an
+authoritative artifact from a review game instance; the MVP produces only
+`reproduced`. `hypothesis` is rejected with a specific message: an asserted path
+is not evidence.
+
+`locator` resolves against the study directory and must stay inside
+`evidence_root`, after symlink resolution. `evidence_root` may not be `.`, which
+would let the study's own prose stand in for reproduced output. `observed` must
+appear on the cited line and quote at least 8 characters, so shortening it is
+not a way to make validation pass. Together these make fabricating an edge
+require fabricating command output.
 
 ## Validation
 
-`graph_validate.py` rejects a graph when ids are not unique or references do not
-resolve; a required field is missing or malformed; evidence is a hypothesis,
-malformed, or does not resolve to its cited line; a path does not start at an
-`entry`, does not chain, does not terminate at its objective, or has no counted
-operation; a cut records no blocked path or lists a path twice; or the graph is
-cyclic.
+All three scripts run the same validation, so a fabricated graph cannot be
+rendered or analyzed even if the validator was skipped. Each takes
+`--study-dir`, which must hold `STAGE3_STUDY.md` and `result.json`: a scratch
+directory of hand-made files is not a study and is rejected.
 
-Shallowness is **not** a validation error. A one-operation path is recorded and
-labelled `shallow` by the analyzer, so a graph over a rejected study still shows
-why it was rejected. Whether shallowness rejects a *challenge* is issue 17's
-decision, not the graph's.
+Validation fails when ids are not unique or references do not resolve; a
+required field is missing or malformed; evidence is a hypothesis, malformed, or
+does not resolve to its cited line; a path does not start at an `entry`, does
+not chain, does not terminate at its objective, or has no counted operation; a
+cut records no blocked path or lists a path twice; or the graph is cyclic. Pass
+`--scope-registry attack-scopes.json` to also require every objective scope to
+be registered or `custom.*`.
+
+A malformed reference produces an error, never a traceback.
+
+Shallowness is **not** a validation error, deliberately. A trivial path is
+recorded and labelled `shallow` by the analyzer, so a graph over a rejected
+study still shows why it was rejected. Whether shallowness rejects a
+*challenge* is issue 17's decision, not the graph's. Because a trivial path
+still participates in cut computation, read `mincut_nontrivial` alongside
+`mincut_all` whenever `shallow` appears.
+
+The scope registry check and the rule that one advisory backs one path are the
+author's responsibility unless `--scope-registry` is passed; the validator
+enforces nothing else about scope semantics.
 
 ## Analysis
 
@@ -114,13 +134,15 @@ decision, not the graph's.
 
 | Output | Meaning |
 |---|---|
-| `minimal_cuts_all`, `mincut_all` | Minimal hitting sets over the recorded paths' cut-eligible operations, capped at size 4 |
-| `objective_coverage` | Per objective: its paths, minimal cuts, and mincut |
-| `geometry` | `fan_in`, `fan_out`, `disjoint`, `shallow`, `single_path` |
-| `nontrivial_paths` | Per path, whether it has at least two counted operations |
-| `observed_cuts[].implicated_operations` | The extensional root cause: operations common to the blocked paths and absent from the survivors |
-| `observed_cuts[].reading` | `contestable_observed`, `terminal_over_recorded_subgraph`, or `no_effect` |
-| `frontier` | Unreached objectives and paths no cut has been run against |
+| `minimum_cuts_all`, `mincut_all` | The cheapest defenses: minimum-cardinality hitting sets over the recorded paths' cut-eligible operations. A cut always exists at or below the path count, so `mincut_all` is `null` only when a path has no cut-eligible operation |
+| `mincut_nontrivial` | The same over nontrivial paths only, so a reproduced one-operation shortcut cannot inflate the headline number |
+| `cuts_truncated` | More minimum cuts exist than `max_listed_cuts`, or the search space exceeded the work cap |
+| `objective_coverage` | Per objective: its paths, minimum cuts, and mincut |
+| `geometry` | `fan_in`, `fan_out`, `disjoint`, `single_path`, or `shallow`. `shallow` is exclusive: a reproduced one-operation shortcut is the whole reading, and suppressing the others stops it from manufacturing `disjoint` |
+| `nontrivial_paths` | Per path, whether two counted operations are linked through an `intermediate` state. Counting operations alone is not enough — one request split in two is not a chain |
+| `observed_cuts[].implicated_operations` | The extensional root cause: cut-eligible operations common to the blocked paths and absent from the survivors. Excluded steps such as authentication never appear, because they cannot be cut |
+| `observed_cuts[].reading` | `contestable_observed` or `terminal_over_recorded_subgraph` |
+| `frontier` | The open questions: objectives with no recorded path, and paths no cut has been run against. Unrelated to the deferred *defense* frontier |
 
 Cuts are computed over recorded paths rather than graph reachability, so every
 result is a statement about what was reproduced. Adding paths can only raise a

@@ -8,7 +8,7 @@ import re
 import sys
 from pathlib import Path
 
-from _graph import Graph, analyze, load, structural_errors
+from _graph import Graph, analyze, read_graph, validate
 
 SHAPES = {
     "entry": '{id}(["{label}"]):::entry',
@@ -22,12 +22,22 @@ CLASSDEFS = [
 ]
 
 
-def _node(identifier: str) -> str:
-    return re.sub(r"\W", "_", identifier)
+def _node(identifier: str, seen: dict[str, str]) -> str:
+    """Mermaid-safe id that stays injective: ST-m.1 and ST-m-1 must not merge."""
+    if identifier in seen:
+        return seen[identifier]
+    base = re.sub(r"\W", "_", identifier)
+    name = base
+    suffix = 2
+    while name in seen.values():
+        name = f"{base}__{suffix}"
+        suffix += 1
+    seen[identifier] = name
+    return name
 
 
 def _label(text: str) -> str:
-    return str(text).replace('"', "'")
+    return re.sub(r"\s+", " ", str(text)).replace('"', "'").replace("|", "/")
 
 
 def _state_label(state: dict) -> str:
@@ -37,13 +47,14 @@ def _state_label(state: dict) -> str:
 
 
 def diagram(graph: Graph, analysis: dict) -> str:
+    seen: dict[str, str] = {}
     lines = ["```mermaid", "flowchart LR", *(f"  {c}" for c in CLASSDEFS), ""]
     for state_id, state in graph.states.items():
         shape = SHAPES.get(state.get("role"), SHAPES["intermediate"])
-        lines.append("  " + shape.format(id=_node(state_id), label=_label(_state_label(state))))
+        lines.append("  " + shape.format(id=_node(state_id, seen), label=_label(_state_label(state))))
     for op_id, operation in graph.operations.items():
         label = _label(operation.get("title") or op_id)
-        lines.append(f'  {_node(op_id)}["{label}"]:::op')
+        lines.append(f'  {_node(op_id, seen)}["{label}"]:::op')
     lines.append("")
 
     implicated = {
@@ -55,12 +66,12 @@ def diagram(graph: Graph, analysis: dict) -> str:
     index = 0
     for op_id, operation in graph.operations.items():
         for state_id in operation.get("requires", []):
-            lines.append(f"  {_node(state_id)} --> {_node(op_id)}")
+            lines.append(f"  {_node(state_id, seen)} --> {_node(op_id, seen)}")
             if op_id in implicated:
                 marked.append(index)
             index += 1
         for state_id in operation.get("produces", []):
-            lines.append(f"  {_node(op_id)} --> {_node(state_id)}")
+            lines.append(f"  {_node(op_id, seen)} --> {_node(state_id, seen)}")
             if op_id in implicated:
                 marked.append(index)
             index += 1
@@ -116,11 +127,11 @@ def report(graph: Graph, analysis: dict) -> str:
                 for path_id, path in graph.paths.items()
             ],
         ),
-        "## Minimal cuts protecting every objective",
+        "## Minimum-cost cuts protecting every objective",
         "",
         _table(
             ["size", "operations"],
-            [[str(len(c)), ", ".join(c)] for c in analysis["minimal_cuts_all"]],
+            [[str(len(c)), ", ".join(c)] for c in analysis["minimum_cuts_all"]],
         ),
         "## Objective coverage",
         "",
@@ -160,14 +171,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("graph", type=Path)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--study-dir",
+        type=Path,
+        required=True,
+        help="Stage 3 study directory; the graph is fully validated before use",
+    )
     args = parser.parse_args()
 
-    document = load(args.graph)
-    errors = structural_errors(document)
+    document, errors = read_graph(args.graph)
+    if document is not None:
+        errors = validate(document, args.study_dir)
     if errors:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
+    args.out.parent.mkdir(parents=True, exist_ok=True)
 
     graph = Graph(document)
     args.out.write_text(report(graph, analyze(graph)), encoding="utf-8")

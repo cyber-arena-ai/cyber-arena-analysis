@@ -13,6 +13,7 @@ STATE_ROLES = {"entry", "objective", "intermediate"}
 LOCATOR = re.compile(r"^(?P<path>[^#]+)#L(?P<line>[1-9][0-9]*)$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 MAX_LISTED_CUTS = 32
+MAX_SEARCH_NODES = 200_000
 MIN_OBSERVED = 8
 
 
@@ -66,16 +67,24 @@ def minimal_cuts(
 
     Branch and bound on an unhit path rather than searching by subset size:
     a cut always exists at or below the path count, so the depth is bounded
-    even when the operation universe is large.
+    even when the operation universe is large. Cost still grows about 6x per
+    added disjoint path, so a work cap keeps the tool terminating; when it
+    fires the result is `mincut` `None` with `cuts_truncated` set, never a
+    guess.
     """
     if not op_sets or any(not op_set for op_set in op_sets):
         return [], None, False
     for size in range(1, len(op_sets) + 1):
         found: set[frozenset[str]] = set()
-        _search(op_sets, size, frozenset(), found, max_listed)
+        nodes = [MAX_SEARCH_NODES]
+        _search(op_sets, size, frozenset(), found, max_listed, nodes)
         if found:
             listed = sorted(found, key=sorted)
             return listed[:max_listed], size, len(listed) > max_listed
+        if nodes[0] <= 0:
+            # The exact search ran out of room. Say so rather than substitute an
+            # estimate: an over-stated mincut manufactures a false `disjoint`.
+            return [], None, True
     return [], None, False
 
 
@@ -85,7 +94,11 @@ def _search(
     chosen: frozenset[str],
     found: set[frozenset[str]],
     max_listed: int,
+    nodes: list[int],
 ) -> None:
+    nodes[0] -= 1
+    if nodes[0] <= 0:
+        return
     unhit = [op_set for op_set in op_sets if not (op_set & chosen)]
     if not unhit:
         found.add(chosen)
@@ -95,7 +108,7 @@ def _search(
     # Branching on the smallest unhit path keeps the factor as low as the
     # data allows; every cut must contain one of its operations.
     for operation in sorted(min(unhit, key=len)):
-        _search(op_sets, budget - 1, chosen | {operation}, found, max_listed)
+        _search(op_sets, budget - 1, chosen | {operation}, found, max_listed, nodes)
 
 
 

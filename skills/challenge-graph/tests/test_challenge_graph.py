@@ -562,3 +562,20 @@ def test_the_worked_example_is_structurally_valid():
     example = SCRIPTS.parent / "references/example-graph.json"
     document = json.loads(example.read_text(encoding="utf-8"))
     assert structural_errors(document) == []
+
+
+def test_an_exhausted_cut_search_reports_unknown_rather_than_guessing():
+    """An over-stated mincut would manufacture a false `disjoint` reading."""
+    sys.path.insert(0, str(SCRIPTS))
+    import _graph
+
+    wide = [frozenset(f"OP-{p}-{o}" for o in range(6)) for p in range(12)]
+    original = _graph.MAX_SEARCH_NODES
+    try:
+        _graph.MAX_SEARCH_NODES = 500
+        cuts, size, truncated = _graph.minimal_cuts(wide)
+    finally:
+        _graph.MAX_SEARCH_NODES = original
+    assert cuts == []
+    assert size is None
+    assert truncated is True

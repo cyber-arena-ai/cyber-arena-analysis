@@ -97,8 +97,9 @@ study directory for writing.
    whose evidence does not resolve.
 
 8. Reconcile the analysis against the study's own recorded decision. Compare
-   `geometry`, `mincut_all`, `mincut_nontrivial`, `cuts_truncated`, and each
-   observed cut's `reading` with what `STAGE3_STUDY.md` concluded. When
+   `geometry`, `mincut_all`, `mincut_nontrivial`, `cuts_truncated`,
+   `evidence_strength`, and each observed cut's `reading` with what
+   `STAGE3_STUDY.md` concluded. When
    `shallow` appears, read `mincut_nontrivial` rather than `mincut_all`. **On disagreement, report it as a `NOTE`. Never
    adjust the graph to make it agree** — the disagreement is the finding.
 
@@ -114,7 +115,8 @@ artifacts/projects/<REPOSITORY>/graph/<study-name>/
 Report the study and reproduced commit, the geometry and `mincut_all`, whether
 the observed cut left a surviving path, the open frontier — objectives with no
 recorded path and paths no cut has been run against — and every `NOTE` where
-the analysis disagreed with the study.
+the analysis disagreed with the study. When `evidence_strength.recorded_only` is
+true, say so: the reading rests on the study's own tables, not raw output.
 
 ## Cleanup
 

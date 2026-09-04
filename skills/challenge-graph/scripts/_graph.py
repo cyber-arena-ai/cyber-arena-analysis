@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import itertools
 import json
-import math
 import re
 from pathlib import Path
 
@@ -15,7 +13,6 @@ STATE_ROLES = {"entry", "objective", "intermediate"}
 LOCATOR = re.compile(r"^(?P<path>[^#]+)#L(?P<line>[1-9][0-9]*)$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 MAX_LISTED_CUTS = 32
-MAX_SEARCH_NODES = 200_000
 MIN_OBSERVED = 8
 
 
@@ -54,10 +51,6 @@ def _entries(document: dict, key: str) -> list[dict]:
     return [e for e in raw if _id(e)] if isinstance(raw, list) else []
 
 
-def load(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
 # --- analysis ---------------------------------------------------------------
 
 
@@ -77,44 +70,13 @@ def minimal_cuts(
     """
     if not op_sets or any(not op_set for op_set in op_sets):
         return [], None, False
-    remaining = _irredundant(op_sets)
-    for size in range(1, len(remaining) + 1):
+    for size in range(1, len(op_sets) + 1):
         found: set[frozenset[str]] = set()
-        budget = [MAX_SEARCH_NODES]
-        _search(remaining, size, frozenset(), found, max_listed, budget)
+        _search(op_sets, size, frozenset(), found, max_listed)
         if found:
             listed = sorted(found, key=sorted)
             return listed[:max_listed], size, len(listed) > max_listed
-        if budget[0] <= 0:
-            # The exact search ran out of room. Report a greedy cut so the
-            # analysis still says something true: its size is an upper bound.
-            greedy = _greedy(remaining)
-            return [greedy], len(greedy), True
     return [], None, False
-
-
-def _greedy(op_sets: list[frozenset[str]]) -> frozenset[str]:
-    chosen: set[str] = set()
-    unhit = list(op_sets)
-    while unhit:
-        counts: dict[str, int] = {}
-        for op_set in unhit:
-            for operation in op_set:
-                counts[operation] = counts.get(operation, 0) + 1
-        best = max(sorted(counts), key=lambda op: counts[op])
-        chosen.add(best)
-        unhit = [op_set for op_set in unhit if best not in op_set]
-    return frozenset(chosen)
-
-
-def _irredundant(op_sets: list[frozenset[str]]) -> list[frozenset[str]]:
-    """Drop any path whose operations are a superset of another's."""
-    unique = sorted(set(op_sets), key=len)
-    kept: list[frozenset[str]] = []
-    for op_set in unique:
-        if not any(earlier <= op_set for earlier in kept):
-            kept.append(op_set)
-    return kept
 
 
 def _search(
@@ -123,11 +85,7 @@ def _search(
     chosen: frozenset[str],
     found: set[frozenset[str]],
     max_listed: int,
-    nodes: list[int],
 ) -> None:
-    nodes[0] -= 1
-    if nodes[0] <= 0:
-        return
     unhit = [op_set for op_set in op_sets if not (op_set & chosen)]
     if not unhit:
         found.add(chosen)
@@ -137,7 +95,7 @@ def _search(
     # Branching on the smallest unhit path keeps the factor as low as the
     # data allows; every cut must contain one of its operations.
     for operation in sorted(min(unhit, key=len)):
-        _search(op_sets, budget - 1, chosen | {operation}, found, max_listed, nodes)
+        _search(op_sets, budget - 1, chosen | {operation}, found, max_listed)
 
 
 
@@ -171,13 +129,11 @@ def analyze(graph: Graph) -> dict:
     per_objective: dict[str, dict] = {}
     for objective in objectives:
         members = [p for p in paths if graph.paths[p].get("objective") == objective]
-        cuts, size, truncated = minimal_cuts([op_sets[p] for p in members])
+        _, size, _ = minimal_cuts([op_sets[p] for p in members])
         per_objective[objective] = {
             "scope": graph.states[objective].get("scope"),
             "paths": members,
-            "minimum_cuts": [sorted(c) for c in cuts],
             "mincut": size,
-            "cuts_truncated": truncated,
         }
 
     all_cuts, mincut_all, all_truncated = minimal_cuts([op_sets[p] for p in paths])
@@ -193,7 +149,7 @@ def analyze(graph: Graph) -> dict:
         spans = {
             op: {graph.paths[p].get("objective") for p in paths if op in op_sets[p]}
             for op in set().union(*op_sets.values())
-        } if paths else {}
+        }
         if any(len(reached) >= 2 for reached in spans.values()):
             labels.append("fan_out")
         if any(len(d["paths"]) >= 2 and d["mincut"] == 1 for d in per_objective.values()):
@@ -409,7 +365,7 @@ def _path_errors(graph: Graph, path_id: str, path: dict) -> list[str]:
     first = graph.operations[operations[0]]
     requires = first.get("requires")
     if not isinstance(requires, list):
-        return errors + [f"path {path_id} starts at an operation with a malformed requires"]
+        return errors
     if not any(graph.states.get(s, {}).get("role") == "entry" for s in requires):
         errors.append(f"path {path_id} must start at an entry state")
     for earlier, later in zip(operations, operations[1:]):
@@ -432,7 +388,7 @@ def _cut_errors(graph: Graph, document: dict) -> list[str]:
     raw = document.get("observed_cuts", [])
     if not isinstance(raw, list):
         return ["observed_cuts must be a list"]
-    if len(graph.observed_cuts) != len(raw):
+    if len({c["id"] for c in graph.observed_cuts}) != len(raw):
         errors.append("every observed_cuts entry needs a unique string id")
     for cut in graph.observed_cuts:
         cut_id = cut["id"]
@@ -464,9 +420,11 @@ def _cut_errors(graph: Graph, document: dict) -> list[str]:
 def _cycle_errors(graph: Graph) -> list[str]:
     edges: dict[str, list[str]] = {}
     for op_id, operation in graph.operations.items():
-        for state_id in operation.get("requires", []):
+        # Shape errors are reported by the operations loop; skip them here so a
+        # malformed field produces that message instead of a traceback.
+        for state_id in operation.get("requires", []) if isinstance(operation.get("requires"), list) else []:
             edges.setdefault(state_id, []).append(op_id)
-        for state_id in operation.get("produces", []):
+        for state_id in operation.get("produces", []) if isinstance(operation.get("produces"), list) else []:
             edges.setdefault(op_id, []).append(state_id)
     colors: dict[str, int] = {}
 

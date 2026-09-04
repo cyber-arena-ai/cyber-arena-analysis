@@ -177,11 +177,16 @@ def main() -> int:
         required=True,
         help="Stage 3 study directory; the graph is fully validated before use",
     )
+    parser.add_argument(
+        "--scope-registry",
+        type=Path,
+        help="attack-scopes.json; when given, objective scopes are checked against it",
+    )
     args = parser.parse_args()
 
     document, errors = read_graph(args.graph)
     if document is not None:
-        errors = validate(document, args.study_dir)
+        errors = validate(document, args.study_dir, args.scope_registry)
     if errors:
         for error in errors:
             print(error, file=sys.stderr)

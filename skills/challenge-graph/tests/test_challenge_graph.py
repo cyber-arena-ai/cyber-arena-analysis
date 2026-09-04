@@ -513,3 +513,42 @@ def test_more_cuts_than_the_listing_cap_are_reported_as_truncated(tmp_path):
     analysis = _analyze(tmp_path, graph)
     assert analysis["cuts_truncated"] is True
     assert len(analysis["minimum_cuts_all"]) == analysis["max_listed_cuts"]
+
+
+def test_recorded_evidence_may_cite_the_study_document(tmp_path):
+    """A study that retained no raw evidence tree can still be represented."""
+    graph = _graph()
+    graph.pop("evidence_root")
+    for element in graph["operations"] + graph["paths"]:
+        element["evidence"] = _evidence("recorded", "STAGE3_STUDY.md#L1", "recovered victim")
+    for key in ("blocked", "survived"):
+        for entry in graph["observed_cuts"][0][key]:
+            entry.update(kind="recorded", locator="STAGE3_STUDY.md#L1", observed="recovered victim")
+    assert _validate(tmp_path, graph).returncode == 0
+    assert _analyze(tmp_path, graph)["evidence_strength"]["recorded_only"] is True
+
+
+def test_raw_evidence_needs_a_declared_evidence_root(tmp_path):
+    graph = _graph()
+    graph.pop("evidence_root")
+    result = _validate(tmp_path, graph)
+    assert result.returncode == 1
+    assert "no evidence_root" in result.stderr
+
+
+def test_non_list_requires_reports_an_error_rather_than_crashing(tmp_path):
+    for malformed in (5, None, {"a": 1}):
+        graph = _graph()
+        graph["operations"][0]["requires"] = malformed
+        result = _validate(tmp_path, graph)
+        assert result.returncode == 1, malformed
+        assert "Traceback" not in result.stderr, (malformed, result.stderr)
+        assert "must be a non-empty list" in result.stderr
+
+
+def test_duplicate_observed_cut_ids_are_rejected(tmp_path):
+    graph = _graph()
+    graph["observed_cuts"].append(dict(graph["observed_cuts"][0]))
+    result = _validate(tmp_path, graph)
+    assert result.returncode == 1
+    assert "unique string id" in result.stderr

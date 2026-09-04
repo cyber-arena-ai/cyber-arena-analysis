@@ -95,10 +95,16 @@ analysis output, never here.
 {"kind": "reproduced", "locator": "<path>#L<line>", "observed": "<exact text>"}
 ```
 
-`kind` is `reproduced` for a Stage 3 observation, or `dynamic` for an
-authoritative artifact from a review game instance; the MVP produces only
-`reproduced`. `hypothesis` is rejected with a specific message: an asserted path
-is not evidence.
+`kind` is `reproduced` for raw Stage 3 output, `dynamic` for an authoritative
+artifact from a review game instance, or `recorded` for an observation the study
+tabulated rather than retained as raw output. `hypothesis` is rejected with a
+specific message: an asserted path is not evidence.
+
+`reproduced` and `dynamic` must resolve inside `evidence_root`; `recorded` may
+cite any retained file in the study, including `STAGE3_STUDY.md`, because some
+studies retain only their own tables. That is weaker evidence, so the analysis
+reports it rather than hiding it. Omit `evidence_root` entirely when a graph
+carries no raw evidence.
 
 `locator` resolves against the study directory and must stay inside
 `evidence_root`, after symlink resolution. `evidence_root` may not be `.`, which
@@ -110,9 +116,9 @@ require fabricating command output.
 ## Validation
 
 All three scripts run the same validation, so a fabricated graph cannot be
-rendered or analyzed even if the validator was skipped. Each takes
-`--study-dir`, which must hold `STAGE3_STUDY.md` and `result.json`: a scratch
-directory of hand-made files is not a study and is rejected.
+rendered or analyzed even if the validator was skipped. Each takes `--study-dir`,
+which must hold `STAGE3_STUDY.md`: a scratch directory of hand-made evidence is
+not a study and is rejected. Each also accepts `--scope-registry`.
 
 Validation fails when ids are not unique or references do not resolve; a
 required field is missing or malformed; evidence is a hypothesis, malformed, or
@@ -150,6 +156,7 @@ enforces nothing else about scope semantics.
 | `observed_cuts[].implicated_operations` | The extensional root cause: cut-eligible operations common to the blocked paths and absent from the survivors. Excluded steps such as authentication never appear, because they cannot be cut |
 | `observed_cuts[].reading` | `contestable_observed` or `terminal_over_recorded_subgraph` |
 | `frontier` | The open questions: objectives with no recorded path, and paths no cut has been run against. Unrelated to the deferred *defense* frontier |
+| `evidence_strength` | Evidence counts by kind, and `recorded_only` when no operation or path cites raw output. A `contestable_observed` reading resting only on the study's own tables is weaker than one backed by command transcripts, and the handoff must say which it is |
 
 Cuts are computed over recorded paths rather than graph reachability, so every
 result is a statement about what was reproduced. Adding paths can only raise a

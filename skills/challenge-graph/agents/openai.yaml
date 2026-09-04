@@ -1,0 +1,4 @@
+interface:
+  display_name: "Challenge Graph"
+  short_description: "Build and analyze one challenge's attack graph"
+  default_prompt: "Use $challenge-graph <absolute-study-dir> to build the attack-graph IR for one completed Stage 3 study, then compute its cuts and render the diagram."

@@ -14,6 +14,10 @@ orchestration code remain in `cyber-arena-orche`.
 - [`challenge-review`](skills/challenge-review/SKILL.md): independently review
   one registered challenge. Claude Code is recommended for final admission;
   Codex remains a supported fallback.
+- [`challenge-graph`](skills/challenge-graph/SKILL.md): build the attack-graph
+  intermediate representation for one completed Stage 3 study, compute its cuts,
+  geometry, and coverage, and render a diagram. Describes and predicts; it does
+  not promote or reject a challenge.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): challenge selection and design contract.
 
 The skills bundle their operational scripts and references.
@@ -28,6 +32,7 @@ artifacts/
     ├── stage2/
     ├── stage3/
     ├── stage4/
+    ├── graph/
     └── review/
 ```
 

@@ -29,7 +29,14 @@ Facts an actor holds or observes.
 `role` is `entry`, `objective`, or `intermediate`. A graph needs at least one
 `entry` and one `objective`. An `objective` declares `store` and `scope`; the
 scope is a registered id from `attack-scopes.json` or a fully defined
-`custom.<challenge_id>.*` scope. Other roles use `title`.
+`custom.<challenge_id>.*` scope. Before Stage 4 there is no declared store, so
+`store` names the study's trial witness. Other roles use `title`.
+
+A line locator proves the cited line holds the text, not which block of a
+structured file it sits in: in a study whose evidence records an authorized and
+an unauthorized attempt side by side, the same `"status": 200` appears twice.
+Cite the line inside the block you mean and name the block in the operation
+title.
 
 ## Operations
 

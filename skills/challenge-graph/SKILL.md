@@ -34,9 +34,11 @@ One required positional argument, absolute and never inferred:
 
 Reject extra arguments. `<absolute-study-dir>` is a completed Stage 3 study
 containing `STAGE3_STUDY.md`, `result.json`, and the evidence files
-`result.json` names. Require `result.json.reproduced_commit` to be non-null;
-any `outcome` is accepted, because a graph over a `rejected` study still shows
-why it was rejected.
+`result.json` names. The retained corpus holds three incompatible `result.json`
+shapes: read the reproduced revision from whichever of `reproduced_commit`,
+`commit`, or `vulnerable_commit` is present, and say which one you used. Any
+`outcome` is accepted, because a graph over a `rejected` study still shows why
+it was rejected.
 
 This skill starts no container, network request, or game instance. It only
 re-reads retained evidence.

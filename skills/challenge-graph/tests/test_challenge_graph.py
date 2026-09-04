@@ -454,3 +454,62 @@ def test_malformed_json_reports_an_error_rather_than_crashing(tmp_path):
     assert result.returncode == 1
     assert "not valid JSON" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+def _second_objective(graph):
+    graph["states"].append({
+        "id": "ST-obj2", "role": "objective",
+        "store": "config_store", "scope": "app.privileged.control",
+    })
+    return graph
+
+
+def test_one_operation_reaching_two_objectives_reads_as_fan_out(tmp_path):
+    graph = _second_objective(_graph())
+    graph["operations"][3]["produces"] = ["ST-obj", "ST-obj2"]
+    graph["paths"].append({
+        "id": "PATH-second", "objective": "ST-obj2",
+        "operations": ["OP-upload-template", "OP-render-template"],
+        "evidence": _evidence("reproduced", "evidence/alt.txt#L2", "recovered victim"),
+    })
+    analysis = _analyze(tmp_path, graph)
+    assert "fan_out" in analysis["geometry"]
+
+
+def test_objective_with_no_path_lands_on_the_frontier(tmp_path):
+    analysis = _analyze(tmp_path, _second_objective(_graph()))
+    assert {"kind": "unreached_objective", "target": "ST-obj2"} in analysis["frontier"]
+    assert analysis["objective_coverage"]["ST-obj2"]["mincut"] is None
+
+
+def test_a_lone_path_is_labelled_single_path(tmp_path):
+    graph = _graph()
+    graph["paths"] = graph["paths"][:1]
+    graph["observed_cuts"][0]["survived"] = []
+    analysis = _analyze(tmp_path, graph)
+    assert analysis["geometry"] == ["single_path"]
+    assert analysis["mincut_all"] == 1
+
+
+def test_more_cuts_than_the_listing_cap_are_reported_as_truncated(tmp_path):
+    graph = _graph()
+    graph["observed_cuts"] = []
+    for index in range(5):
+        mid = f"ST-extra-{index}"
+        graph["states"].append({"id": mid, "role": "intermediate", "title": f"extra {index}"})
+        graph["operations"] += [
+            {"id": f"OP-x{index}", "requires": ["ST-entry"], "produces": [mid],
+             "counts_as_operation": True,
+             "evidence": _evidence("reproduced", "evidence/alt.txt#L1", "201 Created template")},
+            {"id": f"OP-y{index}", "requires": [mid], "produces": ["ST-obj"],
+             "counts_as_operation": True,
+             "evidence": _evidence("reproduced", "evidence/alt.txt#L2", "recovered victim")},
+        ]
+        graph["paths"].append({
+            "id": f"PATH-x{index}", "objective": "ST-obj",
+            "operations": [f"OP-x{index}", f"OP-y{index}"],
+            "evidence": _evidence("reproduced", "evidence/alt.txt#L2", "recovered victim"),
+        })
+    analysis = _analyze(tmp_path, graph)
+    assert analysis["cuts_truncated"] is True
+    assert len(analysis["minimum_cuts_all"]) == analysis["max_listed_cuts"]

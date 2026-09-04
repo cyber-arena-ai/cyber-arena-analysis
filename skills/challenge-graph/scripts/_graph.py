@@ -14,7 +14,7 @@ STATE_ROLES = {"entry", "objective", "intermediate"}
 LOCATOR = re.compile(r"^(?P<path>[^#]+)#L(?P<line>[1-9][0-9]*)$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 MAX_LISTED_CUTS = 32
-MAX_COMBINATIONS = 200_000
+MAX_SEARCH_NODES = 200_000
 MIN_OBSERVED = 8
 
 
@@ -69,23 +69,75 @@ def minimal_cuts(
     the result stays a statement about what was actually reproduced. Only
     minimum-size cuts are returned: they are the cheapest defenses, and
     enumerating every minimal cut is exponential and unreadable.
+
+    Branch and bound on an unhit path rather than searching by subset size:
+    a cut always exists at or below the path count, so the depth is bounded
+    even when the operation universe is large.
     """
     if not op_sets or any(not op_set for op_set in op_sets):
         return [], None, False
-    universe = sorted(set().union(*op_sets))
-    # One operation per path always hits every path, so a cut exists at or
-    # below len(op_sets); the search never needs to go further.
-    for size in range(1, min(len(universe), len(op_sets)) + 1):
-        if math.comb(len(universe), size) > MAX_COMBINATIONS:
-            return [], None, True
-        found = [
-            frozenset(combo)
-            for combo in itertools.combinations(universe, size)
-            if all(set(combo) & op_set for op_set in op_sets)
-        ]
+    remaining = _irredundant(op_sets)
+    for size in range(1, len(remaining) + 1):
+        found: set[frozenset[str]] = set()
+        budget = [MAX_SEARCH_NODES]
+        _search(remaining, size, frozenset(), found, max_listed, budget)
         if found:
-            return found[:max_listed], size, len(found) > max_listed
+            listed = sorted(found, key=sorted)
+            return listed[:max_listed], size, len(listed) > max_listed
+        if budget[0] <= 0:
+            # The exact search ran out of room. Report a greedy cut so the
+            # analysis still says something true: its size is an upper bound.
+            greedy = _greedy(remaining)
+            return [greedy], len(greedy), True
     return [], None, False
+
+
+def _greedy(op_sets: list[frozenset[str]]) -> frozenset[str]:
+    chosen: set[str] = set()
+    unhit = list(op_sets)
+    while unhit:
+        counts: dict[str, int] = {}
+        for op_set in unhit:
+            for operation in op_set:
+                counts[operation] = counts.get(operation, 0) + 1
+        best = max(sorted(counts), key=lambda op: counts[op])
+        chosen.add(best)
+        unhit = [op_set for op_set in unhit if best not in op_set]
+    return frozenset(chosen)
+
+
+def _irredundant(op_sets: list[frozenset[str]]) -> list[frozenset[str]]:
+    """Drop any path whose operations are a superset of another's."""
+    unique = sorted(set(op_sets), key=len)
+    kept: list[frozenset[str]] = []
+    for op_set in unique:
+        if not any(earlier <= op_set for earlier in kept):
+            kept.append(op_set)
+    return kept
+
+
+def _search(
+    op_sets: list[frozenset[str]],
+    budget: int,
+    chosen: frozenset[str],
+    found: set[frozenset[str]],
+    max_listed: int,
+    nodes: list[int],
+) -> None:
+    nodes[0] -= 1
+    if nodes[0] <= 0:
+        return
+    unhit = [op_set for op_set in op_sets if not (op_set & chosen)]
+    if not unhit:
+        found.add(chosen)
+        return
+    if budget == 0 or len(found) > max_listed:
+        return
+    # Branching on the smallest unhit path keeps the factor as low as the
+    # data allows; every cut must contain one of its operations.
+    for operation in sorted(min(unhit, key=len)):
+        _search(op_sets, budget - 1, chosen | {operation}, found, max_listed, nodes)
+
 
 
 def nontrivial(graph: Graph, path_id: str) -> bool:

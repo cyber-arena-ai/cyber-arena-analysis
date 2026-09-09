@@ -342,12 +342,9 @@ def _node_errors(graph: Graph) -> list[str]:
         elif not _text(node.get("title")):
             errors.append(f"node {node_id} must declare a title")
 
-        # `symbol` names the application function, so it is what says two nodes
-        # are one node. Required on a function and unique across the document:
-        # one function under two ids reads as two routes sharing nothing, which
-        # halves the min-cut and manufactures a `disjoint` reading. Shape is
-        # checked for every role, so an unhashable value produces this message
-        # rather than a TypeError further on.
+        # `symbol` is what says two nodes are one node: required on a function,
+        # unique across the document. One function under two ids reads as two
+        # routes sharing nothing, which halves the min-cut.
         symbol = node.get("symbol")
         if role == "function" and "symbol" not in node:
             errors.append(
@@ -493,21 +490,19 @@ def _cut_errors(graph: Graph, document: dict) -> list[str]:
         errors.append("every observed_cuts entry needs a unique string id")
     seen_reference: dict[str, str] = {}
     for cut in graph.observed_cuts:
+        cut_id = cut["id"]
         reference = cut.get("reference")
-        if not isinstance(reference, str):
-            continue
-        if reference in seen_reference:
+        if not _text(reference):
+            errors.append(f"cut {cut_id}.reference must be a non-empty string")
+        elif reference in seen_reference:
             # Split ids give one defense two readings: the id holding only the
             # blocked routes reads terminal, for a defense a recorded route escaped.
             errors.append(
-                f"cuts {seen_reference[reference]} and {cut['id']} record the same "
+                f"cuts {seen_reference[reference]} and {cut_id} record the same "
                 f"defense {reference!r}; use one id"
             )
-        seen_reference.setdefault(reference, cut["id"])
-    for cut in graph.observed_cuts:
-        cut_id = cut["id"]
-        if not _text(cut.get("reference")):
-            errors.append(f"cut {cut_id}.reference must be a non-empty string")
+        else:
+            seen_reference[reference] = cut_id
         seen: set[str] = set()
         recorded = 0
         for key in ("blocked", "survived"):

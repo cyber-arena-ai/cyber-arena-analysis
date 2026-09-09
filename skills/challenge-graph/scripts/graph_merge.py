@@ -77,7 +77,7 @@ def _merge_node(seed_node: dict, expand_node: dict) -> tuple[dict, list[str]]:
     return seed_node, []
 
 
-def _merge_cuts(seed: dict, expand: dict, kept: set[str]) -> tuple[list[dict], list[str]]:
+def _merge_cuts(declared: list[dict], kept: set[str]) -> tuple[list[dict], list[str]]:
     """Cuts union by id: EXPAND reports how the same fix treated its own routes.
 
     A refuted route takes its cut entries with it, and a cut left recording
@@ -85,16 +85,15 @@ def _merge_cuts(seed: dict, expand: dict, kept: set[str]) -> tuple[list[dict], l
     """
     merged: dict[str, dict] = {}
     errors: list[str] = []
-    for fragment in (seed, expand):
-        for cut in fragment.get("observed_cuts") or []:
-            existing = merged.get(cut["id"])
-            if existing is None:
-                merged[cut["id"]] = {**cut, **{k: _keep(cut, k, kept) for k in ENTRIES}}
-            elif existing["reference"] != cut.get("reference"):
-                errors.append(f"fragments disagree on the reference of cut {cut['id']}")
-            else:
-                for key in ENTRIES:
-                    existing[key] += [e for e in _keep(cut, key, kept) if e not in existing[key]]
+    for cut in declared:
+        existing = merged.get(cut["id"])
+        if existing is None:
+            merged[cut["id"]] = {**cut, **{k: _keep(cut, k, kept) for k in ENTRIES}}
+        elif existing["reference"] != cut.get("reference"):
+            errors.append(f"fragments disagree on the reference of cut {cut['id']}")
+        else:
+            for key in ENTRIES:
+                existing[key] += [e for e in _keep(cut, key, kept) if e not in existing[key]]
     return [c for c in merged.values() if c["blocked"] or c["survived"]], errors
 
 
@@ -128,13 +127,14 @@ def merge(seed: dict, expand: dict, refuted: dict[str, str]) -> tuple[dict | Non
             continue
         paths.append(path)
 
-    cuts, cut_errors = _merge_cuts(seed, expand, {p["id"] for p in paths})
+    declared = seed_graph.observed_cuts + expand_graph.observed_cuts
+    cuts, cut_errors = _merge_cuts(declared, {p["id"] for p in paths})
     errors += cut_errors
     if errors:
         return None, {}, errors
 
     dropped = _prune(nodes, paths, set(seed_graph.nodes))
-    document = {**{k: seed[k] for k in SHARED if k in seed}}
+    document = {k: seed[k] for k in SHARED if k in seed}
     document["nodes"] = list(nodes.values())
     document["paths"] = paths
     document["observed_cuts"] = cuts
@@ -148,10 +148,7 @@ def merge(seed: dict, expand: dict, refuted: dict[str, str]) -> tuple[dict | Non
         "routes_added": [p["id"] for p in paths if p["id"] not in seed_graph.paths],
         "routes_refuted": [{"path": p, "reason": r} for p, r in sorted(refuted.items())],
         "nodes_dropped": dropped,
-        "cuts_dropped": sorted(
-            {c["id"] for f in (seed, expand) for c in f.get("observed_cuts") or []}
-            - {c["id"] for c in cuts}
-        ),
+        "cuts_dropped": sorted({c["id"] for c in declared} - {c["id"] for c in cuts}),
     }
     return document, record, []
 
@@ -213,11 +210,8 @@ def main() -> int:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(
-        f"{args.out}: merged "
-        f"+{len(record['nodes_added'])} node(s), "
-        f"+{len(record['routes_added'])} route(s), "
-        f"{len(record['routes_refuted'])} refuted, "
-        f"{len(record['nodes_dropped'])} node(s) dropped"
+        f"{args.out}: merged +{len(record['nodes_added'])} node(s), "
+        f"+{len(record['routes_added'])} route(s), {len(record['routes_refuted'])} refuted"
     )
     return 0
 

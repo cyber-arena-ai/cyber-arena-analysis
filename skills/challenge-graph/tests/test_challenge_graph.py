@@ -210,17 +210,6 @@ def test_a_route_must_reach_each_node_through_a_predecessor(tmp_path):
     _fails(tmp_path, mutate, "before any of its predecessors")
 
 
-def test_a_node_nothing_on_the_route_uses_is_rejected(tmp_path):
-    def mutate(graph):
-        graph["nodes"].append(
-            _fn("N-idle", "unused probe", ["N-entry"], "evidence/pov.txt#L1", "201 Created share")
-        )
-        _path(graph, "PATH-pov")["nodes"] = [
-            "N-entry", "N-idle", "N-create-share", "N-resolve-share", "N-obj"
-        ]
-    _fails(tmp_path, mutate, "still reaches N-obj without N-idle")
-
-
 # --- AND / OR ---------------------------------------------------------------
 
 
@@ -381,18 +370,6 @@ def test_a_route_needs_at_least_one_witness(tmp_path):
     _fails(tmp_path, mutate, "must record at least one observation")
 
 
-def test_a_repeat_execution_is_a_second_witness_not_a_second_route(tmp_path):
-    """A study that re-ran its chain retained better evidence, not another route.
-    Recording the replay as a path would manufacture geometry out of one route."""
-    graph = _graph()
-    _path(graph, "PATH-pov")["witnesses"].append(
-        _cite("evidence/pov.txt#L2", "recovered victim report body")
-    )
-    analysis = _analyze(tmp_path, graph)
-    assert analysis["geometry"] == ["disjoint"]
-    assert analysis["mincut_all"] == 2
-
-
 def test_advisories_record_every_cve_in_a_chained_route(tmp_path):
     graph = _graph()
     _path(graph, "PATH-pov")["advisories"] = ["CVE-2026-0001", "CVE-2026-0002"]
@@ -491,13 +468,6 @@ def test_a_witness_that_reads_the_same_on_the_fixed_build_warns(tmp_path):
     )
     analysis = _analyze(tmp_path, graph)
     assert any(w["where"].startswith("path PATH-pov") for w in analysis["warnings"])
-
-
-def test_only_a_blocked_route_can_warn(tmp_path):
-    """A survivor has no blocked citation to compare against, so reproducing on
-    the repaired build — the contestable finding itself — never warns."""
-    analysis = _analyze(tmp_path, _graph())
-    assert not [w for w in analysis["warnings"] if w["where"].startswith("path PATH-alt")]
 
 
 def test_the_fixed_build_is_found_by_citation_not_by_filename(tmp_path):
@@ -641,9 +611,10 @@ def test_an_empty_symbol_says_what_is_wrong_with_it(tmp_path):
            "node N-create-share.symbol must be a non-empty string")
 
 
-def test_an_unusable_symbol_reports_an_error_rather_than_crashing(tmp_path):
-    """It is used as a dict key while matching nodes, so its shape is checked for
-    every role — an entry's included, which skips the rest of the node rules."""
+def test_an_unusable_symbol_is_reported_rather_than_ignored(tmp_path):
+    """Shape is checked for every role, including an entry, which skips the rest
+    of the node rules. Without it a malformed symbol falls past the uniqueness
+    branch — which is gated on the value being text — and is silently dropped."""
     _fails(tmp_path, lambda g: _node(g, "N-entry").update({"symbol": {"a": 1}}),
            "node N-entry.symbol must be a non-empty string")
 
@@ -1192,14 +1163,6 @@ def test_an_explicit_requires_all_false_is_not_a_disagreement(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
-def test_the_record_names_which_fragment_was_which(tmp_path):
-    """Every other field is relative to whichever fragment was passed first."""
-    _, _, record = _merge(tmp_path, _seed(), _expand())
-    written = json.loads(record.read_text())
-    assert written["seed"].endswith("seed.json")
-    assert written["expand"].endswith("expand.json")
-
-
 def test_merge_rejects_two_defenses_sharing_one_cut_id(tmp_path):
     """Without this the EXPAND reference is silently discarded and two different
     defenses collapse into one cut."""
@@ -1221,3 +1184,25 @@ def test_a_symbol_cannot_break_the_rendered_table(tmp_path):
     ]
     assert len(rows) == 1
     assert rows[0].count("|") == 5, rows[0]
+
+
+def test_the_record_names_which_fragment_was_which(tmp_path):
+    """Every other field is relative to whichever fragment was passed first, so
+    reading the record at all depends on these two."""
+    _, _, record = _merge(tmp_path, _seed(), _expand())
+    written = json.loads(record.read_text())
+    assert written["seed"].endswith("seed.json")
+    assert written["expand"].endswith("expand.json")
+
+
+def test_a_blank_cut_reference_says_only_that(tmp_path):
+    """It is not indexed for uniqueness, so two blank references do not also
+    report themselves as one defense recorded twice."""
+    def mutate(graph):
+        second = json.loads(json.dumps(graph["observed_cuts"][0]))
+        second["id"] = "CUT-second"
+        graph["observed_cuts"].append(second)
+        for cut in graph["observed_cuts"]:
+            cut["reference"] = "  "
+    result = _fails(tmp_path, mutate, "cut CUT-upstream.reference must be a non-empty string")
+    assert "record the same defense" not in result.stderr

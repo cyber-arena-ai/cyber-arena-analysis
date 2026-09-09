@@ -78,13 +78,9 @@ reached from the function that crosses the boundary. Reconnaissance and proof
 submission are not nodes either: if you cannot name the application function or
 route, it does not belong in the graph.
 
-Whether severing a node is an *admissible* defense is a judgment the graph
-cannot make — "disable login" stops most attacks and is feature amputation in
-almost every challenge. What the analysis does instead is exclude the
-terminals, which is Menger's vertex form: the entry is the identity the
-challenge granted, so severing it is not a defense of this boundary.
-
-That makes the entry set the one remaining place where an author's choice moves
+The analysis excludes the terminals, which is Menger's vertex form: the entry
+is the identity the challenge granted, so severing it is not a defense of this
+boundary. That makes the entry set the one remaining place where an author's choice moves
 the numbers. Declaring a node `entry` removes it from every cut, so check that
 it really is the granted starting identity.
 
@@ -108,14 +104,11 @@ Then one rule does the real work: **a route may carry no node it could reach
 the objective without.** If dropping a node still leaves the objective
 derivable from the rest, the route is rejected and the message names that node.
 
-This exists because a path's node set becomes its element in the cut
-computation. A node the route does not depend on enlarges that set, which makes
-it easier to hit and **shrinks** the reported min-cut — and it lands in
-`minimum_cuts_all` as a defense that would not stop the attacker.
-
-It is deliberately not an adjacency check. A `requires_all` node's conjuncts
-are parallel branches, so demanding they sit next to each other would invent an
-edge the application does not have.
+A node the route does not depend on enlarges its node set in the cut
+computation, which **shrinks** the reported min-cut and lands in
+`minimum_cuts_all` as a defense that would not stop the attacker. It is
+deliberately not an adjacency check: a `requires_all` node's conjuncts are
+parallel branches.
 
 The consequence worth knowing when authoring: if a function is genuinely
 reachable both directly and after an earlier step, the *shorter* route is the
@@ -128,9 +121,9 @@ empty. It is documentation and affects nothing. A chained attack legitimately
 names several; a boolean could not record that.
 
 `witnesses` is a non-empty list of observations that the route reached its
-objective. It is a list because a study that re-ran its chain retained
-*better evidence for one route*, not a second route. Recording a replay as a
-second path would manufacture geometry out of one route.
+objective. A study that re-ran its chain retained better evidence for one route,
+not a second route; recording the replay as a second path would manufacture
+geometry out of one.
 
 ## Observed cuts
 
@@ -201,10 +194,8 @@ A malformed document produces an error, never a traceback.
 
 ## Fragments
 
-Under [multi-role authoring](../SKILL.md) each role writes a **fragment** — a
-whole graph that validates on its own — and `graph_merge.py` unions them into
-`graph.json`, so no new validation mode exists. [roles.md](roles.md) states what
-a role must do; two consequences belong here.
+Under [multi-role authoring](../SKILL.md) each role writes a **fragment** and
+`graph_merge.py` unions them into `graph.json`. Two consequences belong here.
 
 **Validity is not compositional.** Unioning a node's `requires` can open a
 shortcut that leaves a route carrying a node it no longer needs, so two
@@ -212,10 +203,8 @@ fragments that each validate can merge into a graph that does not. The merge
 revalidates and writes nothing when that happens.
 
 **A cut recording only survivors asserts a defense was applied, and nothing
-checks that.** Survivor citations are exempt from the discriminator, because
-reproducing on the repaired build is what surviving means, so a survivors-only
-cut rests on the author having read the fixed build. Reconciling it against the
-study's own account is what catches a mistake here.
+checks that.** Survivor citations are exempt from the discriminator, so such a
+cut rests entirely on the author having read the fixed build.
 
 Shallowness is **not** a validation error, deliberately. A one-node route is
 recorded and labelled `shallow` by the analyzer, so a graph over a rejected

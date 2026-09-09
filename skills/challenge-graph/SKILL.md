@@ -77,13 +77,12 @@ notes in `/tmp`, and never open a file under the study directory for writing.
    no section by either name. Locate the material by content and continue; a
    missing heading is not a reason to stop.
 
-3. **Dispatch SEED.** Use the opening prompt in
-   [roles.md](references/roles.md), attached unchanged along with
-   [graph-schema.md](references/graph-schema.md) and the *Authoring procedure*
-   below. Give it the study directory, the scope registry, and
-   `<out>/roles/seed.json` as its fragment path.
+3. **Dispatch SEED** with [roles.md](references/roles.md) and
+   [graph-schema.md](references/graph-schema.md) attached unchanged, using the
+   SEED opening prompt in the first. Give it the study directory, the scope
+   registry, and `<out>/roles/seed.json` as its fragment path.
 
-   If independent agents are unavailable, follow the authoring procedure
+   If independent agents are unavailable, follow roles.md's authoring procedure
    yourself, write the result straight to `<out>/graph.json` instead of a
    fragment, and skip to step 9. Report `roles: root_only` in the handoff, and
    never read a single-role result as terminal.
@@ -106,13 +105,10 @@ notes in `/tmp`, and never open a file under the study directory for writing.
      --scope-registry <analysis-root>/skills/challenge-create/references/attack-scopes.json
    ```
 
-6. **Dispatch EXPAND** with [roles.md](references/roles.md),
-   [graph-schema.md](references/graph-schema.md), and the *Authoring procedure*
-   below attached unchanged — it authors nodes too, so the severability test
-   binds it as much as SEED — plus SEED's fragment, that analysis, the study,
-   its evidence, the scope registry, and `<out>/roles/expand.json` and
-   `<out>/roles/expand.md` as its two output paths. Use the EXPAND opening
-   prompt in [roles.md](references/roles.md). EXPAND is blind to nothing.
+6. **Dispatch EXPAND** with the same two files and the EXPAND opening prompt,
+   plus SEED's fragment, that analysis, the study, its evidence, the scope
+   registry, and `<out>/roles/expand.json` and `<out>/roles/expand.md` as its
+   two output paths.
 
 7. **Merge.** Never hand-edit a fragment and never assemble `graph.json`
    yourself:
@@ -125,20 +121,13 @@ notes in `/tmp`, and never open a file under the study directory for writing.
      --scope-registry <analysis-root>/skills/challenge-create/references/attack-scopes.json
    ```
 
-   Each fragment validates alone, so a duplicated `symbol` only appears when
-   the union names one application function twice; the merged revalidation
-   rejects it. Two *different* names for one function still get
-   through, which is what `NODE-MERGE` below is for.
-
    To refuse one of EXPAND's routes, pass `--refute <PATH-ID>=<reason>`. The
    reason lands in `merge.json`. There is no other way to drop a route, which
    is the point: you own the deliverable, so a refusal must be on the record.
 
-   Fragments each validate alone, but the union can still fail: widening a
-   node's `requires` can open a shortcut that leaves an EXPAND route carrying a
-   node it no longer needs. The merge writes nothing when that happens.
-   Re-dispatch the owning role with the message; never repair a fragment by
-   hand.
+   Fragments each validate alone, but their union can still fail; the merge
+   writes nothing when it does. Re-dispatch the owning role with the message,
+   and never repair a fragment by hand.
 
    When EXPAND returned no fragment, copy SEED's to `<out>/graph.json`, write
    no `merge.json`, and record `expand: needs_study` with the fault it could not
@@ -201,65 +190,6 @@ notes in `/tmp`, and never open a file under the study directory for writing.
     never report agreement or disagreement with it. **Never adjust the graph to
     make it agree** — the disagreement is the finding.
 
-## Authoring procedure
-
-SEED follows this, and so does the root when no independent agent is available.
-It produces one fragment, not `graph.json`.
-
-1. Draft nodes. One `entry` for the identity and access the challenge grants
-   the attacker, one `objective` per confirmed witness and scope, and a
-   `function` for each application function or route the route passes through.
-
-   **Every function node must be something you can point at in the
-   application** — a route, a handler, a named function. Record it in `symbol`.
-   If you cannot name it, it is not a node: reconnaissance, retries, encoding,
-   and proof submission have no application artifact behind them, and the
-   attacker's observation of the result is the objective, not a node.
-
-   Authentication is normally *behind* the entry, because the challenge grants
-   the attacker its credential. Model it as a node only when the attack turns
-   on the authentication function itself.
-
-2. Decide granularity with the severability test, not by how verbosely the
-   evidence file happened to log:
-
-   > **Name a mitigation that stops this link and not its neighbour.**
-   > If you cannot, they are one node.
-
-   Two steps a single fix covers are one node. Two steps a defender could guard
-   independently are two. This is the decision that sets every number, so make
-   it against the application, not against `reproduce.py`'s output format.
-
-3. Wire each node's `requires`. Predecessors are **OR by default** — a route
-   uses one of them. Set `requires_all: true` only for a genuine conjunction,
-   such as a request that needs both an authenticated session and state stored
-   by an earlier call.
-
-   **Open each evidence file and cite a real line plus a string that is
-   actually on it.** Do not write a node from the study's prose alone when the
-   study retained output that witnesses it. Where the study retained nothing
-   else, citing `STAGE3_STUDY.md` is legitimate; the analysis reports how many
-   citations land where, so it is visible rather than hidden.
-
-4. Draft routes. Each is one walk from the entry to an objective, listing every
-   node it passes through and **nothing it could have skipped**. The validator
-   names any node the route did not need; when it does, either record the
-   shorter route or narrow the `requires` that made the shortcut possible.
-
-   A study that reproduced its chain twice recorded better evidence for one
-   route, not a second route. Add the replay to that route's `witnesses`.
-
-   Record `advisories` for each route, listing every advisory it reproduces —
-   a chained attack names several.
-
-5. Draft `observed_cuts` from the fixed-case evidence. At Stage 3 the observed
-   cut is the upstream-fixed deployment. A fragment holding only a surviving
-   route records that survivor and no blocked path; that is a legitimate cut.
-
-6. Validate, fix, and repeat until clean. A trivial one-node route is *not*
-   rejected: it validates and the analyzer labels it `shallow`, so a graph over
-   a rejected study still shows why it was rejected.
-
 ## Deliverable
 
 ```text
@@ -267,24 +197,21 @@ artifacts/projects/<PROJECT>/graph/<study-name>/
 ├── graph.json        the merged IR
 ├── analysis.json     cuts, mincut, geometry, coverage, frontier, warnings
 ├── graph.md          the diagram and summary tables
-└── roles/                 dispatched roles only; absent under `roles: root_only`
+└── roles/            dispatched roles only; absent under `roles: root_only`
     ├── seed.json             SEED's fragment
     ├── seed-analysis.json    what EXPAND was given
     ├── expand.json           EXPAND's fragment, when it found a route
     ├── expand.md             the fault, its cross-check, and every lead
-    └── merge.json            `seed` and `expand` inputs, `nodes_added`,
-                              `requires_widened`, `routes_added`,
-                              `routes_refuted` with reasons, `nodes_dropped`,
-                              `cuts_dropped` (absent when EXPAND returned
-                              no fragment)
+    └── merge.json            what merged and what was refused
 ```
 
 Report the study and reproduced commit, the geometry and `mincut_all`, whether
 the observed cut left a surviving route, the open frontier — objectives with no
 recorded route and routes no cut has been run against — every unresolved
 `warnings` entry, and every `NOTE` where the analysis disagreed with the study.
-Carry `merge.json` into the handoff: every route you refuted and why, and
-whatever the merge dropped with it (`nodes_dropped`, `cuts_dropped`).
+Carry `merge.json` into the handoff: every route you refuted and why, whatever
+the merge dropped with it (`nodes_dropped`, `cuts_dropped`), and any SEED node
+the union changed (`requires_widened`).
 Report EXPAND's fault and whether `implicated_nodes` agreed, the cuts its
 routes eliminated, its surviving leads, and `needs_study` when it found no
 route. When `citation_sources` shows citations resolving outside
@@ -302,9 +229,6 @@ nothing else to tear down, because this skill starts nothing.
   graph property as an admission criterion.
 - Never report a terminal reading as proof that no other attack path exists. A
   role that found nothing is `needs_study`.
-- The entry set is the one author claim the analysis cannot check, because a
-  node declared `entry` is excluded from every cut. Make it the identity the
-  challenge grants, nothing more.
 - Root cause never becomes a node or a field. It is a stated reading with a
   computed cross-check, because the same two chains are one weakness or two
   depending on where the modeler stands.

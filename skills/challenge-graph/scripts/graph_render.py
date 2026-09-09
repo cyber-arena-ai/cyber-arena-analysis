@@ -91,15 +91,13 @@ def report(graph: Graph, analysis: dict, warnings: list[dict]) -> str:
         f"`mincut_all` **{analysis['mincut_all']}**, "
         f"{len(graph.paths)} recorded path(s), {len(graph.by_role('objective'))} objective(s).",
         "",
-        "Cuts are computed over the *recorded* routes and exclude the terminals: "
-        "the entry is the identity the challenge grants the attacker, so severing "
-        "it is not a defense of this boundary. A larger min-cut is sound; a small "
-        "one may only mean no further route was recorded yet.",
-        "",
-        "**This graph does not say which cuts are allowed.** That needs the "
-        "functionality checker and belongs to challenge authoring. The entry set "
-        "is an unchecked author claim: a node declared `entry` is excluded from "
-        "every cut, so check that it really is the identity the challenge grants.",
+        "Cuts are computed over the *recorded* routes and exclude the terminals, "
+        "so a larger min-cut is sound while a small one may only mean no further "
+        "route was recorded yet. **This graph does not say which cuts are "
+        "allowed** — that needs the functionality checker and belongs to challenge "
+        "authoring. The entry set is an unchecked author claim: a node declared "
+        "`entry` leaves every cut, so check that it really is the identity the "
+        "challenge grants the attacker.",
         "",
         diagram(graph, analysis),
         "",

@@ -77,7 +77,7 @@ def _table(header: list[str], rows: list[list[str]]) -> str:
     if not rows:
         return "_none_\n"
     out = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
-    out += ["| " + " | ".join(r) + " |" for r in rows]
+    out += ["| " + " | ".join(_label(c) for c in r) + " |" for r in rows]
     return "\n".join(out) + "\n"
 
 
@@ -111,7 +111,7 @@ def report(graph: Graph, analysis: dict, warnings: list[dict]) -> str:
                 [
                     node_id,
                     str(node.get("role")),
-                    _label(node.get("symbol") or "—"),
+                    str(node.get("symbol") or "—"),
                     (" **and** " if node.get("requires_all") else " *or* ").join(
                         node.get("requires") or []
                     )
@@ -173,9 +173,10 @@ def report(graph: Graph, analysis: dict, warnings: list[dict]) -> str:
             ["kind", "target"],
             [[item["kind"], item["target"]] for item in analysis["frontier"]],
         ),
-        f"Citations resolving inside `evidence_root`: "
-        f"**{analysis['citation_sources']['inside_evidence_root']}**; "
-        f"elsewhere in the study: **{analysis['citation_sources']['elsewhere']}**.",
+        f"Citations resting on the study document: "
+        f"**{analysis['citation_sources']['study_document']}**; "
+        f"citing retained output: "
+        f"**{analysis['citation_sources']['retained_evidence']}**.",
         "",
         "## Citation warnings",
         "",

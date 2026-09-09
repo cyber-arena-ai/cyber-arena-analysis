@@ -20,6 +20,10 @@ Two dispatched roles and a root. Attach this file unchanged to both roles.
   nothing, which halves the min-cut and manufactures a `disjoint` reading.
   `symbol` is required on every function node and never repeats; `title` and
   `evidence` may differ, and SEED's are kept.
+- **Narrow a redeclared node's `requires` to the predecessors your own routes
+  use.** Copying SEED's list verbatim names nodes your fragment does not carry,
+  and it fails your own `graph_validate.py` gate with `requires has unknown
+  node`. The merge unions the two lists back together.
 - Everything in a fragment was reproduced. A route with no citable line is not
   a route.
 - Neither role edits the study directory, and neither starts a container,
@@ -62,8 +66,8 @@ fragment, not `graph.json`.
    **Open each evidence file and cite a real line plus a string that is
    actually on it.** Do not write a node from the study's prose alone when the
    study retained output that witnesses it. Where the study retained nothing
-   else, citing `STAGE3_STUDY.md` is legitimate; the analysis reports how many
-   citations land where, so it is visible rather than hidden.
+   else, citing `STAGE3_STUDY.md` is legitimate; the analysis counts those
+   citations, so it is visible rather than hidden.
 
 4. Draft routes. Each is one walk from the entry to an objective, listing every
    node it passes through and **nothing it could have skipped**. The validator
@@ -104,7 +108,7 @@ Objectives:
 - <node id> — <store> · <scope>
 Routes:
 - <path id> — <advisories, or none> — <witness count>
-Cited outside evidence_root: <each node or route citing the study document>
+Citing STAGE3_STUDY.md: <each node or route resting on prose, or none>
 ```
 
 ## EXPAND
@@ -130,7 +134,8 @@ Cited outside evidence_root: <each node or route citing the study document>
    because the fault is one named thing in the application:
 
    - other routes that reach the same fault;
-   - other objectives the same fault exposes.
+   - other objectives the same fault exposes — report these as **leads**. Only
+     SEED declares objectives (CH-4), and the merge rejects one you add.
 
 3. **Then, only where the study's own evidence suggests a second defect,**
    look for a route that avoids one of the cuts in `minimum_cuts_all`. This is
@@ -138,11 +143,12 @@ Cited outside evidence_root: <each node or route citing the study document>
    work correctly.
 
 4. **Say how the observed cut treated your routes.** Read the fixed-build
-   evidence and record each new route under the *same cut id SEED used* — two
-   ids for one defense split the reading, so a route that escaped it would not
-   show up against the cut it escaped. A fragment whose routes all survived
-   records them under `survived` with an empty `blocked`; that is a legitimate
-   cut and the point of the schema allowing it.
+   evidence and record each new route under the *same cut id and `reference`
+   SEED used* — one id with two references is rejected, and so is one reference
+   under two ids, because splitting a defense in two hides that a route escaped
+   it. A fragment whose routes all survived records them under `survived` with
+   an empty `blocked`; that is a legitimate cut, and the point of the schema
+   allowing it.
 
 5. **Cite or downgrade.** A route needs a real line in retained evidence, like
    any other. A route you believe in but cannot cite is a **lead**: name it,
@@ -169,7 +175,7 @@ empty one.
 ### Opening prompt
 
 ```text
-You are the EXPAND role for the challenge graph over Stage 3 study `<study-dir>`. You are given SEED's graph, its analysis, the study, and its evidence; you are blind to nothing. Identify the fault the study reproduced, then find further routes that reach that fault, and further objectives it exposes. Write them as one fragment at `<out>/roles/expand.json` that passes graph_validate.py --study-dir `<study-dir>` --scope-registry `<scope-registry>` on its own, and write your fault, its cross-check, and every lead to `<out>/roles/expand.md`. Copy any node SEED already declared under its exact id. You may add function nodes and routes; you may not add an entry or an objective. Return only the EXPAND response defined in the attached roles reference.
+You are the EXPAND role for the challenge graph over Stage 3 study `<study-dir>`. You are given SEED's graph, its analysis, the study, and its evidence; you are blind to nothing. Identify the fault the study reproduced, then find further routes that reach that fault, and report any further objective it exposes as a lead rather than a node. Write your routes as one fragment at `<out>/roles/expand.json` that passes graph_validate.py --study-dir `<study-dir>` --scope-registry `<scope-registry>` on its own, and write your fault, its cross-check, and every lead to `<out>/roles/expand.md`. Redeclare any node SEED already declared under its exact id and symbol, narrowing only its requires to your own predecessors. You may add function nodes and routes; you may not add an entry or an objective. Return only the EXPAND response defined in the attached roles reference.
 ```
 
 ### Response
@@ -182,7 +188,7 @@ Fragment: <absolute path, or none>
 Routes added: <path ids, or none>
 Cuts eliminated: <cuts from minimum_cuts_all a new route avoids, or none>
 Leads:
-- Claim: <the route the fault suggests>
+- Claim: <the route, or the objective, the fault suggests>
   Reaches the fault by: <one sentence>
   Exact check: <the one command or request that would settle it>
 Needs study: <when no route was found: the fault, and the search that failed>

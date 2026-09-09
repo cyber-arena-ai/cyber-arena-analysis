@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -445,10 +446,14 @@ def test_a_graph_without_evidence_root_may_cite_the_study_document(tmp_path):
 
 def test_citation_sources_expose_a_graph_built_from_study_prose(tmp_path):
     graph = _graph()
-    _node(graph, "N-create-share")["evidence"] = _cite("STAGE3_STUDY.md#L1", "The attacker resolves")
     graph.pop("evidence_root")
-    analysis = _analyze(tmp_path, graph)
-    assert analysis["citation_sources"]["elsewhere"] >= 1
+    before = _analyze(tmp_path, graph)["citation_sources"]
+    assert before["study_document"] == 0
+
+    _node(graph, "N-create-share")["evidence"] = _cite("STAGE3_STUDY.md#L1", "The attacker resolves")
+    after = _analyze(tmp_path, graph)["citation_sources"]
+    assert after["study_document"] == 1
+    assert after["retained_evidence"] == before["retained_evidence"] - 1
 
 
 def test_fabricated_cut_evidence_is_rejected(tmp_path):
@@ -673,6 +678,23 @@ def test_a_survived_route_stays_solid_in_the_diagram(tmp_path):
     assert len(dashed) < len(edges), "a survived branch must stay solid"
 
 
+def test_the_dashed_edges_enter_the_implicated_nodes(tmp_path):
+    """The caption says dashed edges enter a node the observed cut implicated,
+    and these are the only place graph.md shows what the cut reached."""
+    graph = _graph()
+    body = _render(tmp_path, graph)
+    implicated = set(_analyze(tmp_path, graph)["observed_cuts"][0]["implicated_nodes"])
+    assert implicated, "the fixture must implicate something for this to mean anything"
+
+    edges = [line.split("-->") for line in body.splitlines() if "-->" in line]
+    targets = [target.strip() for _, target in edges]
+    marked = {int(line.split()[1]) for line in body.splitlines() if "linkStyle" in line}
+
+    safe = {re.sub(r"\W", "_", node_id) for node_id in implicated}
+    assert {targets[i] for i in marked} == safe
+    assert marked == {i for i, target in enumerate(targets) if target in safe}
+
+
 def test_the_report_names_each_node_s_code_symbol(tmp_path):
     assert "ShareController.create" in _render(tmp_path, _graph())
 
@@ -870,23 +892,16 @@ def test_a_healthy_graph_emits_no_citation_warning(tmp_path):
     assert _analyze(tmp_path, _graph())["warnings"] == []
 
 
-def test_citation_sources_follow_a_nested_evidence_root(tmp_path):
-    """Counting only the first path segment inverted the one signal that says a
-    graph rests on the study's prose."""
-    study = _study(tmp_path)
-    (study / "evidence" / "run1").mkdir()
-    for name, body in EVIDENCE.items():
-        (study / "evidence" / "run1" / name).write_text(body, encoding="utf-8")
+def test_citation_sources_do_not_depend_on_evidence_root(tmp_path):
+    """Anchored to that field the count was one bit: declared, every locator is
+    inside it by construction; omitted, none can be. It reported whether the
+    field existed, not where the reading rests."""
+    declared = _analyze(tmp_path, _graph())["citation_sources"]
     graph = _graph()
-    graph["evidence_root"] = "evidence/run1"
-    payload = json.dumps(graph).replace('"evidence/', '"evidence/run1/')
-    graph = json.loads(payload)
-    graph["evidence_root"] = "evidence/run1"
-    out = tmp_path / "derived" / "analysis.json"
-    result = _run("graph_analyze.py", tmp_path, graph, "--out", str(out), study=study)
-    assert result.returncode == 0, result.stderr
-    sources = json.loads(out.read_text(encoding="utf-8"))["citation_sources"]
-    assert sources["elsewhere"] == 0 and sources["inside_evidence_root"] > 0
+    graph.pop("evidence_root")
+    assert _analyze(tmp_path, graph)["citation_sources"] == declared
+    assert declared["study_document"] == 0
+    assert declared["retained_evidence"] > 0
 
 
 # --- multi-role merge -------------------------------------------------------
@@ -1001,7 +1016,6 @@ def test_merge_will_not_widen_a_conjunction(tmp_path):
         node = _node(graph, "N-obj")
         node["requires"] = [node["requires"][0], extra]
         node["requires_all"] = True
-        _path(graph, graph["paths"][0]["id"])["nodes"].insert(-1, extra)
     result, _, _ = _merge(tmp_path, seed, expand)
     assert result.returncode == 1
     assert "sets requires_all" in result.stderr
@@ -1099,11 +1113,19 @@ def test_a_refutation_needs_a_reason(tmp_path):
 
 
 def test_merge_rejects_a_node_the_fragments_identify_differently(tmp_path):
-    expand = _expand()
-    _node(expand, "N-obj")["store"] = "some_other_store"
-    result, _, _ = _merge(tmp_path, _seed(), expand)
-    assert result.returncode == 1
-    assert "fragments disagree on node N-obj: store" in result.stderr
+    """A scope disagreement is a disagreement about what asset class was reached."""
+    disagreements = [
+        ("N-obj", "store", "some_other_store"),
+        ("N-obj", "scope", "app.same_boundary.read"),
+        ("N-obj", "requires_all", True),
+        ("N-entry", "symbol", "Some.other.symbol"),
+    ]
+    for node_id, field, value in disagreements:
+        expand = _expand()
+        _node(expand, node_id)[field] = value
+        result, _, _ = _merge(tmp_path, _seed(), expand)
+        assert result.returncode == 1, f"{field} merged silently"
+        assert f"fragments disagree on node {node_id}: {field}" in result.stderr
 
 
 def test_seeds_declaration_wins_where_the_fragments_may_differ(tmp_path):
@@ -1173,17 +1195,41 @@ def test_merge_rejects_two_defenses_sharing_one_cut_id(tmp_path):
     assert "fragments disagree on the reference of cut CUT-upstream" in result.stderr
 
 
+def test_the_study_document_counts_wherever_it_is_kept(tmp_path):
+    """The match is on the basename, which is what lets a graph declare
+    `evidence_root` and still rest on prose — the exception both the schema doc
+    and the docstring hedge on."""
+    study = _study(tmp_path)
+    (study / "evidence" / "STAGE3_STUDY.md").write_text(
+        "The attacker resolves the share link.\n", encoding="utf-8"
+    )
+    graph = _graph()
+    _node(graph, "N-create-share")["evidence"] = _cite(
+        "evidence/STAGE3_STUDY.md#L1", "The attacker resolves"
+    )
+    out = tmp_path / "derived" / "analysis.json"
+    result = _run("graph_analyze.py", tmp_path, graph, "--out", str(out), study=study)
+    assert result.returncode == 0, result.stderr
+    sources = json.loads(out.read_text(encoding="utf-8"))["citation_sources"]
+    assert sources["study_document"] == 1
+
+
 def test_a_symbol_cannot_break_the_rendered_table(tmp_path):
     """`symbol` became mandatory on every function node, so it is the cell most
     likely to carry a pipe: unescaped it adds a phantom column."""
     graph = _graph()
     _node(graph, "N-create-share")["symbol"] = 'Router.match GET /a|/b "x"'
-    rows = [
-        line for line in _render(tmp_path, graph).splitlines()
-        if line.startswith("| N-create-share |")
-    ]
+    graph["observed_cuts"][0]["reference"] = "upstream|fix"
+    body = _render(tmp_path, graph)
+
+    rows = [line for line in body.splitlines() if line.startswith("| N-create-share |")]
     assert len(rows) == 1
     assert rows[0].count("|") == 5, rows[0]
+
+    # Every cell is escaped, not just the one that was reported.
+    cuts = [line for line in body.splitlines() if line.startswith("| CUT-upstream |")]
+    assert len(cuts) == 1
+    assert cuts[0].count("|") == 6, cuts[0]
 
 
 def test_the_record_names_which_fragment_was_which(tmp_path):
@@ -1206,3 +1252,39 @@ def test_a_blank_cut_reference_says_only_that(tmp_path):
             cut["reference"] = "  "
     result = _fails(tmp_path, mutate, "cut CUT-upstream.reference must be a non-empty string")
     assert "record the same defense" not in result.stderr
+
+
+def test_a_route_may_not_list_one_node_twice(tmp_path):
+    """Every computed set ignores the repeat, so it only inflates the node count
+    the renderer prints for that route."""
+    def mutate(graph):
+        _path(graph, "PATH-pov")["nodes"].insert(-1, "N-create-share")
+    _fails(tmp_path, mutate, "path PATH-pov lists N-create-share more than once")
+
+
+def test_a_truncated_cut_listing_says_so():
+    """The work cap can fire after the first cuts are found, listing a subset that
+    is not over the listing cap. Unreported, a partial listing would read as the
+    complete set of cheapest defenses.
+
+    Driven by lowering the cap rather than by a large input: the real threshold
+    needs 289 routes and seven seconds, and the cap is a tuning constant.
+    """
+    sys.path.insert(0, str(SCRIPTS))
+    import _graph
+
+    routes = [frozenset({f"a{i}", f"b{j}"}) for i in range(6) for j in range(6)]
+    listed, size, truncated = _graph.minimal_cuts(routes)
+    assert (size, len(listed), truncated) == (6, 2, False), "both cuts, untruncated"
+
+    original = _graph.MAX_SEARCH_NODES
+    try:
+        # Tuned to land between "found one cut" and "found both": below this the
+        # search reports no size at all, above it there is nothing to truncate.
+        _graph.MAX_SEARCH_NODES = 100
+        listed, size, truncated = _graph.minimal_cuts(routes)
+    finally:
+        _graph.MAX_SEARCH_NODES = original
+    assert size == 6, "the min-cut size stays sound"
+    assert len(listed) == 1, "the search stopped short of both cuts"
+    assert truncated, "a partial listing must say it is partial"

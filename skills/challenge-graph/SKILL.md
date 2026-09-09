@@ -84,8 +84,10 @@ notes in `/tmp`, and never open a file under the study directory for writing.
 
    If independent agents are unavailable, follow roles.md's authoring procedure
    yourself, write the result straight to `<out>/graph.json` instead of a
-   fragment, and skip to step 9. Report `roles: root_only` in the handoff, and
-   never read a single-role result as terminal.
+   fragment, and skip to step 9. There is no second fragment and no merge, so
+   the deliverable carries no `merge.json` and none of the accountability one
+   would give it. Report `roles: root_only` in the handoff, and never read a
+   single-role result as terminal.
 
 4. **Gate on SEED.** Validate its fragment. A fragment whose evidence does not
    resolve does not get to spend the second dispatch:
@@ -122,8 +124,11 @@ notes in `/tmp`, and never open a file under the study directory for writing.
    ```
 
    To refuse one of EXPAND's routes, pass `--refute <PATH-ID>=<reason>`. The
-   reason lands in `merge.json`. There is no other way to drop a route, which
-   is the point: you own the deliverable, so a refusal must be on the record.
+   reason lands in `merge.json`. The union is otherwise mechanical, so no route
+   leaves this step unrecorded — you own the deliverable, and a refusal has to
+   be on the record. The other way a route can disappear is a re-dispatch,
+   which replaces a fragment wholesale; that is why step 8 makes you record
+   those too.
 
    Fragments each validate alone, but their union can still fail; the merge
    writes nothing when it does. Re-dispatch the owning role with the message,
@@ -149,8 +154,14 @@ notes in `/tmp`, and never open a file under the study directory for writing.
 
    Classify each `CONFIRMED` or `REFUTED` against re-read evidence. A confirmed
    contest is repaired by re-dispatching the owning role, never by editing its
-   fragment. Adjudicate EXPAND's leads the same way and carry the surviving
-   ones into the report; they are not nodes and change no number.
+   fragment. **A confirmed change to SEED's node set invalidates EXPAND's
+   fragment**: EXPAND wrote its routes against ids and symbols that no longer
+   exist, and a split node's new symbols mean the duplicate guard cannot see the
+   alias. Re-dispatch EXPAND too, then merge and analyze again. Record every
+   re-dispatch and why in the handoff; nothing else does.
+
+   Adjudicate EXPAND's leads the same way and carry the surviving ones into the
+   report; they are not nodes and change no number.
 
 9. **Analyze and render** the merged graph:
 
@@ -166,9 +177,11 @@ notes in `/tmp`, and never open a file under the study directory for writing.
    All four scripts revalidate, so no deliverable can be produced from a graph
    whose evidence does not resolve.
 
-10. Resolve every `warnings` entry before reporting. A route's witness that
-    also appears in the fixed-build evidence does not show the objective was
-    reached — find a line that differs across builds, or say why none exists.
+10. Resolve every `warnings` entry before reporting. A witness that reads the
+    same on the line its own route's `blocked` entry cites does not show the
+    objective was reached — find a line that differs across builds, or say why
+    none exists. Nothing is checked for a route no cut blocked, so an empty
+    `warnings` can also mean there was nothing to compare against.
 
 11. Reconcile the analysis against the study's own recorded decision. Compare
     `geometry`, `mincut_all`, `mincut_nontrivial`, `cuts_truncated`, and each
@@ -214,9 +227,9 @@ the merge dropped with it (`nodes_dropped`, `cuts_dropped`), and any SEED node
 the union changed (`requires_widened`).
 Report EXPAND's fault and whether `implicated_nodes` agreed, the cuts its
 routes eliminated, its surviving leads, and `needs_study` when it found no
-route. When `citation_sources` shows citations resolving outside
-`evidence_root`, say so: that part of the reading rests on the study's own
-prose.
+route. Report `citation_sources`: it counts the citations resting on
+`STAGE3_STUDY.md` rather than on retained output, and that part of the reading
+is the study's own prose.
 
 ## Cleanup
 

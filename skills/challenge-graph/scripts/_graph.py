@@ -17,6 +17,7 @@ HEX40 = re.compile(r"^[0-9a-f]{40}$")
 MAX_LISTED_CUTS = 32
 MAX_SEARCH_NODES = 200_000
 MIN_OBSERVED = 8
+STUDY_DOCUMENT = "STAGE3_STUDY.md"
 
 
 class Graph:
@@ -88,13 +89,16 @@ def minimal_cuts(node_sets: list[frozenset[str]]) -> tuple[list[frozenset[str]],
         return [], None, False
     for size in range(1, len(node_sets) + 1):
         found: set[frozenset[str]] = set()
-        budget = [MAX_SEARCH_NODES]
-        _search(node_sets, size, frozenset(), found, budget)
+        work = [MAX_SEARCH_NODES]
+        _search(node_sets, size, frozenset(), found, work)
         if found:
             listed = sorted(found, key=sorted)
-            truncated = len(listed) > MAX_LISTED_CUTS or budget[0] <= 0
+            # The work cap can fire after some cuts are found, which lists a
+            # subset without it being over the listing cap; unreported, a partial
+            # listing would read as the complete set of cheapest defenses.
+            truncated = len(listed) > MAX_LISTED_CUTS or work[0] <= 0
             return listed[:MAX_LISTED_CUTS], size, truncated
-        if budget[0] <= 0:
+        if work[0] <= 0:
             # The exact search ran out of room. Say so rather than substitute an
             # estimate: an over-stated mincut manufactures a false `disjoint`.
             return [], None, True
@@ -103,24 +107,24 @@ def minimal_cuts(node_sets: list[frozenset[str]]) -> tuple[list[frozenset[str]],
 
 def _search(
     node_sets: list[frozenset[str]],
-    budget: int,
+    depth: int,
     chosen: frozenset[str],
     found: set[frozenset[str]],
-    remaining: list[int],
+    work: list[int],
 ) -> None:
-    remaining[0] -= 1
-    if remaining[0] <= 0:
+    work[0] -= 1
+    if work[0] <= 0:
         return
     unhit = [node_set for node_set in node_sets if not (node_set & chosen)]
     if not unhit:
         found.add(chosen)
         return
-    if budget == 0 or len(found) > MAX_LISTED_CUTS:
+    if depth == 0 or len(found) > MAX_LISTED_CUTS:
         return
     # Branching on the smallest unhit path keeps the factor as low as the data
     # allows; every cut must contain one of its nodes.
     for node in sorted(min(unhit, key=len)):
-        _search(node_sets, budget - 1, chosen | {node}, found, remaining)
+        _search(node_sets, depth - 1, chosen | {node}, found, work)
 
 
 def analyze(graph: Graph) -> dict:
@@ -178,13 +182,20 @@ def analyze(graph: Graph) -> dict:
 
 
 def _citation_sources(graph: Graph) -> dict[str, int]:
-    """Where the graph's citations land, as a fact rather than a judgment."""
-    root = graph.document.get("evidence_root")
-    counts = {"inside_evidence_root": 0, "elsewhere": 0}
+    """How many citations resolve to the study document rather than to a file.
+
+    A coverage fact about what the study retained, not a strength grade: the
+    same agent wrote `reproduce.py` and `STAGE3_STUDY.md`, which is why
+    `evidence.kind` was removed. Normally zero for a graph declaring
+    `evidence_root`, since that makes a prose citation at the study root a hard
+    error; the match is on the basename, so a study keeping the document inside
+    its evidence directory still counts.
+    """
+    counts = {"study_document": 0, "retained_evidence": 0}
     for _, evidence in _evidence_entries(graph):
         match = LOCATOR.match(str(evidence.get("locator", "")))
-        inside = root is not None and Path(match.group("path")).is_relative_to(Path(str(root)))
-        counts["inside_evidence_root" if inside else "elsewhere"] += 1
+        prose = Path(match.group("path")).name == STUDY_DOCUMENT
+        counts["study_document" if prose else "retained_evidence"] += 1
     return counts
 
 
@@ -436,6 +447,11 @@ def _path_errors(graph: Graph, path_id: str, path: dict) -> list[str]:
     if unknown:
         listed = ", ".join(str(n) for n in unknown)
         return errors + [f"path {path_id} has unknown nodes: {listed}"]
+    repeated = sorted({n for n in nodes if nodes.count(n) > 1})
+    if repeated:
+        # A route is a walk over distinct nodes; a repeat only inflates the node
+        # count the renderer prints, since every computed set ignores it.
+        return errors + [f"path {path_id} lists {', '.join(repeated)} more than once"]
 
     if graph.role(nodes[0]) != "entry":
         errors.append(f"path {path_id} must start at an entry node")
@@ -555,7 +571,7 @@ def study_errors(study_dir: Path) -> list[str]:
     """The study directory must be a real Stage 3 study, not a scratch tree."""
     if not study_dir.is_dir():
         return [f"study directory does not exist: {study_dir}"]
-    if not (study_dir / "STAGE3_STUDY.md").is_file():
+    if not (study_dir / STUDY_DOCUMENT).is_file():
         return [
             f"{study_dir} is not a Stage 3 study; no STAGE3_STUDY.md. "
             "Evidence must resolve against the study that produced it."

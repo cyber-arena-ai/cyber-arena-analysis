@@ -29,8 +29,11 @@ conventions are the ones to copy.
 | `paths` | Non-empty list of reproduced routes |
 | `observed_cuts` | Cuts that were actually run; may be empty |
 
-A schema-1 document is rejected by version, and a document still carrying
-`states` or `operations` is rejected with a message naming the change.
+A schema-1 document is rejected by version. A document declaring version 2
+while still carrying `states` or `operations` is rejected with a message naming
+the change; a real schema-1 file never reaches it, because the version check
+returns first. The five schema-1 graphs already in `artifacts/` are unreadable
+by this tooling and are not migrated.
 
 ## Nodes
 
@@ -86,7 +89,8 @@ it really is the granted starting identity.
 
 ## Paths
 
-A path is one **route**: an ordered walk from an entry node to an objective.
+A path is one **route**: an ordered walk from an entry node to an objective,
+over distinct nodes.
 
 ```json
 {"id": "PATH-pov", "objective": "N-obj-report",
@@ -172,8 +176,11 @@ means fabricating a line in a file that already exists.
 declared, must stay inside it after symlink resolution. Some studies retained
 no evidence directory at all; those graphs omit `evidence_root` and cite the
 study document, which is legitimate and reported rather than hidden —
-`citation_sources` counts how many citations land inside `evidence_root` and
-how many elsewhere.
+`citation_sources` counts them. That is a coverage fact about what the study
+retained, not the strength grade `kind` was removed for: the same agent wrote
+`reproduce.py` and the study document, so neither is better provenance than the
+other. It is normally zero for a graph declaring `evidence_root`, since that
+makes a prose citation at the study root a hard error.
 
 ## Validation
 
@@ -187,8 +194,8 @@ Validation fails when ids are not unique or references do not resolve; a
 required field is missing or malformed; evidence is missing, malformed, or does
 not resolve to its cited line; a route does not start at an entry, does not
 satisfy a node's requirements, carries an unused node, or does not end at its
-objective; a path records no witness; a cut records no path at all or lists one
-twice; or the graph is cyclic.
+objective, or lists one node twice; a path records no witness; a cut records no
+path at all or lists one twice; or the graph is cyclic.
 
 A malformed document produces an error, never a traceback.
 
@@ -229,8 +236,8 @@ still participates in cut computation, read `mincut_nontrivial` alongside
 | `observed_cuts[].implicated_nodes` | The extensional root cause: interior nodes common to every blocked route and absent from every survivor |
 | `observed_cuts[].reading` | `contestable_observed` or `terminal_over_recorded_subgraph` |
 | `frontier` | The open questions: objectives with no recorded route, and routes no cut has been run against |
-| `citation_sources` | How many citations resolve inside `evidence_root`, and how many elsewhere in the study |
-| `warnings` | A route's witness whose text also appears in the fixed-build evidence, so it cannot show the objective was reached. Survived routes are exempt: reproducing on the repaired build is what surviving means |
+| `citation_sources` | How many citations resolve to `STAGE3_STUDY.md` rather than to a file it references. A coverage fact, not a strength grade. Normally zero for a graph declaring `evidence_root`, which makes a prose citation at the study root a hard error |
+| `warnings` | A route's witness that reads the same on the exact line its own `blocked` entry cites, so it cannot show the objective was reached. A route no cut blocked is not checked at all, and a survivor is exempt: reproducing on the repaired build is what surviving means |
 
 Cuts are computed over recorded routes rather than graph reachability, so every
 result is a statement about what was reproduced. Adding routes can only raise a

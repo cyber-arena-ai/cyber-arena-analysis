@@ -7,7 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from _graph import read_graph, validate
+from _graph import load
 
 
 def main() -> int:
@@ -26,9 +26,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    document, errors = read_graph(args.graph)
-    if document is not None:
-        errors = validate(document, args.study_dir, args.scope_registry)
+    document, errors = load(args.graph, args.study_dir, args.scope_registry)
     for error in errors:
         print(error, file=sys.stderr)
     if errors:

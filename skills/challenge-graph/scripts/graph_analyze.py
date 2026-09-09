@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from _graph import Graph, analyze, read_graph, validate
+from _graph import Graph, analyze, discriminator_warnings, load
 
 
 def main() -> int:
@@ -28,19 +28,19 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    document, errors = read_graph(args.graph)
-    if document is not None:
-        errors = validate(document, args.study_dir, args.scope_registry)
+    document, errors = load(args.graph, args.study_dir, args.scope_registry)
     if errors:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
-    analysis = analyze(Graph(document))
+    graph = Graph(document)
+    analysis = analyze(graph)
+    analysis["warnings"] = discriminator_warnings(graph, args.study_dir)
     args.out.write_text(json.dumps(analysis, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"{args.out}: geometry={','.join(analysis['geometry']) or 'none'} "
-          f"mincut_all={analysis['mincut_all']}")
+          f"mincut_all={analysis['mincut_all']} warnings={len(analysis['warnings'])}")
     return 0
 
 

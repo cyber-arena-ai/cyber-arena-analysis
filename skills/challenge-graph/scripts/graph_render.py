@@ -8,22 +8,22 @@ import re
 import sys
 from pathlib import Path
 
-from _graph import Graph, analyze, read_graph, validate
+from _graph import Graph, analyze, discriminator_warnings, load
 
 SHAPES = {
     "entry": '{id}(["{label}"]):::entry',
     "objective": '{id}{{{{"{label}"}}}}:::obj',
-    "intermediate": '{id}("{label}")',
+    "function": '{id}["{label}"]:::fn',
 }
 CLASSDEFS = [
     "classDef entry fill:#eef,stroke:#446",
     "classDef obj fill:#fee,stroke:#a44,stroke-width:2px",
-    "classDef op fill:#fff,stroke:#888",
+    "classDef fn fill:#fff,stroke:#888",
 ]
 
 
 def _node(identifier: str, seen: dict[str, str]) -> str:
-    """Mermaid-safe id that stays injective: ST-m.1 and ST-m-1 must not merge."""
+    """Mermaid-safe id that stays injective: N-m.1 and N-m-1 must not merge."""
     if identifier in seen:
         return seen[identifier]
     base = re.sub(r"\W", "_", identifier)
@@ -40,39 +40,31 @@ def _label(text: str) -> str:
     return re.sub(r"\s+", " ", str(text)).replace('"', "'").replace("|", "/")
 
 
-def _state_label(state: dict) -> str:
-    if state.get("role") == "objective":
-        return f"{state.get('store')} · {state.get('scope')}"
-    return state.get("title") or state["id"]
+def _node_label(node: dict) -> str:
+    if node.get("role") == "objective":
+        return f"{node.get('store')} · {node.get('scope')}"
+    return node.get("title") or node["id"]
 
 
 def diagram(graph: Graph, analysis: dict) -> str:
     seen: dict[str, str] = {}
-    lines = ["```mermaid", "flowchart LR", *(f"  {c}" for c in CLASSDEFS), ""]
-    for state_id, state in graph.states.items():
-        shape = SHAPES.get(state.get("role"), SHAPES["intermediate"])
-        lines.append("  " + shape.format(id=_node(state_id, seen), label=_label(_state_label(state))))
-    for op_id, operation in graph.operations.items():
-        label = _label(operation.get("title") or op_id)
-        lines.append(f'  {_node(op_id, seen)}["{label}"]:::op')
+    # Top-down: authored node titles run long, and a left-to-right chain of them
+    # is many screens wide.
+    lines = ["```mermaid", "flowchart TD", *(f"  {c}" for c in CLASSDEFS), ""]
+    for node_id, node in graph.nodes.items():
+        shape = SHAPES[node["role"]]
+        lines.append(
+            "  " + shape.format(id=_node(node_id, seen), label=_label(_node_label(node)))
+        )
     lines.append("")
 
-    implicated = {
-        op
-        for cut in analysis["observed_cuts"]
-        for op in cut["implicated_operations"]
-    }
+    implicated = {n for cut in analysis["observed_cuts"] for n in cut["implicated_nodes"]}
     marked: list[int] = []
     index = 0
-    for op_id, operation in graph.operations.items():
-        for state_id in operation.get("requires", []):
-            lines.append(f"  {_node(state_id, seen)} --> {_node(op_id, seen)}")
-            if op_id in implicated:
-                marked.append(index)
-            index += 1
-        for state_id in operation.get("produces", []):
-            lines.append(f"  {_node(op_id, seen)} --> {_node(state_id, seen)}")
-            if op_id in implicated:
+    for node_id, node in graph.nodes.items():
+        for required in node.get("requires", []) or []:
+            lines.append(f"  {_node(required, seen)} --> {_node(node_id, seen)}")
+            if node_id in implicated:
                 marked.append(index)
             index += 1
     for edge in marked:
@@ -89,13 +81,8 @@ def _table(header: list[str], rows: list[list[str]]) -> str:
     return "\n".join(out) + "\n"
 
 
-def report(graph: Graph, analysis: dict) -> str:
+def report(graph: Graph, analysis: dict, warnings: list[dict]) -> str:
     target = graph.document["target"]
-    tested = {
-        path: cut["id"]
-        for cut in analysis["observed_cuts"]
-        for path in cut["blocked"] + cut["survived"]
-    }
     parts = [
         f"# Challenge graph: {target['id']}",
         "",
@@ -104,39 +91,64 @@ def report(graph: Graph, analysis: dict) -> str:
         f"`mincut_all` **{analysis['mincut_all']}**, "
         f"{len(graph.paths)} recorded path(s), {len(graph.by_role('objective'))} objective(s).",
         "",
-        "Cuts and geometry are computed over the *recorded* subgraph. A larger "
-        "min-cut is sound; a small one may only mean no further path was recorded yet.",
+        "Cuts are computed over the *recorded* routes and exclude the terminals: "
+        "the entry is the identity the challenge grants the attacker, so severing "
+        "it is not a defense of this boundary. A larger min-cut is sound; a small "
+        "one may only mean no further route was recorded yet.",
+        "",
+        "**This graph does not say which cuts are allowed.** That needs the "
+        "functionality checker and belongs to challenge authoring. The entry set "
+        "is an unchecked author claim: a node declared `entry` is excluded from "
+        "every cut, so check that it really is the identity the challenge grants.",
         "",
         diagram(graph, analysis),
         "",
-        "Dashed red edges are operations an observed cut implicated.",
+        "Dashed red edges enter a node an observed cut implicated.",
         "",
-        "## Paths",
+        "## Nodes",
         "",
         _table(
-            ["path", "objective", "operations", "nontrivial", "advisory", "observed in"],
+            ["node", "role", "symbol", "requires"],
+            [
+                [
+                    node_id,
+                    str(node.get("role")),
+                    _label(node.get("symbol") or "—"),
+                    (" **and** " if node.get("requires_all") else " *or* ").join(
+                        node.get("requires") or []
+                    )
+                    or "—",
+                ]
+                for node_id, node in graph.nodes.items()
+            ],
+        ),
+        "## Routes",
+        "",
+        _table(
+            ["path", "objective", "nodes", "interior", "chain", "advisories", "witnesses"],
             [
                 [
                     path_id,
                     str(path.get("objective")),
-                    str(len(path.get("operations", []))),
+                    str(len(path.get("nodes", []))),
+                    str(len(graph.interior(path_id))),
                     "yes" if analysis["nontrivial_paths"][path_id] else "**no**",
-                    "yes" if path.get("advisory_backed") else "no",
-                    tested.get(path_id, "—"),
+                    ", ".join(path.get("advisories") or []) or "—",
+                    str(len(path.get("witnesses") or [])),
                 ]
                 for path_id, path in graph.paths.items()
             ],
         ),
-        "## Minimum-cost cuts protecting every objective",
+        "## Candidate cuts (cheapest, admissibility not judged)",
         "",
         _table(
-            ["size", "operations"],
+            ["size", "nodes"],
             [[str(len(c)), ", ".join(c)] for c in analysis["minimum_cuts_all"]],
         ),
         "## Objective coverage",
         "",
         _table(
-            ["objective", "scope", "paths", "mincut"],
+            ["objective", "scope", "routes", "mincut"],
             [
                 [objective, str(detail["scope"]), str(len(detail["paths"])), str(detail["mincut"])]
                 for objective, detail in analysis["objective_coverage"].items()
@@ -163,6 +175,16 @@ def report(graph: Graph, analysis: dict) -> str:
             ["kind", "target"],
             [[item["kind"], item["target"]] for item in analysis["frontier"]],
         ),
+        f"Citations resolving inside `evidence_root`: "
+        f"**{analysis['citation_sources']['inside_evidence_root']}**; "
+        f"elsewhere in the study: **{analysis['citation_sources']['elsewhere']}**.",
+        "",
+        "## Citation warnings",
+        "",
+        _table(
+            ["where", "detail"],
+            [[w["where"], w["detail"]] for w in warnings],
+        ),
     ]
     return "\n".join(parts)
 
@@ -184,9 +206,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    document, errors = read_graph(args.graph)
-    if document is not None:
-        errors = validate(document, args.study_dir, args.scope_registry)
+    document, errors = load(args.graph, args.study_dir, args.scope_registry)
     if errors:
         for error in errors:
             print(error, file=sys.stderr)
@@ -194,7 +214,8 @@ def main() -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
     graph = Graph(document)
-    args.out.write_text(report(graph, analyze(graph)), encoding="utf-8")
+    warnings = discriminator_warnings(graph, args.study_dir)
+    args.out.write_text(report(graph, analyze(graph), warnings), encoding="utf-8")
     print(f"{args.out}: rendered")
     return 0
 

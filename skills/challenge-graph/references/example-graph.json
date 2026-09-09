@@ -1,82 +1,114 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "target": {
     "id": "acme-reports-share-token",
     "repository": "acme/reports",
-    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "revision": "1f0c2b7ae9d34c51886a0b2f7de41c9a3b5e6d70"
   },
   "evidence_root": "evidence",
-  "states": [
+  "nodes": [
     {
-      "id": "ST-entry",
+      "id": "N-entry",
       "role": "entry",
-      "title": "Baseline principal on the public surface"
+      "title": "baseline analyst principal with its own credential and a public report id"
     },
     {
-      "id": "ST-share-token",
-      "role": "intermediate",
-      "title": "Attacker holds a share token bound to another tenant"
+      "id": "N-create-share",
+      "role": "function",
+      "title": "POST /api/reports/{id}/share issues a share token",
+      "symbol": "ShareController.create",
+      "requires": ["N-entry"],
+      "evidence": {
+        "locator": "evidence/vulnerable.txt#L4",
+        "observed": "201 Created share=7f2ad4"
+      }
     },
     {
-      "id": "ST-obj-report-read",
+      "id": "N-resolve-share",
+      "role": "function",
+      "title": "GET /s/{token} resolves a token without re-checking report ownership",
+      "symbol": "ShareController.resolve",
+      "requires": ["N-create-share"],
+      "evidence": {
+        "locator": "evidence/vulnerable.txt#L9",
+        "observed": "200 OK owner_check=skipped"
+      }
+    },
+    {
+      "id": "N-upload-template",
+      "role": "function",
+      "title": "POST /api/templates stores an export template",
+      "symbol": "TemplateController.create",
+      "requires": ["N-entry"],
+      "evidence": {
+        "locator": "evidence/alt.txt#L3",
+        "observed": "201 Created template=t9c1"
+      }
+    },
+    {
+      "id": "N-render-template",
+      "role": "function",
+      "title": "the export renderer expands a stored template against any report id",
+      "symbol": "ExportRenderer.render",
+      "requires": ["N-entry", "N-upload-template"],
+      "requires_all": true,
+      "evidence": {
+        "locator": "evidence/alt.txt#L7",
+        "observed": "render template=t9c1 report=8812"
+      }
+    },
+    {
+      "id": "N-obj-report",
       "role": "objective",
-      "store": "report_store",
+      "store": "victim_report",
       "scope": "app.cross_boundary.read",
-      "title": "Another tenant's report body"
-    }
-  ],
-  "operations": [
-    {
-      "id": "OP-create-share",
-      "title": "create a share link for the attacker's own report",
-      "requires": ["ST-entry"],
-      "produces": ["ST-share-token"],
-      "counts_as_operation": true,
-      "evidence": {
-        "kind": "reproduced",
-        "locator": "evidence/vulnerable.txt#L12",
-        "observed": "201 Created share=7f2a"
-      }
-    },
-    {
-      "id": "OP-resolve-share",
-      "title": "resolve that token against another tenant's report id",
-      "requires": ["ST-share-token"],
-      "produces": ["ST-obj-report-read"],
-      "counts_as_operation": true,
-      "evidence": {
-        "kind": "reproduced",
-        "locator": "evidence/vulnerable.txt#L31",
-        "observed": "recovered victim report body"
-      }
+      "requires": ["N-resolve-share", "N-render-template"]
     }
   ],
   "paths": [
     {
       "id": "PATH-pov",
-      "objective": "ST-obj-report-read",
-      "operations": ["OP-create-share", "OP-resolve-share"],
-      "advisory_backed": true,
-      "evidence": {
-        "kind": "reproduced",
-        "locator": "evidence/vulnerable.txt#L31",
-        "observed": "recovered victim report body"
-      }
+      "objective": "N-obj-report",
+      "nodes": ["N-entry", "N-create-share", "N-resolve-share", "N-obj-report"],
+      "advisories": ["CVE-2026-11111"],
+      "witnesses": [
+        {
+          "locator": "evidence/vulnerable.txt#L12",
+          "observed": "recovered victim report body"
+        }
+      ]
+    },
+    {
+      "id": "PATH-template",
+      "objective": "N-obj-report",
+      "nodes": ["N-entry", "N-upload-template", "N-render-template", "N-obj-report"],
+      "advisories": [],
+      "witnesses": [
+        {
+          "locator": "evidence/alt.txt#L9",
+          "observed": "recovered victim report body"
+        }
+      ]
     }
   ],
   "observed_cuts": [
     {
       "id": "CUT-upstream",
       "reference": "upstream_fix",
-      "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "blocked": [
         {
           "path": "PATH-pov",
-          "locator": "evidence/fixed.txt#L20",
-          "observed": "403 Forbidden"
+          "locator": "evidence/fixed.txt#L9",
+          "observed": "403 Forbidden owner_check=enforced"
         }
       ],
-      "survived": []
+      "survived": [
+        {
+          "path": "PATH-template",
+          "locator": "evidence/fixed.txt#L14",
+          "observed": "recovered victim report body"
+        }
+      ]
     }
   ]
 }

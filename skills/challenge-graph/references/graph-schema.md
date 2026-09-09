@@ -1,86 +1,136 @@
-# Challenge graph schema (version 1)
+# Challenge graph schema (version 2)
 
 One `graph.json` per challenge. It records the attack structure that was
 *reproduced*, never the complete attack surface.
 
-[example-graph.json](example-graph.json) is a complete, minimal instance. Its
-conventions are the ones to copy: `target.id` is a short kebab-case name for the
-study, `store` names the trial witness in one snake_case token before Stage 4
-declares a real store, and each operation is one link of the attack chain with
-its own evidence line.
+The model is written from the defender's side. A **node** is something that
+exists in the application: an entry point the attacker starts from, a function
+or route they use, or the objective they reach. An **edge is abstract** — it
+says one node leads to the next and carries no claim of its own. A defender
+guards or disables a function, so the node is what a defense targets and a
+**cut is a set of nodes**.
+
+The graph never says which cuts are *allowed*. That needs the functionality
+checker and belongs to challenge authoring.
+
+[example-graph.json](example-graph.json) is a complete, minimal instance whose
+conventions are the ones to copy.
 
 ## Document
 
 | Field | Contract |
 |---|---|
-| `schema_version` | `1` |
-| `target.id` | Challenge or study identifier |
+| `schema_version` | `2` |
+| `target.id` | Challenge or study identifier, short kebab-case |
 | `target.repository` | `owner/project` |
 | `target.revision` | The reproduced commit, 40 lowercase hex characters |
-| `evidence_root` | Relative directory inside the study that every locator must stay within |
-| `states` | Non-empty list of state nodes |
-| `operations` | Non-empty list of operation nodes |
-| `paths` | Non-empty list of reproduced scoring paths |
+| `evidence_root` | Optional. A directory inside the study that every locator must stay within |
+| `nodes` | Non-empty list of nodes |
+| `paths` | Non-empty list of reproduced routes |
 | `observed_cuts` | Cuts that were actually run; may be empty |
 
-## States
+A schema-1 document is rejected by version, and a document still carrying
+`states` or `operations` is rejected with a message naming the change.
 
-Facts an actor holds or observes.
-
-```json
-{"id": "ST-obj-report-read", "role": "objective",
- "store": "report_store", "scope": "app.cross_boundary.read"}
-```
-
-`role` is `entry`, `objective`, or `intermediate`. A graph needs at least one
-`entry` and one `objective`. An `objective` declares `store` and `scope`; the
-scope is a registered id from `attack-scopes.json` or a fully defined
-`custom.<challenge_id>.*` scope. Before Stage 4 there is no declared store, so
-`store` names the study's trial witness — one short snake_case token, because
-the renderer prints it inside the objective node beside the scope. Other roles
-use `title`.
-
-The attacker's observation of the result is the objective state itself, not an
-operation. The operation that crosses the boundary `produces` it; do not add a
-non-counted operation for reading or submitting the proof.
-
-A line locator proves the cited line holds the text, not which block of a
-structured file it sits in: in a study whose evidence records an authorized and
-an unauthorized attempt side by side, the same `"status": 200` appears twice.
-Cite the line inside the block you mean and name the block in the operation
-title.
-
-## Operations
-
-Application-controlled operations, with AND semantics across `requires`.
+## Nodes
 
 ```json
-{"id": "OP-create-share", "title": "create share link",
- "requires": ["ST-entry"], "produces": ["ST-share-token"],
- "counts_as_operation": true,
- "evidence": {"kind": "reproduced", "locator": "evidence/pov.txt#L2",
-              "observed": "201 Created share=7f2a"}}
+{"id": "N-resolve-share", "role": "function",
+ "title": "GET /s/{token} resolves a token without re-checking ownership",
+ "symbol": "ShareController.resolve",
+ "requires": ["N-create-share"],
+ "evidence": {"locator": "evidence/vulnerable.txt#L9",
+              "observed": "200 OK owner_check=skipped"}}
 ```
 
-`counts_as_operation` is `false` for the categories contestability excludes:
-authentication, environment setup, retries, encoding, reconnaissance, and proof
-submission. Only counted operations are cut-eligible, because they are what a
-defense can meaningfully target.
+`role` is `entry`, `function`, or `objective`. A graph needs at least one of
+each terminal role.
+
+- **`entry`** — the identity and access the challenge grants the attacker, as
+  the scenario states it: *"the attacker begins as `[role]` and can use
+  `[public feature]`."* It declares `title` and must not `require` anything.
+- **`function`** — an application function, route, or handler. It declares
+  `title`, `requires`, `evidence`, and `symbol` — the code symbol or endpoint it
+  names. If you cannot name it, it is not a node.
+
+  `symbol` is unique across the document, because it is what says two nodes are
+  one node. One application function under two ids reads as two routes sharing
+  nothing, which halves the min-cut and manufactures a `disjoint` reading — a
+  false contestable result. Two *different* names for one function still pass;
+  that is a judgment, and it belongs to whoever adjudicates the graph.
+- **`objective`** — the protected asset reached. It declares `store`, `scope`,
+  and `requires` — the functions that reach it — instead of a title. Before
+  Stage 4 there is no declared store, so `store` names the study's trial
+  witness in one short snake_case token,
+  because the renderer prints it inside the node beside the scope. The scope is
+  a registered id from `attack-scopes.json` or a fully defined
+  `custom.<challenge_id>.*` scope.
+
+### Reaching a node
+
+`requires` lists the predecessors a node is reached through, and is **OR by
+default**: a route uses one of them. Set `requires_all: true` for a genuine
+conjunction — a request that needs both an authenticated session and state a
+previous call stored.
+
+The attacker's observation of the result is not a node. It is the objective,
+reached from the function that crosses the boundary. Reconnaissance and proof
+submission are not nodes either: if you cannot name the application function or
+route, it does not belong in the graph.
+
+Whether severing a node is an *admissible* defense is a judgment the graph
+cannot make — "disable login" stops most attacks and is feature amputation in
+almost every challenge. What the analysis does instead is exclude the
+terminals, which is Menger's vertex form: the entry is the identity the
+challenge granted, so severing it is not a defense of this boundary.
+
+That makes the entry set the one remaining place where an author's choice moves
+the numbers. Declaring a node `entry` removes it from every cut, so check that
+it really is the granted starting identity.
 
 ## Paths
 
+A path is one **route**: an ordered walk from an entry node to an objective.
+
 ```json
-{"id": "PATH-pov", "objective": "ST-obj-report-read",
- "operations": ["OP-create-share", "OP-resolve-share"],
- "advisory_backed": true,
- "evidence": {"kind": "reproduced", "locator": "evidence/pov.txt#L5",
-              "observed": "recovered victim report body"}}
+{"id": "PATH-pov", "objective": "N-obj-report",
+ "nodes": ["N-entry", "N-create-share", "N-resolve-share", "N-obj-report"],
+ "advisories": ["CVE-2026-11111"],
+ "witnesses": [{"locator": "evidence/vulnerable.txt#L12",
+                "observed": "recovered victim report body"}]}
 ```
 
-`operations` are ordered. The first must require an `entry` state, consecutive
-operations must share a state, and the last must produce the path's objective.
-`advisory_backed` marks the PoV. Exactly one path may be advisory-backed per
-reproduced advisory; the objective set is never derived from it (CH-4).
+`nodes` starts at an `entry`, ends at the path's `objective`, and every node in
+between is a `function`. Each node must be reached after its predecessors: at
+least one of them for a disjunction, all of them for `requires_all`.
+
+Then one rule does the real work: **a route may carry no node it could reach
+the objective without.** If dropping a node still leaves the objective
+derivable from the rest, the route is rejected and the message names that node.
+
+This exists because a path's node set becomes its element in the cut
+computation. A node the route does not depend on enlarges that set, which makes
+it easier to hit and **shrinks** the reported min-cut — and it lands in
+`minimum_cuts_all` as a defense that would not stop the attacker.
+
+It is deliberately not an adjacency check. A `requires_all` node's conjuncts
+are parallel branches, so demanding they sit next to each other would invent an
+edge the application does not have.
+
+The consequence worth knowing when authoring: if a function is genuinely
+reachable both directly and after an earlier step, the *shorter* route is the
+one to record. The longer one is rejected, because cutting the step it skips
+would not stop the attacker. If the longer route is the only real one, say so
+by narrowing that node's `requires`.
+
+`advisories` lists the advisory identifiers this route reproduces, and may be
+empty. It is documentation and affects nothing. A chained attack legitimately
+names several; a boolean could not record that.
+
+`witnesses` is a non-empty list of observations that the route reached its
+objective. It is a list because a study that re-ran its chain retained
+*better evidence for one route*, not a second route. Recording a replay as a
+second path would manufacture geometry out of one route.
 
 ## Observed cuts
 
@@ -89,69 +139,90 @@ upstream-fixed deployment, whose feature preservation is inherited from
 upstream rather than measured.
 
 ```json
-{"id": "CUT-upstream", "reference": "upstream_fix", "revision": "<40hex>",
- "blocked":  [{"path": "PATH-pov", "locator": "evidence/fixed-pov.txt#L2",
-               "observed": "403 Forbidden"}],
+{"id": "CUT-upstream", "reference": "upstream_fix",
+ "blocked":  [{"path": "PATH-pov", "locator": "evidence/fixed.txt#L9",
+               "observed": "403 Forbidden owner_check=enforced"}],
  "survived": [{"path": "PATH-alt", "locator": "evidence/fixed-alt.txt#L2",
                "observed": "recovered victim report body"}]}
 ```
 
-`blocked` must record at least one path. `survived` may be empty; that is how a
-terminal result over the recorded subgraph is written down. A path may not
-appear in both lists of one cut. Candidate cuts are computed and belong in the
-analysis output, never here.
+`reference` names the defense that was applied. It is the defense's identity,
+so **one defense gets one cut id**: recording the blocked routes under one id
+and the survivors under another leaves the first reading terminal for a defense
+a recorded route demonstrably escaped. Two cuts sharing a `reference` are
+rejected.
+
+A cut must record at least one path, in either list. `survived` may be empty;
+that is how a terminal result over the recorded subgraph is written down.
+`blocked` may be empty too — "the defense was applied and did not stop these
+routes" is exactly the contestability signal, and it is all an EXPAND fragment
+carrying only its surviving route has to say. A path may not appear in both
+lists of one cut. Candidate cuts are computed and belong in the analysis
+output, never here.
 
 ## Evidence
 
 ```json
-{"kind": "reproduced", "locator": "<path>#L<line>", "observed": "<exact text>"}
+{"locator": "<path>#L<line>", "observed": "<exact text on that line>"}
 ```
 
-`kind` is `reproduced` for raw Stage 3 output, `dynamic` for an authoritative
-artifact from a review game instance, or `recorded` for an observation the study
-tabulated rather than retained as raw output. `hypothesis` is rejected with a
-specific message: an asserted path is not evidence.
+A citation has no `kind`: the same Stage 3 agent wrote both `reproduce.py` and
+`STAGE3_STUDY.md`, so labelling one of them stronger asserted a provenance
+boundary that does not exist. A citation carrying `kind` is rejected.
 
-`reproduced` and `dynamic` must resolve inside `evidence_root`; `recorded` may
-cite any retained file in the study, including `STAGE3_STUDY.md`, because some
-studies retain only their own tables. That is weaker evidence, so the analysis
-reports it rather than hiding it. Omit `evidence_root` entirely when a graph
-carries no raw evidence.
+What the locator does enforce is that the *graph's* author — a later agent
+reading the study — cited something already written down, at an exact line,
+quoting at least 8 characters that are actually on it. Fabricating an edge
+means fabricating a line in a file that already exists.
 
-`locator` resolves against the study directory and must stay inside
-`evidence_root`, after symlink resolution. `evidence_root` may not be `.`, which
-would let the study's own prose stand in for reproduced output. `observed` must
-appear on the cited line and quote at least 8 characters, so shortening it is
-not a way to make validation pass. Together these make fabricating an edge
-require fabricating command output.
+`locator` resolves against the study directory and, when `evidence_root` is
+declared, must stay inside it after symlink resolution. Some studies retained
+no evidence directory at all; those graphs omit `evidence_root` and cite the
+study document, which is legitimate and reported rather than hidden —
+`citation_sources` counts how many citations land inside `evidence_root` and
+how many elsewhere.
 
 ## Validation
 
-All three scripts run the same validation, so a fabricated graph cannot be
-rendered or analyzed even if the validator was skipped. Each takes `--study-dir`,
-which must hold `STAGE3_STUDY.md`: a scratch directory of hand-made evidence is
-not a study and is rejected. Each also accepts `--scope-registry`.
+All four scripts run the same validation, so a fabricated graph cannot be
+rendered, analyzed, or merged even if the validator was skipped. Each takes
+`--study-dir`, which must hold `STAGE3_STUDY.md`: a scratch directory of
+hand-made evidence is not a study and is rejected. Each also accepts
+`--scope-registry`.
 
 Validation fails when ids are not unique or references do not resolve; a
-required field is missing or malformed; evidence is a hypothesis, malformed, or
-does not resolve to its cited line; a path does not start at an `entry`, does
-not chain, does not terminate at its objective, or has no counted operation; a
-cut records no blocked path or lists a path twice; or the graph is cyclic. Pass
-`--scope-registry attack-scopes.json` to also require every objective scope to
-be registered or `custom.*`.
+required field is missing or malformed; evidence is missing, malformed, or does
+not resolve to its cited line; a route does not start at an entry, does not
+satisfy a node's requirements, carries an unused node, or does not end at its
+objective; a path records no witness; a cut records no path at all or lists one
+twice; or the graph is cyclic.
 
-A malformed reference produces an error, never a traceback.
+A malformed document produces an error, never a traceback.
 
-Shallowness is **not** a validation error, deliberately. A trivial path is
+## Fragments
+
+Under [multi-role authoring](../SKILL.md) each role writes a **fragment** — a
+whole graph that validates on its own — and `graph_merge.py` unions them into
+`graph.json`, so no new validation mode exists. [roles.md](roles.md) states what
+a role must do; two consequences belong here.
+
+**Validity is not compositional.** Unioning a node's `requires` can open a
+shortcut that leaves a route carrying a node it no longer needs, so two
+fragments that each validate can merge into a graph that does not. The merge
+revalidates and writes nothing when that happens.
+
+**A cut recording only survivors asserts a defense was applied, and nothing
+checks that.** Survivor citations are exempt from the discriminator, because
+reproducing on the repaired build is what surviving means, so a survivors-only
+cut rests on the author having read the fixed build. Reconciling it against the
+study's own account is what catches a mistake here.
+
+Shallowness is **not** a validation error, deliberately. A one-node route is
 recorded and labelled `shallow` by the analyzer, so a graph over a rejected
 study still shows why it was rejected. Whether shallowness rejects a
-*challenge* is issue 17's decision, not the graph's. Because a trivial path
+*challenge* is issue 17's decision, not the graph's. Because a trivial route
 still participates in cut computation, read `mincut_nontrivial` alongside
 `mincut_all` whenever `shallow` appears.
-
-The scope registry check and the rule that one advisory backs one path are the
-author's responsibility unless `--scope-registry` is passed; the validator
-enforces nothing else about scope semantics.
 
 ## Analysis
 
@@ -159,19 +230,21 @@ enforces nothing else about scope semantics.
 
 | Output | Meaning |
 |---|---|
-| `minimum_cuts_all`, `mincut_all` | The cheapest defenses: minimum-cardinality hitting sets over the recorded paths' cut-eligible operations. A cut always exists at or below the path count, so `mincut_all` is `null` only when a path has no cut-eligible operation |
-| `mincut_nontrivial` | The same over nontrivial paths only, so a reproduced one-operation shortcut cannot inflate the headline number |
-| `cuts_truncated` | More minimum cuts exist than `max_listed_cuts`, or the search space exceeded the work cap |
-| `objective_coverage` | Per objective: its paths, minimum cuts, and mincut |
-| `geometry` | `fan_in`, `fan_out`, `disjoint`, `single_path`, or `shallow`. `shallow` is exclusive: a reproduced one-operation shortcut is the whole reading, and suppressing the others stops it from manufacturing `disjoint` |
-| `nontrivial_paths` | Per path, whether two counted operations are linked through an `intermediate` state. Counting operations alone is not enough — one request split in two is not a chain |
-| `observed_cuts[].implicated_operations` | The extensional root cause: cut-eligible operations common to the blocked paths and absent from the survivors. Excluded steps such as authentication never appear, because they cannot be cut |
+| `mincut_all` | The size of the cheapest defense over every recorded route |
+| `minimum_cuts_all` | Every cut of that size, capped at 32. Each is a set of nodes whose removal disconnects the entry from an objective, admissibility not judged |
+| `mincut_nontrivial` | The cheapest defenses over nontrivial routes only, so a reproduced one-node shortcut cannot inflate the headline number. `null` when no route is nontrivial |
+| `cuts_truncated` | More minimum cuts exist than the listing cap, or the search space exceeded the work cap |
+| `objective_coverage` | Per objective: its `scope`, its routes, and their mincut |
+| `geometry` | `fan_in`, `fan_out`, `disjoint`, `single_path`, or `shallow`. `shallow` is exclusive: a one-node route is the whole reading, and suppressing the others stops it manufacturing `disjoint` |
+| `nontrivial_paths` | Per route, whether it has two or more interior nodes |
+| `observed_cuts[].implicated_nodes` | The extensional root cause: interior nodes common to every blocked route and absent from every survivor |
 | `observed_cuts[].reading` | `contestable_observed` or `terminal_over_recorded_subgraph` |
-| `frontier` | The open questions: objectives with no recorded path, and paths no cut has been run against. Unrelated to the deferred *defense* frontier |
-| `evidence_strength` | Evidence counts by kind, and `recorded_only` when no operation or path cites raw output. A `contestable_observed` reading resting only on the study's own tables is weaker than one backed by command transcripts, and the handoff must say which it is |
+| `frontier` | The open questions: objectives with no recorded route, and routes no cut has been run against |
+| `citation_sources` | How many citations resolve inside `evidence_root`, and how many elsewhere in the study |
+| `warnings` | A route's witness whose text also appears in the fixed-build evidence, so it cannot show the objective was reached. Survived routes are exempt: reproducing on the repaired build is what surviving means |
 
-Cuts are computed over recorded paths rather than graph reachability, so every
-result is a statement about what was reproduced. Adding paths can only raise a
+Cuts are computed over recorded routes rather than graph reachability, so every
+result is a statement about what was reproduced. Adding routes can only raise a
 min-cut, so a large `mincut_all` is sound while a small one may only mean no
-further path has been recorded yet. The analyzer never emits an accept or
+further route has been recorded yet. The analyzer never emits an accept or
 reject.

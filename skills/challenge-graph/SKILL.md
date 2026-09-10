@@ -11,57 +11,49 @@ reproduced, compute cuts and geometry over it, and draw it.
 You are the **root**: the executor. You call functions — scripts and subagents —
 and own every deliverable. You do not author the graph you adjudicate.
 
-## Read first
-
-Resolve the directory holding this file as `<skill-root>`. Resolve the enclosing
-Git checkout as `<analysis-root>`, only when its origin identifies
-`cyber-arena-analysis`; otherwise stop and ask the user which checkout that is.
-Python 3.11 or newer.
-
-**Root instruction** — [contracts.md](references/contracts.md) is the root's
-deterministic function contract and the only place its script invocations are
-written. Copy from it; never restate a signature in your own words.
-
-**Role instruction** — `references/seed.md` and `references/expand.md` are
-role-facing contracts. Start each role with no inherited conversation or agent
-history (`fork_turns="none"` when using `spawn_agent`), and give it only the
-bootstrap in its workflow step; do not copy or restate the contract. Neither
-role receives `contracts.md`, `corpus.md`, or the other role's contract.
-[authoring.md](references/authoring.md) is their shared procedure; you do not
-author, but you review what it produces. End either bootstrap with: *Read the
-role contract in full, then only the instruction materials it names. Follow it
-with these input bindings and return its specified response.*
-
-**Material** — [graph-schema.md](references/graph-schema.md) and
-[corpus.md](references/corpus.md), which is yours: it is provisioning knowledge
-the roles are forbidden to act on. Read both before dispatching anything.
-
-## Input
-
-```text
-<absolute-study-dir>
-```
-
-Reject extra arguments.
-
 ## Workflow
 
 | # | Step | Consumes | Produces |
 |---|---|---|---|
-| 0 | Bind | the argument | `<out>`, `<run>` |
-| 1 | Read | `<study>` | revision, the study reading |
-| 2 | Provision | `<study>` | `<target>` |
-| 3 | SEED | `<target>`, materials | `<run>/seed.json`, `<run>/seed-analysis.json` |
-| 4 | EXPAND | SEED's fragment and analysis | `<run>/expand.json`, the EXPAND response |
-| 5 | Merge | both fragments | `graph.json`, `<run>/merge.json` |
-| 6 | Review | `graph.json`, `<study>`, `<target>` | repairs, or nothing |
-| 7 | Derive | `graph.json` | `analysis.json` |
-| 8 | Finalize | everything above | `provenance.json`, `graph.md`, `findings.md` |
+| 1 | Read instructions | this skill | root and shared contracts |
+| 2 | Bind | the invocation | `<study>`, `<out>`, `<run>`, tools |
+| 3 | Inspect inputs | the Stage 3 bundle | verified semantic and runtime inputs |
+| 4 | Provision | the verified bundle | `<target>` |
+| 5 | SEED | `<target>`, role materials | `<run>/seed.json`, `<run>/seed-analysis.json` |
+| 6 | EXPAND | SEED's fragment and analysis | `<run>/expand.json`, the EXPAND response |
+| 7 | Merge | both fragments | `graph.json`, `<run>/merge.json` |
+| 8 | Adjudicate | `graph.json`, `<study>`, `<target>` | repaired fragments, or nothing |
+| 9 | Derive | `graph.json` | `analysis.json` |
+| 10 | Finalize | everything above | `provenance.json`, `graph.md`, `findings.md` |
 
-### 0. Bind
+### 1. Read instructions
 
-Assert `<study>/STAGE3_STUDY.md` exists and the scope registry exists. Nothing
-below may discover a missing input.
+Resolve the directory holding this file as `<skill-root>`. Read
+[graph-schema.md](references/graph-schema.md) in full; it is the shared output
+contract the root later adjudicates.
+
+`references/seed.md` and `references/expand.md` are opaque role contracts. Do
+not read, copy, or restate them. Start each role with no inherited conversation
+or agent history (`fork_turns="none"` when using `spawn_agent`) and send only
+the bootstrap in its dispatch step. Neither role receives root-only
+instructions or the other role's contract. End each bootstrap
+with: *Read the role contract in full, then only the instruction materials it
+names. Follow it with these input bindings and return its specified response.*
+
+### 2. Bind
+
+The invocation is exactly one `<absolute-study-dir>`. Bind it as `<study>` and
+reject extra arguments. Resolve the enclosing Git checkout as
+`<analysis-root>` only when its origin identifies `cyber-arena-analysis`;
+otherwise ask the user which checkout to use. Use Python 3.11 or newer.
+
+Bind the fixed tool paths, then derive the two writable locations without
+creating them yet:
+
+```text
+<registry> = <analysis-root>/skills/challenge-create/references/attack-scopes.json
+<scripts>  = <skill-root>/scripts/
+```
 
 ```text
 <out> = <analysis-root>/artifacts/projects/<PROJECT>/graph/<study-name>/
@@ -77,49 +69,65 @@ from `result.json`.
 <run> = /tmp/challenge-graph/<study-name>-<run-id>/
 ```
 
-What `<run>` holds is in contracts.md's Paths table. Nothing there is a
-dependency of the deliverable. `<run-id>` is fresh per run and namespaces
-`<run>` alone: the study's own reproducer names its containers after an id it
-mints itself, which is why step 2 records that id and step 8 tears down by it.
+Use a fresh `<run-id>` for each run. `<run>` holds only intermediates; `<out>`
+holds only the final deliverable.
 
-Create `<out>` and `<run>` now, unconditionally. `<out>` holds only what
-ships.
+### 3. Inspect inputs
 
-### 1. Read
+Treat `<study>` as read-only. Before creating `<run>` or `<out>`, resolve every
+item below. Use only the defaults stated here.
 
-Read `result.json` if present and say which field gave you the revision. Read
-`STAGE3_STUDY.md` whole; the attack chain and the witness and authoring
-consequences are the semantic source. Steps 6 and 8 consume this reading.
+| Input | Source | Required or default |
+|---|---|---|
+| Semantic study | `<study>/STAGE3_STUDY.md`, read in full | Required. It must identify the attacker identity and public entrypoint, attack chain, vulnerable outcome, trial witness, and authoring consequences. |
+| Graph identity | `target.id`; `repository`; and the exact reproduced revision | `target.id` defaults from `<study-name>` by the rule below, unless the semantic study names a short kebab-case challenge or study id. `repository` and revision are required from populated fields in `result.json`, otherwise from the semantic study. For the revision use `reproduced_commit`, then the legacy `commit` or `vulnerable_commit`; never substitute `primary_commit` or `repair_commit`. |
+| Runnable reproduction | The study's own reproduction command and every environment or reproduction artifact it names | Required. It must start the studied target from a disposable copy. No runnable bundle is a terminal failure; do not dispatch the roles. |
+| Retained observations | Vulnerable, repaired, lifecycle, or shortcut evidence named by the bundle | Every named file is required and remains read-only. It guides the rerun but is not evidence for the new graph. |
+| Repaired case | The bundle's repaired build and comparison, when supplied | Default: absent. Omit `advisory_cut` when the study supplies no repaired case. |
+| Stage 3 result | `<study>/result.json` | Default: absent. When present it is metadata and an artifact manifest; its `outcome` never gates this skill. |
+| Scope registry | `<registry>` | Required external input; it is not part of the bundle. |
 
-### 2. Provision
+For the default `target.id`, lowercase `<study-name>`, replace each run of
+characters outside `a-z0-9` with `-`, and trim leading or trailing `-`.
+
+Reject an incomplete bundle. Otherwise bind `<target-id>`, `<repository>`,
+`<revision>`, and `<revision-source>`, then create `<run>` and `<out>`. SEED
+receives those resolved values; EXPAND inherits them from SEED's validated
+fragment. Neither role repairs, discovers, or defaults the bundle inputs.
+
+The semantic study, not `result.json`, supplies the attack chain, witness, and
+authoring consequences consumed during Adjudicate and Finalize.
+
+### 4. Provision
 
 **You are the only frame that touches Docker.**
 
 ```text
-graph_provision.py <study> --run <run> --reproducer "..."   ... (contracts.md)
+python3 <scripts>/graph_provision.py <study> --run <run> \
+  --reproducer "<the study's own command>"
 ```
 
-It copies the bundle to `<run>/env/`, runs the reproducer *there*, and writes
-`<run>/target.json` from what came up. Read the study for the reproducer's own
-command; the bundle shapes differ (corpus.md).
+This copies the bundle to `<run>/env/`, runs the reproducer there, and records
+what came up in `<run>/target.json`. It writes that file before later checks so
+the run remains tearable down. A non-zero exit is a terminal provisioning
+failure; do not dispatch a role.
 
-Then finish `target.json` to the shape in authoring.md, because the script
-cannot: each build's `auth_header` — the **entry principal and nothing more** —
-and what the facility seeded.
+Complete `target.json` in place without removing its teardown record:
 
-**You provision that principal; you do not go looking for one.** The reproducer
-mints its own and keeps the tokens in memory, so there is nothing to recover —
-and borrowing a principal it created would be taking an identity rather than
-issuing one. You are the facility: you started the application, and the credentials it was
-configured with are in its containers — `graph_provision.py` prints which ones it
-found and writes none of them to `target.json`, because that file goes to the
-roles. Read their values yourself, create an entry principal with the access the
-challenge grants, and record only that in `auth_header`. How to create a user is
-per-study work, and some studies configure no such credential at all. Verify the study's own baseline before dispatching anything. A study with no runnable bundle has no reproducer to run: skip
-`graph_provision.py` altogether, write `<run>/target.json` yourself with
-`none: true`, and the roles read it there — `graph_provision.py` requires a
-reproducer and treats discovering no build as a failure, because for every other
-study it is one.
+```json
+{"reproducer": {"compose_projects": ["..."]},
+ "builds": {"<name>": {"base_url": "http://127.0.0.1:<port>",
+                          "auth_header": "<header name>: <value>"}},
+ "seeded": "<what the facility planted and how to recognise it>"}
+```
+
+Resolve any ambiguous `base_url`, set each `auth_header` to the entry principal
+and nothing more, and make the seeded value recognisable.
+
+Create the entry principal declared by the study; do not reuse an identity the
+reproducer created. Use the facility credentials printed by
+`graph_provision.py` when needed, record only the entry principal in
+`auth_header`, and verify its baseline before dispatching.
 
 `probe.py` sends HTTP, and it is the roles' fast path rather than their only
 one. A study whose attack is a broker protocol, a WebSocket or a `git` transport
@@ -128,19 +136,23 @@ exchange with `probe.py --record`. What you owe them is a target they can reach 
 if the bundle publishes no host port, or the attack needs the study's own
 attacker container, say so in `seeded` so a role is not left guessing.
 
-### 3. SEED
+### 5. SEED
 
-Dispatch SEED with only this bootstrap, after resolving every path:
+Dispatch SEED with only this bootstrap, after resolving every binding:
 
 ```text
 Role contract: <skill-root>/references/seed.md
 Inputs:
-  study    = <study>
-  registry = <registry>
-  scripts  = <scripts>
-  run      = <run>
-  target   = <run>/target.json
-  fragment = <run>/seed.json
+  study           = <study>
+  registry        = <registry>
+  scripts         = <scripts>
+  run             = <run>
+  target          = <run>/target.json
+  fragment        = <run>/seed.json
+  target_id       = <target-id>
+  repository      = <repository>
+  revision        = <revision>
+  revision_source = <revision-source>
 ```
 
 While it runs, `<run>/seed.progress`
@@ -148,15 +160,17 @@ is where you look: the age of its last line is how you tell a working role from 
 dead one. Then gate and analyze:
 
 ```text
-graph_validate.py <run>/seed.json                              ... (contracts.md)
-graph_analyze.py  <run>/seed.json --out <run>/seed-analysis.json  ... (contracts.md)
+python3 <scripts>/graph_validate.py <run>/seed.json \
+  --scope-registry <registry>
+python3 <scripts>/graph_analyze.py <run>/seed.json \
+  --out <run>/seed-analysis.json --scope-registry <registry>
 ```
 
-A fragment whose evidence does not hold up does not get to spend the second
-dispatch. On rejection, re-dispatch SEED with the message; never repair a
-fragment by hand.
+The validator writes nothing; the analyzer writes cuts, geometry, and objective
+coverage. Do not dispatch EXPAND unless both succeed. On rejection, return the
+message to SEED; never repair its fragment by hand.
 
-### 4. EXPAND
+### 6. EXPAND
 
 After SEED returns, dispatch EXPAND with only this bootstrap, after resolving
 every path:
@@ -185,16 +199,22 @@ every unsettled claim carries `Blocked by`, and `Needs study`, when EXPAND found
 no route, names a search. A claim whose check EXPAND could have run is
 unfinished work — send it back.
 
-### 5. Merge
+### 7. Merge
 
 ```text
-graph_merge.py <run>/seed.json --expand <run>/expand.json  ... (contracts.md)
+python3 <scripts>/graph_merge.py <run>/seed.json \
+  --expand <run>/expand.json \
+  --out <out>/graph.json --record <run>/merge.json \
+  --scope-registry <registry>
 ```
 
-Never assemble `graph.json` yourself, and never drop a route here: a route
-leaves the graph only by re-dispatching the role that wrote it, at step 6.
+EXPAND's fragment is required even when its `paths` is empty. The merger
+validates both fragments and their union, assigns final route ids in
+SEED-then-EXPAND order, and records attribution in `merge.json`. Never assemble
+`graph.json` yourself or drop a route; a route leaves only through Adjudicate
+re-dispatching its author.
 
-### 6. Review
+### 8. Adjudicate
 
 Re-read every cited construct in full. You saw SEED's reasoning as its
 dispatcher, so the artifact and its evidence are what you check, not the
@@ -210,18 +230,35 @@ Review writes no record of itself — you would be attesting to your own
 diligence, and a run that reviewed nothing could write the same words. What it
 leaves behind is the change it caused, in `graph.json`.
 
+Route a rejection to the owner of its input: root corrects root-owned inputs;
+SEED or EXPAND corrects a fragment named in the error; an error created by the
+union is adjudicated here. Never repair a role artifact or merged graph by hand.
+
 Repair a `Repair` finding by re-dispatching the role that wrote the subject.
 **Changing SEED's node set invalidates EXPAND's fragment** — its routes name ids
 and symbols that no longer exist — so re-dispatch EXPAND too and return to
-step 4. Otherwise return to step 5. At most two passes; then abort.
+EXPAND. Otherwise return to Merge. At most two passes; then abort.
 
-### 7. Derive
+### 9. Derive
 
 ```text
-graph_analyze.py <out>/graph.json --out <out>/analysis.json   ... (contracts.md)
+python3 <scripts>/graph_analyze.py <out>/graph.json \
+  --out <out>/analysis.json --scope-registry <registry>
 ```
 
-### 8. Finalize
+The analyzer writes only facts over the recorded routes:
+
+| Field | Meaning |
+|---|---|
+| `mincut_all` | Smallest number of function nodes that intersects every route; entries and objectives are excluded. |
+| `objective_coverage` | Each objective's scope, route count, and route min-cut. |
+| `geometry` | Shape labels: `fan_out` when one function reaches multiple objectives, `fan_in` when multiple routes to one objective share a one-node cut, and `disjoint` when `mincut_all` is at least two. No label is also valid. |
+
+Adding routes can raise a min-cut size. A small size may therefore mean only
+that no further route was recorded. Geometry names the recorded shape; it is
+not a verdict.
+
+### 10. Finalize
 
 Reconcile the analysis against the study's own recorded decision — `geometry`,
 `mincut_all`. Raise a `NOTE` for exactly these disagreements and no others:
@@ -235,25 +272,34 @@ Reconcile the analysis against the study's own recorded decision — `geometry`,
 
 **Never adjust the graph to make it agree** — the disagreement is the finding.
 
-Write `<out>/provenance.json` to the shape in contracts.md — the fault, the
-unsettled claims (each with the `Reaches the fault by` line EXPAND returned) and
-the NOTEs. Attribution is not yours to write: the merge established it. Then:
+Write `<out>/provenance.json`; `unsettled` and `notes` default to empty lists:
 
-```text
-graph_finalize.py <out> --merge-record <run>/merge.json   ... (contracts.md)
+```json
+{"fault": {"statement": "..."},
+ "unsettled": [{"claim": "...", "reaches_fault_by": "...",
+                 "check": "...", "blocked_by": "..."}],
+ "notes": ["..."]}
 ```
 
-It checks the deliverable and writes both derived files, `graph.md` and `findings.md`. **Do not write either yourself.** Attribution comes from `merge.json`, and the refusals come from `graph.json`'s
-own `advisory_cut` — neither from anything you retype.
+Carry EXPAND's `Reaches the fault by` text into `reaches_fault_by`.
+Attribution is not yours to write: Merge established it. Then run:
 
 ```text
-graph_provision.py --run <run> --down   ... (contracts.md)
+python3 <scripts>/graph_finalize.py <out> \
+  --merge-record <run>/merge.json --scope-registry <registry>
 ```
 
-That removes exactly what step 2 started, by the compose projects it recorded —
-they carry the id the study's reproducer minted, not `<run-id>`. Leave `<run>`
-itself: `/tmp` is where the intermediates stay, and they are the only record of
-a run that failed.
+This rejects a partial, invalid, stale, or unattributed deliverable and writes
+`graph.md` and `findings.md`. **Do not write either yourself.** Attribution
+comes from `merge.json`; refusals come from `graph.json`'s `advisory_cut`.
+
+```text
+python3 <scripts>/graph_provision.py --run <run> --down
+```
+
+This removes only the containers, volumes, networks, and locally built images
+that Provision recorded. Leave `<run>` itself: `/tmp` retains the intermediates
+from successful and failed work.
 
 ## Deliverable
 

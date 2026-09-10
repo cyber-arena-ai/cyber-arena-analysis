@@ -956,7 +956,7 @@ def test_a_partial_tree_is_refused_rather_than_read_as_finished(tmp_path):
 
 
 def test_an_analysis_of_an_older_graph_cannot_ship(tmp_path):
-    """Repair the graph at step 6, skip step 7, and the numbers would be stale."""
+    """Repair during Adjudicate, skip Derive, and the numbers would be stale."""
     graph = _graph()
     result, out = _finalize(tmp_path, graph, _provenance(graph), derive=True)
     assert result.returncode == 0, result.stderr
@@ -1360,7 +1360,7 @@ def _provision(*args):
 
 
 def test_provisioning_refuses_a_directory_that_is_not_a_study(tmp_path):
-    """Nothing below step 2 may discover that the study was not there."""
+    """Provision must not discover that the study was missing."""
     result = _provision(str(tmp_path / "nowhere"), "--run", str(tmp_path / "run"),
                         "--reproducer", "true")
     assert result.returncode == 1
@@ -1396,7 +1396,7 @@ def test_provisioning_will_not_write_over_an_existing_bundle_copy(tmp_path):
 # --- provisioning: what the exit status has to mean (needs Docker) ------------
 
 def test_provisioning_that_discovers_no_build_is_a_failure(tmp_path):
-    """Exit status is the one signal step 2 tells the caller to trust.
+    """Exit status is the one signal Provision tells the caller to trust.
 
     Four studies in one batch ran a reproducer that passed and left nothing
     standing; the script wrote `"builds": {}` and exited 0, so provisioning

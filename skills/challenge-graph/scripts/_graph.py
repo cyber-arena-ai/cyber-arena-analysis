@@ -363,7 +363,8 @@ def _droppable_errors(
 ) -> list[str]:
     """A route may carry no node it could reach the objective without.
 
-    See references/graph-schema.md, "Paths", for why this rule exists.
+    See references/graph-schema.md, "Rules the template cannot express", for
+    why this rule exists.
     """
     errors = []
     for node_id in nodes:

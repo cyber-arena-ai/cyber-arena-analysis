@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stand up a study's own bundle in a scratch copy, and tear it down again.
 
-Step 2 is the same sequence for every study — copy the bundle out of the study,
+Provisioning is the same sequence for every study — copy the bundle out of the study,
 run its reproducer there, find out what came up, write it down. What is *not* the
 same for every study is the reproducer's command and how it names things, so
 those are supplied and discovered rather than guessed: the script diffs Docker's

@@ -71,8 +71,9 @@ def merge_errors(merged: object, graph: Graph) -> list[str]:
 def derived_errors(out: Path, graph: Graph) -> list[str]:
     """`analysis.json` is computed from `graph.json`, so it can be recomputed.
     (`graph.md` is too, but it is rewritten here unconditionally, so it cannot
-    drift and is not compared.) Being present said nothing: a graph repaired at step 6 and
-    shipped without re-running step 7 carries an analysis of the older graph."""
+    drift and is not compared.) Being present said nothing: a graph repaired during
+    Adjudicate and shipped without re-running Derive carries an analysis of the older
+    graph."""
     analysis = analyze(graph)
 
     errors = []
@@ -80,7 +81,7 @@ def derived_errors(out: Path, graph: Graph) -> list[str]:
         # Compared parsed, not as text: this checks that the analysis is of *this*
         # graph, not that it was serialised the way graph_analyze.py serialises.
         if json.loads((out / "analysis.json").read_text(encoding="utf-8")) != analysis:
-            errors.append("analysis.json was not derived from this graph.json; re-run step 7")
+            errors.append("analysis.json was not derived from this graph.json; re-run Derive")
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         errors.append("analysis.json is not the JSON graph_analyze.py writes")
     return errors

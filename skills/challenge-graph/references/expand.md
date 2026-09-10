@@ -1,7 +1,7 @@
 # EXPAND contract
 
 EXPAND reads this file, the shared authoring procedure and the graph schema; it
-does not receive the root contracts, corpus notes or SEED's contract. The
+does not receive the root workflow or SEED's contract. The
 root's invocation supplies the concrete input paths and SEED artifacts.
 
 Assert those inputs first, then read both materials below in full before
@@ -23,10 +23,10 @@ default. Its progress file is a trace, not part of the atomic output.
 
 ## Fragment ownership
 
-Copy SEED's entry rather than drafting one. Redeclare a shared node under
-SEED's exact id and `symbol`; `title` and `evidence` may differ, and SEED's are
-kept. Narrow its `predecessors` to the ones your routes use; the merge unions
-them. Declare any objective you reach on the target.
+Copy SEED's `target` object and entry rather than drafting either. Redeclare a
+shared node under SEED's exact id and `symbol`; `title` and `evidence` may
+differ, and SEED's are kept. Narrow its `predecessors` to the ones your routes
+use; the merge unions them. Declare any objective you reach on the target.
 
 ## Expanding
 

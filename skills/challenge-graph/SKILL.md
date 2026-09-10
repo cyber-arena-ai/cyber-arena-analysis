@@ -18,11 +18,15 @@ Git checkout as `<analysis-root>`, only when its origin identifies
 `cyber-arena-analysis`; otherwise stop and ask the user which checkout that is.
 Python 3.11 or newer.
 
-**Instruction** — [contracts.md](references/contracts.md) is every function's
-inputs, assertions and outputs, and the only place an invocation is written,
-dispatch prompts included. Copy from it; never restate a signature in your own
-words. [authoring.md](references/authoring.md) is the procedure the roles
-follow; you do not author, but you review what it produces.
+**Root instruction** — [contracts.md](references/contracts.md) is the root's
+deterministic function contract and the only place its script invocations are
+written. Copy from it; never restate a signature in your own words.
+
+**Role instruction** — [seed.md](references/seed.md) and
+[expand.md](references/expand.md) are separate contracts. Copy only the
+selected role's `Dispatch` block; neither role receives `contracts.md` or the
+other role's contract. [authoring.md](references/authoring.md) is their shared
+procedure; you do not author, but you review what it produces.
 
 **Material** — [graph-schema.md](references/graph-schema.md) and
 [corpus.md](references/corpus.md), which is yours: it is provisioning knowledge
@@ -95,9 +99,9 @@ It copies the bundle to `<run>/env/`, runs the reproducer *there*, and writes
 `<run>/target.json` from what came up. Read the study for the reproducer's own
 command; the bundle shapes differ (corpus.md).
 
-Then finish `target.json` yourself, because the script cannot: each build's
-`auth_header` — the **entry principal and nothing more** — and what the facility
-seeded.
+Then finish `target.json` to the shape in authoring.md, because the script
+cannot: each build's `auth_header` — the **entry principal and nothing more** —
+and what the facility seeded.
 
 **You provision that principal; you do not go looking for one.** The reproducer
 mints its own and keeps the tokens in memory, so there is nothing to recover —
@@ -122,7 +126,7 @@ attacker container, say so in `seeded` so a role is not left guessing.
 
 ### 3. SEED
 
-Dispatch it with the contract in contracts.md. While it runs, `<run>/seed.progress`
+Dispatch it with the contract in seed.md. While it runs, `<run>/seed.progress`
 is where you look: the age of its last line is how you tell a working role from a
 dead one. Then gate and analyze:
 
@@ -137,7 +141,8 @@ fragment by hand.
 
 ### 4. EXPAND
 
-Dispatch it after SEED returns; the two roles never overlap. They do share one
+Dispatch it with the contract in expand.md after SEED returns; the two roles
+never overlap. They do share one
 instance, and SEED's probing mutates it, so **EXPAND inherits whatever state
 SEED left**. A route EXPAND reaches only because of that state is not a route
 the attacker can walk from the entry: check any route whose precondition SEED

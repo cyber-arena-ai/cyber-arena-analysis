@@ -1,43 +1,103 @@
 # Authoring
 
-How a role builds its fragment. The contracts are in
-[contracts.md](contracts.md); the format, and why each rule exists, is in
-[graph-schema.md](graph-schema.md).
+How either role builds its fragment. Role-specific ownership and procedure live
+in [seed.md](seed.md) and [expand.md](expand.md); the format, and why each rule
+exists, is in [graph-schema.md](graph-schema.md).
 
-SEED follows the whole of *Fragments* and *Procedure*. EXPAND follows them too,
-then *Expanding*. EXPAND copies SEED's entry rather than drafting its own; an
-objective it reached on the target is its own to declare.
+## Target
+
+`target.json` names each build's `base_url` and `auth_header`, plus what the
+facility seeded:
+
+```json
+{"builds": {"<name>": {"base_url": "http://127.0.0.1:<port>",
+                       "auth_header": "<header name>: <value>"}},
+ "seeded": "<what the facility planted, and how you recognise it>"}
+```
+
+`auth_header` is the entry principal and nothing more. `none: true` means the
+study has no runnable bundle; `probe.py` refuses it rather than reaching for
+something else. `seeded` must make the protected value recognisable; without
+that, a role cannot distinguish a disclosure from an error message.
+
+## Probing
+
+```text
+python3 <scripts>/probe.py --target <run>/target.json --build <name> \
+  --path </path> [--method GET] [--param NAME=VALUE]... [--header "NAME: VALUE"]... \
+  [--data '<json body>' | --form NAME=VALUE... | --data-file <path>] \
+  [--note "<what this is for>"] [--observed "<the string carrying the claim>"]
+```
+
+Sends one request as that build's entry principal, appends it to
+`<run>/probes.log` with the effective extra headers, the request body it sent,
+the response's own headers and a UTC timestamp, and prints it. A request has
+one body: `--data` is JSON, `--form` is form-encoded, `--data-file` is bytes,
+for a payload that is not text. Binary bodies are retained as
+`base64:<encoded bytes>` in the log's `sent` field and the evidence `source`,
+so neither depends on the original file. The record grows with the file size.
+
+`--header` adds a header; it may not replace the entry principal's, though a
+cookie is merged into it, the granted one winning. Extra headers are recorded
+after cookie merging and case-insensitive request-header normalization, then
+named in the evidence `source`, so a route opened by a second header is not
+read as one the entry principal walked alone. **One invocation is one
+request**: redirects are not followed, and a 302 is returned as the result it
+is, with its `Location` among the response headers. With `--observed`, it
+prints the graph evidence for it — and refuses when the response does not
+contain that string, which is the one thing hand-assembled evidence cannot
+check about itself; when the claim lands deeper than the excerpt the log keeps,
+the evidence excerpt follows the match rather than the start, and a claim
+carried by a response header rather than the body is quotable too. A 403 is a
+result, not a failure; a request that never arrived is logged too, and exits 1.
+A rejected `--observed` also exits 1, after logging and printing the completed
+exchange without an evidence claim.
+
+```text
+python3 <scripts>/probe.py --target <run>/target.json --build <name> --record \
+  --request "<the request you sent, verbatim>" --response-file <path> \
+  --status <code> [--note "..."] [--observed "<the string carrying the claim>"]
+```
+
+Records an exchange **you** performed, for a request this script cannot send —
+another protocol, a client the study ships, a chain it cannot hold. It runs the
+same containment check and writes the same log line, and its evidence `source`
+says `attested`, so a reader can see which claims rest on a client other than
+this one.
+
+`probe.py` sends HTTP. It is the fast path and not a fence: what the graph rests
+on is that **every observation it cites matches a record in `probes.log`**, not
+which client obtained it.
+
+## Evidence
+
+Every node, witness and cut entry carries one observation. The shape, rules and
+rationale live in [graph-schema.md](graph-schema.md) §Evidence; do not restate
+them.
+
+Every observation is a response this run received, and the build belongs in
+`source`, because two runs against different builds are otherwise the same
+record.
 
 ## Fragments
 
 - **Neither role writes `graph.json`.** Each writes one fragment; the root
   merges them with `graph_merge.py`.
-- **A fragment is a whole graph.** It carries the entry, the objectives it
-  touches and its own function nodes, and it passes `graph_validate.py` alone
-  before the role returns. SEED owns at least one route; EXPAND writes a
-  fragment either way, and one carrying no route is what finding nothing looks
-  like.
-- **Redeclare a shared node under SEED's exact id and `symbol`.** `symbol` is
-  required on every function node and never repeats across the document.
-  `title` and `evidence` may differ; SEED's are kept.
-- **Narrow a redeclared node's `predecessors`** to the ones your own routes
-  use. The merge unions the lists back together.
+- **A fragment is a whole graph.** It carries the terminals it touches and its
+  own function nodes, and it passes `graph_validate.py` alone before the role
+  returns. Its role contract says which terminals and routes it owns.
 - Everything in a fragment was reproduced — by the study, or by you. A route
   with no citable line is not a route.
 
 ## Procedure
 
-1. **Draft nodes.** One `entry` for the identity and access the challenge
-   grants the attacker, one `objective` per confirmed witness and scope, and a
-   `function` for each application function the route passes through.
+1. **Draft nodes.** Follow the role contract for terminals. Declare one
+   `objective` per confirmed witness and scope, and a `function` for each
+   application function the route passes through.
 
    Every function node is something you can point at in the application — a
    route, a handler, a named function. Record it in `symbol`. If you cannot
    name it, it is not a node.
-
-   Authentication sits *behind* the entry, because the challenge grants the
-   attacker its credential. Model it only when the attack turns on the
-   authentication function itself.
 
 2. **Decide granularity by what a defender can cut.**
 
@@ -51,7 +111,7 @@ objective it reached on the target is its own to declare.
    one of them. Set `conjunctive: true` only for a node that needs all of them.
 
 4. **Establish every node and route against the running target.** Reach for
-   `probe.py` (contracts.md) first and paste what it prints under `evidence:`.
+   `probe.py` above first and paste what it prints under `evidence:`.
    It builds the three fields from the response and refuses a claim the response
    does not carry, which is the one thing hand-assembled evidence cannot check
    about itself — and it is faster than doing that by hand.
@@ -98,35 +158,3 @@ objective it reached on the target is its own to declare.
    payload for a route. Leave the cut out only when the study ships no fix.
 
 7. **Validate, fix, repeat until clean.**
-
-## Expanding
-
-1. **Name the fault.** Read what `STAGE3_STUDY.md` says is defective, then
-   establish it against the running target. Never substitute a min-cut for the
-   fault: a min-cut is arithmetic over the recorded routes and claims nothing
-   about what is defective.
-
-2. **Expand from the fault.** It is one named thing in the application, so this
-   is bounded:
-
-   - other routes that reach the same fault;
-   - other objectives the same fault exposes — **declare them**, with a scope
-     from the registry, when you reached one on the target. Nothing at Stage 3
-     declares the objective; both roles reconstruct it, so yours stands beside
-     SEED's. You may not add an `entry`: that is the identity the challenge
-     grants, and a second one lowers every cut.
-
-3. **Then, only where the study's own evidence suggests a second defect,** look
-   for a route that avoids the nodes the routes you have already share.
-   Secondary and speculative. Do not go looking for ways around functions that
-   work.
-
-4. **Run it, then record it.** Run the check with `probe.py`, or with a client
-   that can send it and then `probe.py --record`, and carry what it prints into
-   the graph as the observation itself.
-
-5. **Score what you did.** Do not assert a new `mincut_all`; the root re-runs
-   the analyzer.
-
-Root cause stays out of the IR: it lives in your response as a stated reading,
-and never as a field.

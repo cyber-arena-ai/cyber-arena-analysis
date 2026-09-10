@@ -22,11 +22,15 @@ Python 3.11 or newer.
 deterministic function contract and the only place its script invocations are
 written. Copy from it; never restate a signature in your own words.
 
-**Role instruction** — [seed.md](references/seed.md) and
-[expand.md](references/expand.md) are separate contracts. Copy only the
-selected role's `Dispatch` block; neither role receives `contracts.md` or the
-other role's contract. [authoring.md](references/authoring.md) is their shared
-procedure; you do not author, but you review what it produces.
+**Role instruction** — `references/seed.md` and `references/expand.md` are
+role-facing contracts. Start each role with no inherited conversation or agent
+history (`fork_turns="none"` when using `spawn_agent`), and give it only the
+bootstrap in its workflow step; do not copy or restate the contract. Neither
+role receives `contracts.md`, `corpus.md`, or the other role's contract.
+[authoring.md](references/authoring.md) is their shared procedure; you do not
+author, but you review what it produces. End either bootstrap with: *Read the
+role contract in full, then only the instruction materials it names. Follow it
+with these input bindings and return its specified response.*
 
 **Material** — [graph-schema.md](references/graph-schema.md) and
 [corpus.md](references/corpus.md), which is yours: it is provisioning knowledge
@@ -126,7 +130,20 @@ attacker container, say so in `seeded` so a role is not left guessing.
 
 ### 3. SEED
 
-Dispatch it with the contract in seed.md. While it runs, `<run>/seed.progress`
+Dispatch SEED with only this bootstrap, after resolving every path:
+
+```text
+Role contract: <skill-root>/references/seed.md
+Inputs:
+  study    = <study>
+  registry = <registry>
+  scripts  = <scripts>
+  run      = <run>
+  target   = <run>/target.json
+  fragment = <run>/seed.json
+```
+
+While it runs, `<run>/seed.progress`
 is where you look: the age of its last line is how you tell a working role from a
 dead one. Then gate and analyze:
 
@@ -141,8 +158,23 @@ fragment by hand.
 
 ### 4. EXPAND
 
-Dispatch it with the contract in expand.md after SEED returns; the two roles
-never overlap. They do share one
+After SEED returns, dispatch EXPAND with only this bootstrap, after resolving
+every path:
+
+```text
+Role contract: <skill-root>/references/expand.md
+Inputs:
+  study    = <study>
+  registry = <registry>
+  scripts  = <scripts>
+  run      = <run>
+  target   = <run>/target.json
+  seed     = <run>/seed.json
+  analysis = <run>/seed-analysis.json
+  fragment = <run>/expand.json
+```
+
+The two roles never overlap. They do share one
 instance, and SEED's probing mutates it, so **EXPAND inherits whatever state
 SEED left**. A route EXPAND reaches only because of that state is not a route
 the attacker can walk from the entry: check any route whose precondition SEED

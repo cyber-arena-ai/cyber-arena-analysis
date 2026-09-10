@@ -1,8 +1,8 @@
 # Authoring
 
 How either role builds its fragment. Role-specific ownership and procedure live
-in [seed.md](seed.md) and [expand.md](expand.md); the format, and why each rule
-exists, is in [graph-schema.md](graph-schema.md).
+in the contract that directed you here; the format, and why each rule exists,
+is in [graph-schema.md](graph-schema.md).
 
 ## Target
 
@@ -110,20 +110,9 @@ record.
 3. **Wire `predecessors`.** They are OR by default — a route arrives through
    one of them. Set `conjunctive: true` only for a node that needs all of them.
 
-4. **Establish every node and route against the running target.** Reach for
-   `probe.py` above first and paste what it prints under `evidence:`.
-   It builds the three fields from the response and refuses a claim the response
-   does not carry, which is the one thing hand-assembled evidence cannot check
-   about itself — and it is faster than doing that by hand.
-
-   Where it cannot send the request, **use a client that can.** A broker
-   protocol, a WebSocket, a packfile, a redirect chain you must follow: reach
-   the target however the target is reached, then bring the exchange back with
-   `probe.py --record`, which runs the same containment check and writes the
-   same log line. What the graph rests on is `probes.log`, not which client
-   spoke: **every observation you cite must match a record there.** A record you
-   attested says so in its own `source`, so the root knows to check it hardest;
-   an observation with no record behind it is not evidence at all.
+4. **Establish every node and route against the running target.** Use the
+   probing contract above. Every observation you cite must match a record in
+   `probes.log`; one with no record behind it is not evidence.
 
    **Do not cite the study.** Its prose and its retained `evidence/` files say
    where to look; they are not facts this run established, and nothing in the

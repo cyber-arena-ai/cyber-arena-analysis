@@ -1,8 +1,11 @@
 # EXPAND contract
 
-The root copies the dispatch below. EXPAND reads this file, the shared
-authoring procedure and the graph schema; it does not receive the root
-contracts or corpus notes.
+EXPAND reads this file, the shared authoring procedure and the graph schema; it
+does not receive the root contracts, corpus notes or SEED's contract. The
+root's invocation supplies the concrete input paths and SEED artifacts.
+
+Assert those inputs first, then read both materials below in full before
+probing or authoring.
 
 EXPAND is a black-box function. It either produces its whole output or produces
 none of it, and rejects an incomplete input rather than proceeding with a
@@ -11,12 +14,12 @@ default. Its progress file is a trace, not part of the atomic output.
 | | |
 |---|---|
 | **Consumes** | `<study>`, `<registry>`, `<target>`, `<scripts>`, `<run>/seed.json`, `<run>/seed-analysis.json`, and the materials below |
-| **Materials** | [expand.md](expand.md), [authoring.md](authoring.md), [graph-schema.md](graph-schema.md) |
+| **Materials** | [authoring.md](authoring.md), [graph-schema.md](graph-schema.md) |
 | **Produces** | `<run>/expand.json` — always, carrying no route when you found none — and the response below |
 | **May** | read `<study>` and SEED's inputs; send requests to `<target>` as that build's `auth_header`; write `<run>/expand.json` |
 | **May not** | start, stop or build a container; run a reproducer; use host Docker; write anything under `<study>`; introduce an `entry` SEED does not declare |
 | **Asserts on receipt** | every input above present and readable. A missing one is returned as `REJECT: <what is missing>`, not worked around. |
-| **Must ensure** | the fragment passes the validation command in the dispatch; `<run>/expand.progress` carries a UTC-timestamped line per step; every unsettled claim carries `Blocked by`; `Needs study` names a search, never a missing citation |
+| **Must ensure** | the fragment passes the validation command below; `<run>/expand.progress` carries a UTC-timestamped line as you begin reading, probing, authoring, validating and returning; every unsettled claim carries `Blocked by`; `Needs study` names a search, never a missing citation |
 
 ## Fragment ownership
 
@@ -57,24 +60,16 @@ them. Declare any objective you reach on the target.
 Root cause stays out of the IR: it lives in your response as a stated reading,
 and never as a field.
 
-## Dispatch
+## Validate
 
 ```text
-Inputs — replace each name with an absolute path before sending:
-  study     = <study>
-  registry  = <registry>
-  scripts   = <scripts>
-  target    = <run>/target.json
-  seed      = <run>/seed.json
-  analysis  = <run>/seed-analysis.json
-  fragment  = <run>/expand.json                     (write your fragment here)
-  materials = <skill-root>/references/expand.md, authoring.md,
-              graph-schema.md
-
-You are the EXPAND role for the challenge graph over Stage 3 study <study>. Read the three materials listed above, in full, before anything else. You are given SEED's fragment and its analysis; you are blind to nothing. Name the fault the study reproduced, find further routes that reach it, and declare any further objective you reached, with a scope from the registry. The live target is described in <run>/target.json: use each build's base_url and auth_header, and read seeded to recognise the protected value. Run what you can against it using probe.py, as specified in authoring.md, recording what it prints as the observation; where probe.py cannot send the request, use a client that can and record the exchange with probe.py --record, so that every observation you cite matches a record in <run>/probes.log. Redeclare any node SEED declared under its exact id and symbol, narrowing only its predecessors. You may add function nodes, routes, and an objective you reached on the target; you may not introduce an entry SEED does not declare. Append one UTC-timestamped line to <run>/expand.progress as you begin each step of your procedure — reading, probing, authoring, validating, returning — so a dispatcher can tell you apart from a dead agent. Assert every input on receipt and return REJECT if one is missing. Gate your fragment with `python3 <scripts>/graph_validate.py <run>/expand.json --scope-registry <registry>` before returning, write your fault and unsettled claims for the root, and return only the EXPAND response.
+python3 <scripts>/graph_validate.py <run>/expand.json \
+  --scope-registry <registry>
 ```
 
 ## Response
+
+Return only:
 
 ```text
 Role: EXPAND

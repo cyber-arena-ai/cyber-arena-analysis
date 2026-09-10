@@ -259,8 +259,8 @@ A malformed document produces an error, never a traceback.
 
 ## Fragments
 
-Under [multi-role authoring](../SKILL.md) each role writes a **fragment** and
-`graph_merge.py` unions them into `graph.json`. Two consequences belong here.
+Under multi-role authoring each role writes a **fragment** and `graph_merge.py`
+unions them into `graph.json`. Two consequences belong here.
 
 **Validity is not compositional.** Unioning a node's `predecessors` can open a
 shortcut that leaves a route carrying a node it no longer needs, so two

@@ -5,7 +5,6 @@
     "repository": "acme/reports",
     "revision": "1f0c2b7ae9d34c51886a0b2f7de41c9a3b5e6d70"
   },
-  "evidence_root": "evidence",
   "nodes": [
     {
       "id": "N-entry",
@@ -17,9 +16,12 @@
       "role": "function",
       "title": "POST /api/reports/{id}/share issues a share token",
       "symbol": "ShareController.create",
-      "requires": ["N-entry"],
+      "predecessors": [
+        "N-entry"
+      ],
       "evidence": {
-        "locator": "evidence/vulnerable.txt#L4",
+        "source": "vulnerable build \u00b7 POST /reports/9/share \u00b7 201",
+        "excerpt": "201 Created share=7f2ad4 \u00b7 line as it read",
         "observed": "201 Created share=7f2ad4"
       }
     },
@@ -28,9 +30,12 @@
       "role": "function",
       "title": "GET /s/{token} resolves a token without re-checking report ownership",
       "symbol": "ShareController.resolve",
-      "requires": ["N-create-share"],
+      "predecessors": [
+        "N-create-share"
+      ],
       "evidence": {
-        "locator": "evidence/vulnerable.txt#L9",
+        "source": "vulnerable build \u00b7 GET /s/7f2a \u00b7 200",
+        "excerpt": "200 OK owner_check=skipped share=7f2a ts=2026-08-02T11:04:19Z",
         "observed": "200 OK owner_check=skipped"
       }
     },
@@ -39,9 +44,12 @@
       "role": "function",
       "title": "POST /api/templates stores an export template",
       "symbol": "TemplateController.create",
-      "requires": ["N-entry"],
+      "predecessors": [
+        "N-entry"
+      ],
       "evidence": {
-        "locator": "evidence/alt.txt#L3",
+        "source": "vulnerable build \u00b7 POST /templates \u00b7 201",
+        "excerpt": "201 Created template=t9c1 \u00b7 line as it read",
         "observed": "201 Created template=t9c1"
       }
     },
@@ -50,10 +58,14 @@
       "role": "function",
       "title": "the export renderer expands a stored template against any report id",
       "symbol": "ExportRenderer.render",
-      "requires": ["N-entry", "N-upload-template"],
-      "requires_all": true,
+      "predecessors": [
+        "N-entry",
+        "N-upload-template"
+      ],
+      "conjunctive": true,
       "evidence": {
-        "locator": "evidence/alt.txt#L7",
+        "source": "vulnerable build \u00b7 GET /reports/9/export \u00b7 200",
+        "excerpt": "render template=t9c1 report=8812 \u00b7 line as it read",
         "observed": "render template=t9c1 report=8812"
       }
     },
@@ -62,53 +74,73 @@
       "role": "objective",
       "store": "victim_report",
       "scope": "app.cross_boundary.read",
-      "requires": ["N-resolve-share", "N-render-template"]
+      "predecessors": [
+        "N-resolve-share",
+        "N-render-template"
+      ]
     }
   ],
   "paths": [
     {
-      "id": "PATH-pov",
+      "id": "PATH-create-share-resolve-share",
       "objective": "N-obj-report",
-      "nodes": ["N-entry", "N-create-share", "N-resolve-share", "N-obj-report"],
-      "advisories": ["CVE-2026-11111"],
+      "nodes": [
+        "N-entry",
+        "N-create-share",
+        "N-resolve-share",
+        "N-obj-report"
+      ],
+      "advisories": [
+        "CVE-2026-11111"
+      ],
       "witnesses": [
         {
-          "locator": "evidence/vulnerable.txt#L12",
+          "source": "vulnerable build \u00b7 GET /reports/9 \u00b7 200",
+          "excerpt": "recovered victim report body CYBERARENA{8f31c0a94d2e}",
           "observed": "recovered victim report body"
         }
       ]
     },
     {
-      "id": "PATH-template",
+      "id": "PATH-upload-template-render-template",
       "objective": "N-obj-report",
-      "nodes": ["N-entry", "N-upload-template", "N-render-template", "N-obj-report"],
+      "nodes": [
+        "N-entry",
+        "N-upload-template",
+        "N-render-template",
+        "N-obj-report"
+      ],
       "advisories": [],
       "witnesses": [
         {
-          "locator": "evidence/alt.txt#L9",
+          "source": "vulnerable build \u00b7 GET /reports/9/export \u00b7 200",
+          "excerpt": "recovered victim report body CYBERARENA{8f31c0a94d2e}",
           "observed": "recovered victim report body"
         }
       ]
     }
   ],
-  "observed_cuts": [
-    {
-      "id": "CUT-upstream",
-      "reference": "upstream_fix",
-      "blocked": [
-        {
-          "path": "PATH-pov",
-          "locator": "evidence/fixed.txt#L9",
-          "observed": "403 Forbidden owner_check=enforced"
-        }
-      ],
-      "survived": [
-        {
-          "path": "PATH-template",
-          "locator": "evidence/fixed.txt#L14",
-          "observed": "recovered victim report body"
-        }
-      ]
-    }
-  ]
+  "advisory_cut": {
+    "advisory": "CVE-2026-11111",
+    "nodes": [
+      "N-resolve-share"
+    ],
+    "refused": [
+      {
+        "path": "PATH-create-share-resolve-share",
+        "source": "fixed build \u00b7 GET /s/7f2a \u00b7 403",
+        "excerpt": "403 Forbidden owner_check=enforced share=7f2a",
+        "observed": "403 Forbidden owner_check=enforced",
+        "tried": "the study's own token guess, a direct object id, and a re-signed token"
+      }
+    ],
+    "survived": [
+      {
+        "path": "PATH-upload-template-render-template",
+        "source": "fixed build \u00b7 GET /reports/9/export \u00b7 200",
+        "excerpt": "200 {\"body\": \"recovered victim report body\"}",
+        "observed": "recovered victim report body"
+      }
+    ]
+  }
 }

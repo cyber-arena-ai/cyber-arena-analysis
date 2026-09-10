@@ -12,12 +12,10 @@ from pathlib import Path
 SCHEMA_VERSION = 2
 NODE_ROLES = {"entry", "function", "objective"}
 TERMINAL_ROLES = {"entry", "objective"}
-LOCATOR = re.compile(r"^(?P<path>[^#]+)#L(?P<line>[1-9][0-9]*)$")
+CUT_SIDES = ("refused", "survived")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
-MAX_LISTED_CUTS = 32
 MAX_SEARCH_NODES = 200_000
 MIN_OBSERVED = 8
-STUDY_DOCUMENT = "STAGE3_STUDY.md"
 
 
 class Graph:
@@ -27,7 +25,8 @@ class Graph:
         self.document = document
         self.nodes = {n["id"]: n for n in _entries(document, "nodes")}
         self.paths = {p["id"]: p for p in _entries(document, "paths")}
-        self.observed_cuts = _entries(document, "observed_cuts")
+        raw = document.get("advisory_cut")
+        self.advisory_cut = raw if isinstance(raw, dict) else None
 
     def by_role(self, role: str) -> list[str]:
         return [i for i in self.nodes if self.role(i) == role]
@@ -63,197 +62,107 @@ def _entries(document: dict, key: str) -> list[dict]:
     return [e for e in raw if _id(e)] if isinstance(raw, list) else []
 
 
-def _requires(node: dict) -> list[str]:
-    raw = node.get("requires")
+def _predecessors(node: dict) -> list[str]:
+    raw = node.get("predecessors")
     return [r for r in raw if isinstance(r, str)] if isinstance(raw, list) else []
 
 
-def _requires_all(node: dict) -> bool:
+def _conjunctive(node: dict) -> bool:
     """Whether every listed predecessor is needed, or any one of them suffices."""
-    return bool(node.get("requires_all"))
+    return bool(node.get("conjunctive"))
 
 
 # --- analysis ---------------------------------------------------------------
 
 
-def minimal_cuts(node_sets: list[frozenset[str]]) -> tuple[list[frozenset[str]], int | None, bool]:
-    """Minimum-cardinality hitting sets over the recorded paths.
+def minimal_cuts(node_sets: list[frozenset[str]]) -> int | None:
+    """Size of the smallest set of nodes that hits every recorded route.
 
     Branch and bound on an unhit path rather than searching by subset size:
     a cut always exists at or below the path count, so the depth is bounded
     even when the node universe is large. Cost still grows about 6x per added
     disjoint path, so a work cap keeps the tool terminating; when it fires the
-    result is `mincut` `None` with `cuts_truncated` set, never a guess.
+    result is `None`, never a guess — an over-stated mincut manufactures a
+    false `disjoint`.
+
+    Only the size is computed. Enumerating the cheapest cuts told a reader which
+    nodes to sever, and the cheapest set is routinely a shared executor every
+    legitimate request needs, so the listing named defenses that were not
+    defenses.
     """
     if not node_sets or any(not node_set for node_set in node_sets):
-        return [], None, False
+        return None
     for size in range(1, len(node_sets) + 1):
-        found: set[frozenset[str]] = set()
         work = [MAX_SEARCH_NODES]
-        _search(node_sets, size, frozenset(), found, work)
-        if found:
-            listed = sorted(found, key=sorted)
-            # The work cap can fire after some cuts are found, which lists a
-            # subset without it being over the listing cap; unreported, a partial
-            # listing would read as the complete set of cheapest defenses.
-            truncated = len(listed) > MAX_LISTED_CUTS or work[0] <= 0
-            return listed[:MAX_LISTED_CUTS], size, truncated
+        if _search(node_sets, size, frozenset(), work):
+            return size
         if work[0] <= 0:
-            # The exact search ran out of room. Say so rather than substitute an
-            # estimate: an over-stated mincut manufactures a false `disjoint`.
-            return [], None, True
-    return [], None, False
+            return None
+    return None
 
 
 def _search(
-    node_sets: list[frozenset[str]],
-    depth: int,
-    chosen: frozenset[str],
-    found: set[frozenset[str]],
-    work: list[int],
-) -> None:
+    node_sets: list[frozenset[str]], depth: int, chosen: frozenset[str], work: list[int]
+) -> bool:
     work[0] -= 1
     if work[0] <= 0:
-        return
+        return False
     unhit = [node_set for node_set in node_sets if not (node_set & chosen)]
     if not unhit:
-        found.add(chosen)
-        return
-    if depth == 0 or len(found) > MAX_LISTED_CUTS:
-        return
+        return True
+    if depth == 0:
+        return False
     # Branching on the smallest unhit path keeps the factor as low as the data
     # allows; every cut must contain one of its nodes.
     for node in sorted(min(unhit, key=len)):
-        _search(node_sets, depth - 1, chosen | {node}, found, work)
+        if _search(node_sets, depth - 1, chosen | {node}, work):
+            return True
+    return False
 
 
 def analyze(graph: Graph) -> dict:
     paths = list(graph.paths)
     objectives = graph.by_role("objective")
     interiors = {p: graph.interior(p) for p in paths}
-    trivial = [p for p in paths if len(interiors[p]) < 2]
 
     per_objective: dict[str, dict] = {}
     for objective in objectives:
         members = [p for p in paths if graph.paths[p].get("objective") == objective]
-        _, size, _ = minimal_cuts([interiors[p] for p in members])
         per_objective[objective] = {
             "scope": graph.nodes[objective].get("scope"),
-            "paths": members,
-            "mincut": size,
+            "routes": len(members),
+            "mincut": minimal_cuts([interiors[p] for p in members]),
         }
 
-    all_cuts, mincut_all, all_truncated = minimal_cuts([interiors[p] for p in paths])
-    _, mincut_nontrivial, _ = minimal_cuts(
-        [interiors[p] for p in paths if p not in trivial]
-    )
+    mincut_all = minimal_cuts([interiors[p] for p in paths])
 
+    # Every route counts, however short. A one-function route used to suppress
+    # the labels below on the grounds that it was "just a one-step attack" —
+    # an editorial call, and the label it hid was accurate.
     labels: list[str] = []
-    if trivial:
-        # A reproduced one-node route dominates every other reading: it would
-        # otherwise inflate mincut_all and manufacture `disjoint`.
-        labels.append("shallow")
-    else:
-        spans = {
-            node: {graph.paths[p].get("objective") for p in paths if node in interiors[p]}
-            for node in set().union(*interiors.values())
-        }
-        if any(len(reached) >= 2 for reached in spans.values()):
-            labels.append("fan_out")
-        if any(len(d["paths"]) >= 2 and d["mincut"] == 1 for d in per_objective.values()):
-            labels.append("fan_in")
-        if mincut_all is not None and mincut_all >= 2:
-            labels.append("disjoint")
-        if len(paths) == 1:
-            labels.append("single_path")
+    spans = {
+        node: {graph.paths[p].get("objective") for p in paths if node in interiors[p]}
+        for node in set().union(*interiors.values())
+    }
+    if any(len(reached) >= 2 for reached in spans.values()):
+        labels.append("fan_out")
+    if any(d["routes"] >= 2 and d["mincut"] == 1 for d in per_objective.values()):
+        labels.append("fan_in")
+    if mincut_all is not None and mincut_all >= 2:
+        labels.append("disjoint")
 
+    # The advisory cut is authored, not computed, so it stays in graph.json where
+    # its evidence is. Restating it here was a projection nothing derived.
     return {
         "geometry": sorted(set(labels)),
         "mincut_all": mincut_all,
-        "mincut_nontrivial": mincut_nontrivial,
-        "minimum_cuts_all": [sorted(c) for c in all_cuts],
-        "cuts_truncated": all_truncated,
-        "nontrivial_paths": {p: p not in trivial for p in paths},
         "objective_coverage": per_objective,
-        "observed_cuts": _observed(graph),
-        "frontier": _frontier(graph, per_objective),
-        "citation_sources": _citation_sources(graph),
     }
-
-
-def _citation_sources(graph: Graph) -> dict[str, int]:
-    """How many citations resolve to the study document rather than to a file.
-
-    A coverage fact about what the study retained, not a strength grade: the
-    same agent wrote `reproduce.py` and `STAGE3_STUDY.md`, which is why
-    `evidence.kind` was removed. Normally zero for a graph declaring
-    `evidence_root`, since that makes a prose citation at the study root a hard
-    error; the match is on the basename, so a study keeping the document inside
-    its evidence directory still counts.
-    """
-    counts = {"study_document": 0, "retained_evidence": 0}
-    for _, evidence in _evidence_entries(graph):
-        match = LOCATOR.match(str(evidence.get("locator", "")))
-        prose = Path(match.group("path")).name == STUDY_DOCUMENT
-        counts["study_document" if prose else "retained_evidence"] += 1
-    return counts
 
 
 def _witnesses(path: dict) -> list[dict]:
     raw = path.get("witnesses")
     return [w for w in raw if isinstance(w, dict)] if isinstance(raw, list) else []
-
-
-def _observed(graph: Graph) -> list[dict]:
-    results = []
-    for cut in graph.observed_cuts:
-        blocked = [e["path"] for e in cut.get("blocked", []) if _path_ref(graph, e)]
-        survived = [e["path"] for e in cut.get("survived", []) if _path_ref(graph, e)]
-        reading = "contestable_observed" if survived else "terminal_over_recorded_subgraph"
-        implicated: set[str] = set()
-        if blocked:
-            # The extensional root cause: interior nodes common to every blocked
-            # route and absent from every survivor.
-            implicated = set.intersection(*(set(graph.interior(p)) for p in blocked))
-            for path_id in survived:
-                implicated -= set(graph.interior(path_id))
-        results.append(
-            {
-                "id": cut["id"],
-                "reference": cut.get("reference"),
-                "blocked": blocked,
-                "survived": survived,
-                "reading": reading,
-                "implicated_nodes": sorted(implicated),
-            }
-        )
-    return results
-
-
-def _path_ref(graph: Graph, entry: object) -> bool:
-    return (
-        isinstance(entry, dict)
-        and isinstance(entry.get("path"), str)
-        and entry["path"] in graph.paths
-    )
-
-
-def _frontier(graph: Graph, per_objective: dict) -> list[dict]:
-    items = []
-    for objective, detail in per_objective.items():
-        if not detail["paths"]:
-            items.append({"kind": "unreached_objective", "target": objective})
-    tested = {
-        entry["path"]
-        for cut in graph.observed_cuts
-        for key in ("blocked", "survived")
-        for entry in cut.get(key, []) or []
-        if _path_ref(graph, entry)
-    }
-    for path_id in graph.paths:
-        if path_id not in tested:
-            items.append({"kind": "untested_path", "target": path_id})
-    return items
 
 
 # --- structural validation --------------------------------------------------
@@ -264,24 +173,39 @@ def _text(value: object) -> bool:
 
 
 def evidence_shape(evidence: object, where: str, errors: list[str]) -> None:
-    """A citation must point at a real line and quote enough of it to check."""
+    """One observation: what was sent, what came back, and the part that carries
+    the claim.
+
+    Every observation is a response this run received. There is no field saying
+    where the text came from, because there is only one place it may come from:
+    the study says where to look and never what to record.
+
+    Nothing here is resolved against the filesystem. A graph that cited a file
+    outside itself stopped meaning what it meant the moment that file moved or
+    was regenerated, and a stale citation that still matches its quoted string
+    is worse than none: it reads as checked. So the excerpt travels with the
+    claim and `source` is a label for a human, never a path to open.
+    """
     if not isinstance(evidence, dict):
         errors.append(f"{where}.evidence must be an object")
         return
-    if "kind" in evidence:
-        errors.append(
-            f"{where}.evidence.kind was removed in schema 2; a citation is a "
-            "locator and an observed string"
-        )
+    for gone in ("kind", "locator", "provenance"):
+        if gone in evidence:
+            errors.append(
+                f"{where}.evidence.{gone} was removed; an observation is source, "
+                "excerpt and observed — every one of them a response this run received"
+            )
+    for field in ("source", "excerpt"):
+        if not _text(evidence.get(field)):
+            errors.append(f"{where}.evidence.{field} must be a non-empty string")
     observed = evidence.get("observed")
     if not _text(observed) or len(str(observed).strip()) < MIN_OBSERVED:
         errors.append(
             f"{where}.evidence.observed must quote at least {MIN_OBSERVED} characters "
-            "of the cited line"
+            "of the excerpt"
         )
-    locator = evidence.get("locator")
-    if not _text(locator) or not LOCATOR.match(str(locator)):
-        errors.append(f"{where}.evidence.locator must look like path/to/file.txt#L12")
+    elif _text(evidence.get("excerpt")) and str(observed) not in str(evidence["excerpt"]):
+        errors.append(f"{where}.evidence.observed does not appear in the excerpt")
 
 
 def structural_errors(document: object) -> list[str]:
@@ -310,19 +234,22 @@ def structural_errors(document: object) -> list[str]:
         if not HEX40.match(str(target.get("revision", ""))):
             errors.append("target.revision must be 40 lowercase hex characters")
 
-    root = document.get("evidence_root")
-    if root is not None:
-        parts = Path(str(root)).parts if _text(root) else ()
-        if not parts or Path(str(root)).is_absolute() or ".." in parts:
-            errors.append("evidence_root must name a directory inside the study")
-
     graph = Graph(document)
-    for key, index in (("nodes", graph.nodes), ("paths", graph.paths)):
-        raw = document.get(key)
-        if not isinstance(raw, list) or not raw:
-            errors.append(f"{key} must be a non-empty list")
-        elif len(index) != len(raw):
-            errors.append(f"every {key} entry needs a unique string id")
+    raw_nodes = document.get("nodes")
+    if not isinstance(raw_nodes, list) or not raw_nodes:
+        errors.append("nodes must be a non-empty list")
+    elif len(graph.nodes) != len(raw_nodes):
+        errors.append("every nodes entry needs a unique string id")
+    # `paths` may be empty here. This validates a *fragment* as often as a
+    # finished graph, and EXPAND finding no further route is a real outcome that
+    # has to be writable: the fragment's existence is what says EXPAND ran at
+    # all. A finished deliverable with no route is rejected by graph_finalize.py,
+    # which is the step that owns finished trees.
+    raw_paths = document.get("paths")
+    if not isinstance(raw_paths, list):
+        errors.append("paths must be a list")
+    elif len(graph.paths) != len(raw_paths):
+        errors.append("every paths entry needs a unique string id")
 
     errors.extend(_node_errors(graph))
     if not graph.by_role("entry"):
@@ -332,14 +259,31 @@ def structural_errors(document: object) -> list[str]:
 
     for path_id, path in graph.paths.items():
         errors.extend(_path_errors(graph, path_id, path))
+    # A route *is* its walk. Two entries over the same nodes are one route
+    # recorded twice, which inflates the route count and can manufacture a
+    # `fan_in` reading out of a single way in.
+    walks: dict[tuple, str] = {}
+    for path_id, path in graph.paths.items():
+        walk = tuple(path.get("nodes") or [])
+        if walk in walks:
+            errors.append(f"route {path_id} walks the same nodes as route {walks[walk]}")
+        else:
+            walks[walk] = path_id
 
-    errors.extend(_cut_errors(graph, document))
+    errors.extend(_advisory_cut_errors(graph, document))
     errors.extend(_cycle_errors(graph))
     return errors
 
 
 def _node_errors(graph: Graph) -> list[str]:
     errors: list[str] = []
+    for node_id, node in graph.nodes.items():
+        # `requires` read as AND to anyone writing it and as OR to the analyzer.
+        # Silently ignoring it would leave the node with no predecessors at all,
+        # which is a worse reading than either.
+        for gone, now in (("requires", "predecessors"), ("requires_all", "conjunctive")):
+            if gone in node:
+                errors.append(f"node {node_id}.{gone} is now {now}")
     symbols: dict[str, str] = {}
     for node_id, node in graph.nodes.items():
         role = graph.role(node_id)
@@ -372,21 +316,21 @@ def _node_errors(graph: Graph) -> list[str]:
                 )
             symbols.setdefault(symbol, node_id)
 
-        raw = node.get("requires")
+        raw = node.get("predecessors")
         if role == "entry":
             if raw:
                 errors.append(f"entry {node_id} must not require another node")
             continue
         if not isinstance(raw, list) or not raw:
-            errors.append(f"node {node_id}.requires must be a non-empty list")
+            errors.append(f"node {node_id}.predecessors must be a non-empty list")
             continue
         for other in raw:
             if not isinstance(other, str) or other not in graph.nodes:
-                errors.append(f"node {node_id}.requires has unknown node {other}")
+                errors.append(f"node {node_id}.predecessors has unknown node {other}")
             elif graph.role(other) == "objective":
                 errors.append(f"node {node_id} may not require objective {other}")
-        if not isinstance(node.get("requires_all", False), bool):
-            errors.append(f"node {node_id}.requires_all must be a boolean")
+        if not isinstance(node.get("conjunctive", False), bool):
+            errors.append(f"node {node_id}.conjunctive must be a boolean")
         if role == "function":
             evidence_shape(node.get("evidence"), f"node {node_id}", errors)
     return errors
@@ -406,8 +350,8 @@ def _derivable(graph: Graph, nodes: set[str], objective: str) -> bool:
         changed = False
         for node_id in nodes - have:
             node = graph.nodes[node_id]
-            needed = _requires(node)
-            rule = all if _requires_all(node) else any
+            needed = _predecessors(node)
+            rule = all if _conjunctive(node) else any
             if rule(r in have for r in needed) if needed else graph.role(node_id) == "entry":
                 have.add(node_id)
                 changed = True
@@ -427,7 +371,7 @@ def _droppable_errors(
             continue
         if _derivable(graph, set(nodes) - {node_id}, objective):
             errors.append(
-                f"path {path_id} still reaches {objective} without {node_id}; "
+                f"route {path_id} still reaches {objective} without {node_id}; "
                 "record the shorter route instead"
             )
     return errors
@@ -437,115 +381,151 @@ def _path_errors(graph: Graph, path_id: str, path: dict) -> list[str]:
     errors: list[str] = []
     objective = path.get("objective")
     if not isinstance(objective, str) or graph.role(objective) != "objective":
-        errors.append(f"path {path_id}.objective must name an objective node")
+        errors.append(f"route {path_id}.objective must name an objective node")
         objective = None
 
     nodes = path.get("nodes")
     if not isinstance(nodes, list) or not nodes:
-        return errors + [f"path {path_id}.nodes must be a non-empty list"]
+        return errors + [f"route {path_id}.nodes must be a non-empty list"]
     unknown = [n for n in nodes if not isinstance(n, str) or n not in graph.nodes]
     if unknown:
         listed = ", ".join(str(n) for n in unknown)
-        return errors + [f"path {path_id} has unknown nodes: {listed}"]
+        return errors + [f"route {path_id} has unknown nodes: {listed}"]
     repeated = sorted({n for n in nodes if nodes.count(n) > 1})
     if repeated:
         # A route is a walk over distinct nodes; a repeat only inflates the node
         # count the renderer prints, since every computed set ignores it.
-        return errors + [f"path {path_id} lists {', '.join(repeated)} more than once"]
+        return errors + [f"route {path_id} lists {', '.join(repeated)} more than once"]
 
     if graph.role(nodes[0]) != "entry":
-        errors.append(f"path {path_id} must start at an entry node")
+        errors.append(f"route {path_id} must start at an entry node")
     if objective and nodes[-1] != objective:
-        errors.append(f"path {path_id} must end at {objective}")
+        errors.append(f"route {path_id} must end at {objective}")
     for node_id in nodes[1:-1]:
         if graph.role(node_id) != "function":
-            errors.append(f"path {path_id} interior node {node_id} must be a function")
+            errors.append(f"route {path_id} interior node {node_id} must be a function")
 
     seen: set[str] = set()
     for node_id in nodes:
         node = graph.nodes[node_id]
-        needed = _requires(node)
-        if needed and _requires_all(node):
+        needed = _predecessors(node)
+        if needed and _conjunctive(node):
             missing = [r for r in needed if r not in seen]
             if missing:
                 errors.append(
-                    f"path {path_id} reaches {node_id} without {', '.join(sorted(missing))}"
+                    f"route {path_id} reaches {node_id} without {', '.join(sorted(missing))}"
                 )
         elif needed and not any(r in seen for r in needed):
             errors.append(
-                f"path {path_id} reaches {node_id} before any of its predecessors"
+                f"route {path_id} reaches {node_id} before any of its predecessors"
             )
         seen.add(node_id)
 
     if not graph.interior(path_id):
-        errors.append(f"path {path_id} needs at least one interior node")
+        errors.append(f"route {path_id} needs at least one interior node")
     elif objective:
         errors.extend(_droppable_errors(graph, path_id, nodes, objective))
 
     witnesses = _witnesses(path)
     if not witnesses:
-        errors.append(f"path {path_id}.witnesses must record at least one observation")
+        errors.append(f"route {path_id}.witnesses must record at least one observation")
     for index, witness in enumerate(witnesses):
-        evidence_shape(witness, f"path {path_id} witness {index}", errors)
+        evidence_shape(witness, f"route {path_id} witness {index}", errors)
 
     advisories = path.get("advisories")
     if advisories is not None and (
         not isinstance(advisories, list)
         or any(not _text(a) for a in advisories)
     ):
-        errors.append(f"path {path_id}.advisories must be a list of identifiers")
+        errors.append(f"route {path_id}.advisories must be a list of identifiers")
     return errors
 
 
-def _cut_errors(graph: Graph, document: dict) -> list[str]:
+def _advisory_cut_errors(graph: Graph, document: dict) -> list[str]:
+    """The one cut in the graph whose admissibility is known.
+
+    `survived` is decisive and `refused` is not: one request reaching the
+    objective proves the route open, while no number of refusals proves it
+    closed. So `refused` records what this run sent, never that the fix severed
+    the route, and each entry says which payload shapes it tried.
+
+    Every other cut this tool reports is a candidate nobody has judged — the
+    cheapest is routinely a shared executor every legitimate request needs, so
+    severing it is feature amputation. This one shipped upstream with the
+    feature intact, which makes it an exemplar: these nodes could be guarded,
+    and the project accepted the result.
+
+    `nodes` is what the fix touched. `refused` and `survived` are what that
+    achieved over the recorded routes, so an accepted cut that leaves a route
+    open is sayable — which is the whole reason to record it rather than trust
+    it.
+
+    One advisory, one cut, so there is no id and no `reference`. The earlier
+    model let a defense be split across two ids, and the id holding only the
+    refused routes then read as terminal for a defense a recorded route
+    demonstrably escaped.
+    """
+    raw = document.get("advisory_cut")
+    if raw is None:
+        return []
+    if not isinstance(raw, dict):
+        return ["advisory_cut must be an object"]
+
     errors: list[str] = []
-    raw = document.get("observed_cuts", [])
-    if not isinstance(raw, list):
-        return ["observed_cuts must be a list"]
-    if len({c["id"] for c in graph.observed_cuts}) != len(raw):
-        errors.append("every observed_cuts entry needs a unique string id")
-    seen_reference: dict[str, str] = {}
-    for cut in graph.observed_cuts:
-        cut_id = cut["id"]
-        reference = cut.get("reference")
-        if not _text(reference):
-            errors.append(f"cut {cut_id}.reference must be a non-empty string")
-        elif reference in seen_reference:
-            # Split ids give one defense two readings: the id holding only the
-            # blocked routes reads terminal, for a defense a recorded route escaped.
-            errors.append(
-                f"cuts {seen_reference[reference]} and {cut_id} record the same "
-                f"defense {reference!r}; use one id"
-            )
-        else:
-            seen_reference[reference] = cut_id
-        seen: set[str] = set()
-        recorded = 0
-        for key in ("blocked", "survived"):
-            entries = cut.get(key, [])
-            if not isinstance(entries, list):
-                errors.append(f"cut {cut_id}.{key} must be a list")
+    if "blocked" in raw:
+        # Ignoring it would drop the whole side: the routes it names vanish from
+        # the render and from the merge, and the `tried` check never sees them.
+        errors.append("advisory_cut.blocked is now refused, and each entry needs `tried`")
+    # The cut is named for the advisory, so it must say which one. Most fixes
+    # ship with a CVE; a few land as an ordinary commit, and naming that commit
+    # is what keeps the cut from being anonymous.
+    if not _text(raw.get("advisory")):
+        errors.append("advisory_cut.advisory must name the advisory, or the "
+                      "upstream commit where the fix shipped without one")
+    nodes = raw.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        errors.append("advisory_cut.nodes must be a non-empty list of the nodes the fix touched")
+    else:
+        for node_id in nodes:
+            if node_id not in graph.nodes:
+                errors.append(f"advisory_cut.nodes names {node_id}, which is not a node")
+            elif graph.role(node_id) != "function":
+                # A fix that severed a terminal would be removing the identity the
+                # challenge grants, or the asset itself. Neither is a defense of
+                # this boundary, and neither is what upstream shipped.
+                errors.append(f"advisory_cut.nodes names {node_id}, a {graph.role(node_id)}")
+    seen: set[str] = set()
+    recorded = 0
+    for key in CUT_SIDES:
+        entries = raw.get(key, [])
+        if not isinstance(entries, list):
+            errors.append(f"advisory_cut.{key} must be a list")
+            continue
+        recorded += len(entries)
+        for entry in entries:
+            path_ref = entry.get("path") if isinstance(entry, dict) else None
+            if not isinstance(path_ref, str) or path_ref not in graph.paths:
+                errors.append(f"advisory_cut.{key} has an unknown route")
                 continue
-            recorded += len(entries)
-            for entry in entries:
-                path_ref = entry.get("path") if isinstance(entry, dict) else None
-                if not isinstance(path_ref, str) or path_ref not in graph.paths:
-                    errors.append(f"cut {cut_id}.{key} has an unknown path")
-                    continue
-                if path_ref in seen:
-                    errors.append(f"cut {cut_id} lists {path_ref} twice")
-                seen.add(path_ref)
-                evidence_shape(entry, f"cut {cut_id} entry {path_ref}", errors)
-        if not recorded:
-            # Survivors alone are a legitimate cut: "this defense was applied and
-            # did not stop these routes" is the contestability signal, and an
-            # EXPAND fragment carrying only a survivor must be able to say it.
-            errors.append(f"cut {cut_id} must record at least one path")
+            if path_ref in seen:
+                errors.append(f"advisory_cut records {path_ref} on both sides")
+            seen.add(path_ref)
+            evidence_shape(entry, f"advisory_cut {key} {path_ref}", errors)
+            if key == "refused" and not _text(entry.get("tried")):
+                # "Every request I sent failed" is not "the route is severed", and
+                # a run that sent one family of payloads cannot tell them apart.
+                # Saying what was tried is what lets a reader see the gap.
+                errors.append(
+                    f"advisory_cut.refused {path_ref} must say what was tried; "
+                    "refusing every request of one shape is not severance"
+                )
+    if not recorded:
+        errors.append("advisory_cut records no route; leave it out instead")
     return errors
 
 
 def _cycle_errors(graph: Graph) -> list[str]:
-    edges = {n: _requires(node) for n, node in graph.nodes.items()}
+    edges = {n: _predecessors(node) for n, node in graph.nodes.items()}
     colors: dict[str, int] = {}
 
     def visit(node: str) -> bool:
@@ -564,106 +544,7 @@ def _cycle_errors(graph: Graph) -> list[str]:
     return []
 
 
-# --- evidence and study validation ------------------------------------------
-
-
-def study_errors(study_dir: Path) -> list[str]:
-    """The study directory must be a real Stage 3 study, not a scratch tree."""
-    if not study_dir.is_dir():
-        return [f"study directory does not exist: {study_dir}"]
-    if not (study_dir / STUDY_DOCUMENT).is_file():
-        return [
-            f"{study_dir} is not a Stage 3 study; no STAGE3_STUDY.md. "
-            "Evidence must resolve against the study that produced it."
-        ]
-    return []
-
-
-def _evidence_entries(graph: Graph) -> list[tuple[str, dict]]:
-    entries: list[tuple[str, dict]] = []
-    for node_id, node in graph.nodes.items():
-        if graph.role(node_id) == "function" and isinstance(node.get("evidence"), dict):
-            entries.append((f"node {node_id}", node["evidence"]))
-    for path_id, path in graph.paths.items():
-        for index, witness in enumerate(_witnesses(path)):
-            entries.append((f"path {path_id} witness {index}", witness))
-    for cut in graph.observed_cuts:
-        for key in ("blocked", "survived"):
-            raw = cut.get(key, [])
-            for entry in raw if isinstance(raw, list) else []:
-                if isinstance(entry, dict):
-                    entries.append((f"cut {cut['id']} {key} {entry.get('path')}", entry))
-    return entries
-
-
-def evidence_errors(graph: Graph, study_dir: Path) -> list[str]:
-    """Resolve each locator to a real line holding the observed string."""
-    errors: list[str] = []
-    declared = graph.document.get("evidence_root")
-    anchor = (
-        (study_dir / str(declared)).resolve() if declared is not None else study_dir.resolve()
-    )
-    for where, evidence in _evidence_entries(graph):
-        match = LOCATOR.match(str(evidence.get("locator", "")))
-        relative = Path(match.group("path"))
-        if relative.is_absolute() or ".." in relative.parts:
-            errors.append(f"{where} locator must stay inside the study")
-            continue
-        resolved = study_dir / relative
-        # resolve() first: a symlink inside the tree must not read out of it.
-        if not resolved.resolve().is_relative_to(anchor):
-            errors.append(f"{where} locator resolves outside {anchor.name}")
-            continue
-        if not resolved.is_file():
-            errors.append(f"{where} locator does not exist: {relative}")
-            continue
-        lines = resolved.read_text(encoding="utf-8", errors="replace").split("\n")
-        number = int(match.group("line"))
-        if number > len(lines):
-            errors.append(f"{where} locator points past the end of {relative}")
-            continue
-        if str(evidence.get("observed", "")) not in lines[number - 1]:
-            errors.append(f"{where} observed string is not on {relative} line {number}")
-    return errors
-
-
-def discriminator_warnings(graph: Graph, study_dir: Path) -> list[dict]:
-    """Flag a route's witness that reads the same on the repaired build.
-
-    A witness claims the objective was reached, so text that also appears where
-    the cut recorded that route blocked cannot support it. The comparison is
-    against those exact cited lines: pooling whole files warned on every study
-    that keeps one combined fixed-build log, and on a survivor's own success
-    string, which is what surviving means.
-    """
-    blocked_lines: dict[str, list[str]] = {}
-    for cut in graph.observed_cuts:
-        for entry in cut.get("blocked", []) or []:
-            match = LOCATOR.match(str(entry.get("locator", ""))) if isinstance(entry, dict) else None
-            if not match:
-                continue
-            candidate = study_dir / match.group("path")
-            if not candidate.is_file():
-                continue
-            lines = candidate.read_text(encoding="utf-8", errors="replace").split("\n")
-            number = int(match.group("line"))
-            if number <= len(lines):
-                blocked_lines.setdefault(entry["path"], []).append(lines[number - 1])
-
-    warnings = []
-    for path_id, path in graph.paths.items():
-        for index, witness in enumerate(_witnesses(path)):
-            observed = str(witness.get("observed", ""))
-            if observed and any(observed in line for line in blocked_lines.get(path_id, [])):
-                warnings.append(
-                    {
-                        "kind": "non_discriminating_witness",
-                        "where": f"path {path_id} witness {index}",
-                        "detail": "observed text also appears where this route was "
-                        "recorded blocked, so it does not show the objective was reached",
-                    }
-                )
-    return warnings
+# --- evidence validation ----------------------------------------------------
 
 
 def scope_errors(graph: Graph, registry_path: Path) -> list[str]:
@@ -671,7 +552,8 @@ def scope_errors(graph: Graph, registry_path: Path) -> list[str]:
     try:
         registry = json.loads(registry_path.read_text(encoding="utf-8"))
         known = {entry.get("id") for entry in registry["scopes"]}
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError,
+            AttributeError) as exc:
         return [f"scope registry could not be read: {exc}"]
     errors = []
     for node_id in graph.by_role("objective"):
@@ -681,19 +563,20 @@ def scope_errors(graph: Graph, registry_path: Path) -> list[str]:
     return errors
 
 
-def validate(document: object, study_dir: Path, registry: Path | None = None) -> list[str]:
-    """Every check, in the order that produces the most useful first message."""
+def validate(document: object, registry: Path) -> list[str]:
+    """Every check, in the order that produces the most useful first message.
+
+    Nothing outside the document is read but the scope registry, which is a
+    fixed list rather than a per-study artifact. The registry is required: an
+    optional one meant every objective scope went unchecked in silence.
+    """
     errors = structural_errors(document)
     if errors:
         return errors
-    graph = Graph(document)
-    errors = study_errors(study_dir) or evidence_errors(graph, study_dir)
-    if not errors and registry is not None:
-        errors = scope_errors(graph, registry)
-    return errors
+    return scope_errors(Graph(document), registry)
 
 
-def load(path: Path, study_dir: Path, registry: Path | None = None) -> tuple[object, list[str]]:
+def load(path: Path, registry: Path) -> tuple[object, list[str]]:
     """Read and fully validate one graph, for every CLI."""
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
@@ -703,4 +586,4 @@ def load(path: Path, study_dir: Path, registry: Path | None = None) -> tuple[obj
         return None, [f"{path} could not be read: {exc}"]
     except json.JSONDecodeError as exc:
         return None, [f"{path} is not valid JSON: {exc}"]
-    return document, validate(document, study_dir, registry)
+    return document, validate(document, registry)

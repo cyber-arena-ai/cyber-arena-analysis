@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compute cuts, geometry, coverage, and the open frontier for a challenge graph."""
+"""Compute cuts, geometry, and objective coverage for a challenge graph."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from _graph import Graph, analyze, discriminator_warnings, load
+from _graph import Graph, analyze, load
 
 
 def main() -> int:
@@ -16,19 +16,14 @@ def main() -> int:
     parser.add_argument("graph", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(
-        "--study-dir",
-        type=Path,
-        required=True,
-        help="Stage 3 study directory; the graph is fully validated before use",
-    )
-    parser.add_argument(
         "--scope-registry",
         type=Path,
-        help="attack-scopes.json; when given, objective scopes are checked against it",
+        required=True,
+        help="attack-scopes.json; objective scopes are checked against it",
     )
     args = parser.parse_args()
 
-    document, errors = load(args.graph, args.study_dir, args.scope_registry)
+    document, errors = load(args.graph, args.scope_registry)
     if errors:
         for error in errors:
             print(error, file=sys.stderr)
@@ -37,10 +32,9 @@ def main() -> int:
 
     graph = Graph(document)
     analysis = analyze(graph)
-    analysis["warnings"] = discriminator_warnings(graph, args.study_dir)
     args.out.write_text(json.dumps(analysis, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"{args.out}: geometry={','.join(analysis['geometry']) or 'none'} "
-          f"mincut_all={analysis['mincut_all']} warnings={len(analysis['warnings'])}")
+          f"mincut_all={analysis['mincut_all']}")
     return 0
 
 

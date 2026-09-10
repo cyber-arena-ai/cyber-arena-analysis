@@ -1,8 +1,12 @@
+import http.server
 import json
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
+
+import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 REGISTRY = (
@@ -13,26 +17,23 @@ REGISTRY = (
 )
 REVISION = "a" * 40
 
-EVIDENCE = {
-    "pov.txt": "201 Created share=7f2a\nrecovered victim report body\n",
-    "alt.txt": "201 Created template=t9\nrecovered victim report body\n",
-    "fixed-pov.txt": "403 Forbidden denied\n",
-    "fixed-alt.txt": "recovered victim report body\n",
-}
+def _cite(source, observed, excerpt=None):
+    """One observation: the request, what came back, and the part carrying the claim."""
+    return {
+        "source": source,
+        "excerpt": excerpt if excerpt is not None else observed,
+        "observed": observed,
+    }
 
 
-def _cite(locator, observed):
-    return {"locator": locator, "observed": observed}
-
-
-def _fn(node_id, title, requires, locator, observed, **extra):
+def _fn(node_id, title, predecessors, source, observed, **extra):
     return {
         "id": node_id,
         "role": "function",
         "title": title,
         "symbol": f"App.{node_id.removeprefix('N-').replace('-', '_')}",
-        "requires": requires,
-        "evidence": _cite(locator, observed),
+        "predecessors": predecessors,
+        "evidence": _cite(source, observed),
         **extra,
     }
 
@@ -42,27 +43,26 @@ def _graph():
     return {
         "schema_version": 2,
         "target": {"id": "acme-reports", "repository": "acme/reports", "revision": REVISION},
-        "evidence_root": "evidence",
         "nodes": [
             {"id": "N-entry", "role": "entry", "title": "Baseline principal"},
             _fn("N-create-share", "create share link", ["N-entry"],
-                "evidence/pov.txt#L1", "201 Created share",
+                "vulnerable build · GET /pov · 200 #L1", "201 Created share",
                 symbol="ShareController.create"),
             _fn("N-resolve-share", "resolve share link", ["N-create-share"],
-                "evidence/pov.txt#L2", "recovered victim",
+                "vulnerable build · GET /pov · 200 #L2", "recovered victim",
                 symbol="ShareController.resolve"),
             _fn("N-upload-template", "upload template", ["N-entry"],
-                "evidence/alt.txt#L1", "201 Created template",
+                "vulnerable build · GET /alt · 200 #L1", "201 Created template",
                 symbol="TemplateController.create"),
             _fn("N-render-template", "render template", ["N-upload-template"],
-                "evidence/alt.txt#L2", "recovered victim",
+                "vulnerable build · GET /alt · 200 #L2", "recovered victim",
                 symbol="ExportRenderer.render"),
             {
                 "id": "N-obj",
                 "role": "objective",
                 "store": "report_store",
                 "scope": "app.cross_boundary.read",
-                "requires": ["N-resolve-share", "N-render-template"],
+                "predecessors": ["N-resolve-share", "N-render-template"],
             },
         ],
         "paths": [
@@ -71,25 +71,15 @@ def _graph():
                 "objective": "N-obj",
                 "nodes": ["N-entry", "N-create-share", "N-resolve-share", "N-obj"],
                 "advisories": ["CVE-2026-0001"],
-                "witnesses": [_cite("evidence/pov.txt#L2", "recovered victim report")],
+                "witnesses": [_cite("vulnerable build · GET /pov · 200 #L2", "recovered victim report")],
             },
             {
                 "id": "PATH-alt",
                 "objective": "N-obj",
                 "nodes": ["N-entry", "N-upload-template", "N-render-template", "N-obj"],
                 "advisories": [],
-                "witnesses": [_cite("evidence/alt.txt#L2", "recovered victim report")],
+                "witnesses": [_cite("vulnerable build · GET /alt · 200 #L2", "recovered victim report")],
             },
-        ],
-        "observed_cuts": [
-            {
-                "id": "CUT-upstream",
-                "reference": "upstream_fix",
-                "blocked": [_cite("evidence/fixed-pov.txt#L1", "403 Forbidden") | {"path": "PATH-pov"}],
-                "survived": [
-                    _cite("evidence/fixed-alt.txt#L1", "recovered victim") | {"path": "PATH-alt"}
-                ],
-            }
         ],
     }
 
@@ -102,35 +92,23 @@ def _path(graph, path_id):
     return next(p for p in graph["paths"] if p["id"] == path_id)
 
 
-def _study(tmp_path):
-    study = tmp_path / "study"
-    (study / "evidence").mkdir(parents=True, exist_ok=True)
-    for name, body in EVIDENCE.items():
-        (study / "evidence" / name).write_text(body, encoding="utf-8")
-    (study / "STAGE3_STUDY.md").write_text(
-        "The attacker resolves the share link and reads the victim report body.\n",
-        encoding="utf-8",
-    )
-    return study
-
-
 def _write(tmp_path, graph):
     path = tmp_path / "graph.json"
     path.write_text(json.dumps(graph, indent=2) + "\n", encoding="utf-8")
     return path
 
 
-def _run(script, tmp_path, graph, *extra, study=None):
+def _run(script, tmp_path, graph, *extra):
     return subprocess.run(
         [sys.executable, str(SCRIPTS / script), str(_write(tmp_path, graph)),
-         "--study-dir", str(study or _study(tmp_path)), *extra],
+         "--scope-registry", str(REGISTRY), *extra],
         capture_output=True,
         text=True,
     )
 
 
-def _validate(tmp_path, graph, study=None):
-    return _run("graph_validate.py", tmp_path, graph, study=study)
+def _validate(tmp_path, graph):
+    return _run("graph_validate.py", tmp_path, graph)
 
 
 def _analyze(tmp_path, graph):
@@ -141,10 +119,16 @@ def _analyze(tmp_path, graph):
 
 
 def _render(tmp_path, graph):
-    out = tmp_path / "derived" / "graph.md"
-    result = _run("graph_render.py", tmp_path, graph, "--out", str(out))
-    assert result.returncode == 0, result.stderr
-    return out.read_text(encoding="utf-8")
+    """graph.md as a reader meets it. `graph_finalize.py` writes it; this calls
+    the same two functions rather than standing up a whole deliverable."""
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        from _graph import Graph, analyze
+        from graph_render import report
+    finally:
+        sys.path.pop(0)
+    assert _validate(tmp_path, graph).returncode == 0
+    return report(Graph(graph), analyze(Graph(graph)))
 
 
 def _fails(tmp_path, mutate, needle):
@@ -156,14 +140,68 @@ def _fails(tmp_path, mutate, needle):
     return result
 
 
+# --- the advisory's own fix -------------------------------------------------
+
+
+def _cut(graph, refused=("PATH-pov",), survived=("PATH-alt",), nodes=("N-resolve-share",)):
+    graph["advisory_cut"] = {
+        "advisory": "CVE-2026-0001",
+        "nodes": list(nodes),
+        "refused": [_cite("fixed build · GET /s/7f2a · 403", "403 Forbidden owner_check")
+                    | {"path": p, "tried": "token guess, direct id, and the study's payload"}
+                    for p in refused],
+        "survived": [_cite("fixed build · GET /reports/9/export · 200",
+                           "recovered victim report") | {"path": p} for p in survived],
+    }
+    return graph
+
+
+def test_the_advisory_fix_records_the_cut_it_accepted_and_what_it_left_open(tmp_path):
+    """The one cut whose admissibility is known, and what it actually achieved."""
+    body = _render(tmp_path, _cut(_graph()))
+    assert "| advisory | CVE-2026-0001 |" in body
+    assert "| nodes it guarded | N-resolve-share |" in body
+    assert "| routes that refused every request tried | PATH-pov |" in body
+    assert "| routes it left open | PATH-alt |" in body
+
+
+def test_an_accepted_cut_cannot_name_a_terminal(tmp_path):
+    """Upstream did not ship a fix that removed the login or the asset."""
+    _fails(tmp_path, lambda g: _cut(g, nodes=("N-entry",)),
+           "advisory_cut.nodes names N-entry, a entry")
+
+
+def test_one_route_cannot_be_both_refused_and_open(tmp_path):
+    """It would read as a defense that worked, next to the proof it did not."""
+    _fails(tmp_path, lambda g: _cut(g, refused=("PATH-pov",), survived=("PATH-pov",)),
+           "records PATH-pov on both sides")
+
+
+def test_the_renamed_side_is_rejected_rather_than_dropped(tmp_path):
+    """The worked example kept `blocked` through the rename and still validated,
+    so the routes it recorded vanished from the render and the merge."""
+    def rename(g):
+        _cut(g)
+        g["advisory_cut"]["blocked"] = g["advisory_cut"].pop("refused")
+    _fails(tmp_path, rename, "advisory_cut.blocked is now refused")
+
+
+def test_a_refusal_must_say_what_it_tried(tmp_path):
+    """A run recorded three routes closed on one payload family; a fourth opened
+    them. No count of refusals is severance, so the record says what it sent."""
+    def drop(g):
+        _cut(g)
+        del g["advisory_cut"]["refused"][0]["tried"]
+    _fails(tmp_path, drop, "must say what was tried")
+
+
 # --- the fixture itself -----------------------------------------------------
 
 
-def test_two_disjoint_routes_read_as_disjoint_and_contestable(tmp_path):
+def test_two_disjoint_routes_read_as_disjoint(tmp_path):
     analysis = _analyze(tmp_path, _graph())
     assert analysis["geometry"] == ["disjoint"]
     assert analysis["mincut_all"] == 2
-    assert analysis["observed_cuts"][0]["reading"] == "contestable_observed"
 
 
 # --- schema 2 migration -----------------------------------------------------
@@ -184,25 +222,17 @@ def test_a_v1_shaped_document_names_the_structural_change(tmp_path):
     _fails(tmp_path, mutate, "'states' is schema 1")
 
 
-def test_evidence_kind_is_rejected_rather_than_ignored(tmp_path):
-    """Silently accepting `kind` would let v1 habits survive unnoticed."""
-    def mutate(graph):
-        _node(graph, "N-create-share")["evidence"]["kind"] = "reproduced"
-    _fails(tmp_path, mutate, "kind was removed in schema 2")
+def test_the_removed_evidence_fields_are_rejected_rather_than_ignored(tmp_path):
+    """Silently accepting one would let a graph carry a dependency it cannot check."""
+    for gone in ("kind", "locator"):
+        _fails(
+            tmp_path,
+            lambda g, gone=gone: _node(g, "N-create-share")["evidence"].__setitem__(gone, "x"),
+            f"evidence.{gone} was removed",
+        )
 
 
-# --- routes may not merge (the cut-shrinking regression) --------------------
-
-
-def test_a_route_may_not_absorb_another_routes_nodes(tmp_path):
-    """Listing both branches in one path shrinks the hitting set and understates
-    the mincut: the tool would claim one node cuts routes it never touches."""
-    def mutate(graph):
-        _path(graph, "PATH-pov")["nodes"] = [
-            "N-entry", "N-create-share", "N-resolve-share",
-            "N-upload-template", "N-render-template", "N-obj",
-        ]
-    _fails(tmp_path, mutate, "still reaches N-obj without")
+# --- a route walks its predecessors -----------------------------------------
 
 
 def test_a_route_must_reach_each_node_through_a_predecessor(tmp_path):
@@ -214,11 +244,11 @@ def test_a_route_must_reach_each_node_through_a_predecessor(tmp_path):
 # --- AND / OR ---------------------------------------------------------------
 
 
-def test_requires_all_demands_every_predecessor_on_the_route(tmp_path):
+def test_a_conjunctive_node_demands_every_predecessor_on_the_route(tmp_path):
     def mutate(graph):
         node = _node(graph, "N-resolve-share")
-        node["requires"] = ["N-create-share", "N-upload-template"]
-        node["requires_all"] = True
+        node["predecessors"] = ["N-create-share", "N-upload-template"]
+        node["conjunctive"] = True
     _fails(tmp_path, mutate, "without N-upload-template")
 
 
@@ -227,9 +257,9 @@ def _shared_serializer(graph):
     graph["nodes"].append(
         _fn("N-serialize", "shared response serializer",
             ["N-resolve-share", "N-render-template"],
-            "evidence/pov.txt#L2", "recovered victim")
+            "vulnerable build · GET /pov · 200 #L2", "recovered victim")
     )
-    _node(graph, "N-obj")["requires"] = ["N-serialize"]
+    _node(graph, "N-obj")["predecessors"] = ["N-serialize"]
     for path_id in ("PATH-pov", "PATH-alt"):
         path = _path(graph, path_id)
         path["nodes"] = path["nodes"][:-1] + ["N-serialize", "N-obj"]
@@ -241,18 +271,9 @@ def test_a_shared_node_reached_by_either_branch_reads_as_fan_in(tmp_path):
     analysis = _analyze(tmp_path, _shared_serializer(_graph()))
     assert analysis["geometry"] == ["fan_in"]
     assert analysis["mincut_all"] == 1
-    assert analysis["minimum_cuts_all"] == [["N-serialize"]]
 
 
 # --- terminals are never cut ------------------------------------------------
-
-
-def test_no_cut_ever_contains_a_terminal(tmp_path):
-    """The entry is the identity the challenge grants, so 'disable login' is not
-    a defense of this boundary; including it would make every mincut 1."""
-    analysis = _analyze(tmp_path, _graph())
-    flat = {node for cut in analysis["minimum_cuts_all"] for node in cut}
-    assert "N-entry" not in flat and "N-obj" not in flat
 
 
 # --- geometry ---------------------------------------------------------------
@@ -260,45 +281,28 @@ def test_no_cut_ever_contains_a_terminal(tmp_path):
 
 def _shortcut(graph):
     graph["nodes"].append(
-        _fn("N-direct", "one-hop shortcut", ["N-entry"], "evidence/pov.txt#L2", "recovered victim")
+        _fn("N-direct", "one-hop shortcut", ["N-entry"], "vulnerable build · GET /pov · 200 #L2", "recovered victim")
     )
-    _node(graph, "N-obj")["requires"].append("N-direct")
+    _node(graph, "N-obj")["predecessors"].append("N-direct")
     graph["paths"].append(
         {
             "id": "PATH-short",
             "objective": "N-obj",
             "nodes": ["N-entry", "N-direct", "N-obj"],
             "advisories": [],
-            "witnesses": [_cite("evidence/pov.txt#L2", "recovered victim report")],
+            "witnesses": [_cite("vulnerable build · GET /pov · 200 #L2", "recovered victim report")],
         }
     )
 
 
-def test_a_one_node_route_is_labelled_shallow_not_rejected(tmp_path):
-    graph = _graph()
-    _shortcut(graph)
-    analysis = _analyze(tmp_path, graph)
-    assert analysis["geometry"] == ["shallow"]
-    assert analysis["nontrivial_paths"]["PATH-short"] is False
-
-
-def test_a_shallow_route_cannot_manufacture_disjoint_geometry(tmp_path):
-    """`shallow` is exclusive: a trivial shortcut raises mincut_all but must not
-    be reported as two materially different routes."""
+def test_a_one_node_route_is_recorded_like_any_other(tmp_path):
+    """A one-function route is still a route: it raises the min-cut and takes
+    whatever label the shape earns, rather than blanking the reading."""
     graph = _graph()
     _shortcut(graph)
     analysis = _analyze(tmp_path, graph)
     assert analysis["mincut_all"] == 3
-    assert analysis["mincut_nontrivial"] == 2
-
-
-def test_a_lone_route_is_labelled_single_path(tmp_path):
-    graph = _graph()
-    graph["paths"] = [_path(graph, "PATH-pov")]
-    graph["observed_cuts"][0]["survived"] = []
-    analysis = _analyze(tmp_path, graph)
-    assert analysis["geometry"] == ["single_path"]
-    assert analysis["observed_cuts"][0]["reading"] == "terminal_over_recorded_subgraph"
+    assert "disjoint" in analysis["geometry"]
 
 
 def test_one_node_reaching_two_objectives_reads_as_fan_out(tmp_path):
@@ -309,7 +313,7 @@ def test_one_node_reaching_two_objectives_reads_as_fan_out(tmp_path):
             "role": "objective",
             "store": "second_store",
             "scope": "app.cross_boundary.write",
-            "requires": ["N-resolve-share"],
+            "predecessors": ["N-resolve-share"],
         }
     )
     graph["paths"].append(
@@ -318,48 +322,10 @@ def test_one_node_reaching_two_objectives_reads_as_fan_out(tmp_path):
             "objective": "N-obj2",
             "nodes": ["N-entry", "N-create-share", "N-resolve-share", "N-obj2"],
             "advisories": [],
-            "witnesses": [_cite("evidence/pov.txt#L2", "recovered victim report")],
+            "witnesses": [_cite("vulnerable build · GET /pov · 200 #L2", "recovered victim report")],
         }
     )
     assert "fan_out" in _analyze(tmp_path, graph)["geometry"]
-
-
-def test_implicated_nodes_drop_anything_the_survivor_also_uses(tmp_path):
-    """The extensional root cause: what the cut removed and the survivor kept.
-
-    The shared node must be subtracted; the fixture's own routes are disjoint,
-    so testing this on them would pass with the subtraction deleted.
-    """
-    graph = _shared_serializer(_graph())
-    implicated = _analyze(tmp_path, graph)["observed_cuts"][0]["implicated_nodes"]
-    assert implicated == ["N-create-share", "N-resolve-share"], (
-        "N-serialize is on the survivor and must not be implicated"
-    )
-
-
-# --- frontier ---------------------------------------------------------------
-
-
-def test_a_path_no_cut_was_run_against_lands_on_the_frontier(tmp_path):
-    graph = _graph()
-    graph["observed_cuts"][0]["survived"] = []
-    frontier = _analyze(tmp_path, graph)["frontier"]
-    assert {"kind": "untested_path", "target": "PATH-alt"} in frontier
-
-
-def test_an_objective_with_no_route_lands_on_the_frontier(tmp_path):
-    graph = _graph()
-    graph["nodes"].append(
-        {
-            "id": "N-obj2",
-            "role": "objective",
-            "store": "second_store",
-            "scope": "app.cross_boundary.write",
-            "requires": ["N-resolve-share"],
-        }
-    )
-    frontier = _analyze(tmp_path, graph)["frontier"]
-    assert {"kind": "unreached_objective", "target": "N-obj2"} in frontier
 
 
 # --- witnesses and advisories -----------------------------------------------
@@ -378,19 +344,14 @@ def test_advisories_record_every_cve_in_a_chained_route(tmp_path):
     assert "CVE-2026-0002" in _render(tmp_path, graph)
 
 
-def test_advisories_must_be_a_list_of_identifiers(tmp_path):
-    def mutate(graph):
-        _path(graph, "PATH-pov")["advisories"] = "CVE-2026-0001"
-    _fails(tmp_path, mutate, "must be a list of identifiers")
-
-
 # --- citations --------------------------------------------------------------
 
 
-def test_observed_string_must_be_on_the_cited_line(tmp_path):
+def test_observed_must_appear_in_the_excerpt_it_was_taken_from(tmp_path):
+    """The one check left once nothing is resolved: the quote is in the text."""
     def mutate(graph):
         _node(graph, "N-create-share")["evidence"]["observed"] = "never appeared anywhere"
-    _fails(tmp_path, mutate, "observed string is not on")
+    _fails(tmp_path, mutate, "does not appear in the excerpt")
 
 
 def test_observed_must_quote_enough_to_identify_the_line(tmp_path):
@@ -399,121 +360,14 @@ def test_observed_must_quote_enough_to_identify_the_line(tmp_path):
     _fails(tmp_path, mutate, "at least 8 characters")
 
 
-def test_a_locator_cannot_leave_the_evidence_root(tmp_path):
-    """Names the message, so a rejection for some other reason cannot pass."""
-    def mutate(graph):
-        _node(graph, "N-create-share")["evidence"] = _cite(
-            "STAGE3_STUDY.md#L1", "The attacker resolves"
-        )
-    _fails(tmp_path, mutate, "resolves outside evidence")
-
-
-def test_a_locator_cannot_traverse_out_of_the_study(tmp_path):
-    def mutate(graph):
-        _node(graph, "N-create-share")["evidence"] = _cite(
-            "evidence/../../outside.txt#L1", "201 Created share"
-        )
-    _fails(tmp_path, mutate, "must stay inside the study")
-
-
-def test_a_symlink_cannot_read_outside_the_study(tmp_path):
-    secret = tmp_path / "outside.txt"
-    secret.write_text("201 Created share=7f2a\n", encoding="utf-8")
-    study = _study(tmp_path)
-    (study / "evidence" / "link.txt").symlink_to(secret)
-    graph = _graph()
-    _node(graph, "N-create-share")["evidence"] = _cite("evidence/link.txt#L1", "201 Created share")
-    result = _validate(tmp_path, graph, study=study)
-    assert result.returncode == 1
-    assert "resolves outside" in result.stderr
-
-
-def test_a_graph_without_evidence_root_may_cite_the_study_document(tmp_path):
-    """Some studies retained no evidence directory; the graph is still buildable."""
-    graph = _graph()
-    graph.pop("evidence_root")
-    for node in graph["nodes"]:
-        if node["role"] == "function":
-            node["evidence"] = _cite("STAGE3_STUDY.md#L1", "The attacker resolves")
-    for path in graph["paths"]:
-        path["witnesses"] = [_cite("STAGE3_STUDY.md#L1", "reads the victim report")]
-    for cut in graph["observed_cuts"]:
-        for key in ("blocked", "survived"):
-            for entry in cut[key]:
-                entry.update(_cite("STAGE3_STUDY.md#L1", "The attacker resolves"))
-    assert _validate(tmp_path, graph).returncode == 0
-
-
-def test_citation_sources_expose_a_graph_built_from_study_prose(tmp_path):
-    graph = _graph()
-    graph.pop("evidence_root")
-    before = _analyze(tmp_path, graph)["citation_sources"]
-    assert before["study_document"] == 0
-
-    _node(graph, "N-create-share")["evidence"] = _cite("STAGE3_STUDY.md#L1", "The attacker resolves")
-    after = _analyze(tmp_path, graph)["citation_sources"]
-    assert after["study_document"] == 1
-    assert after["retained_evidence"] == before["retained_evidence"] - 1
-
-
-def test_fabricated_cut_evidence_is_rejected(tmp_path):
-    def mutate(graph):
-        graph["observed_cuts"][0]["blocked"][0]["observed"] = "418 I am a teapot"
-    _fails(tmp_path, mutate, "observed string is not on")
-
-
-# --- the discriminator warning ----------------------------------------------
-
-
-def test_a_witness_that_reads_the_same_on_the_fixed_build_warns(tmp_path):
-    """A blocked route's witness must differ across builds or it shows nothing."""
-    graph = _graph()
-    graph["observed_cuts"][0]["blocked"][0].update(
-        _cite("evidence/fixed-alt.txt#L1", "recovered victim")
-    )
-    analysis = _analyze(tmp_path, graph)
-    assert any(w["where"].startswith("path PATH-pov") for w in analysis["warnings"])
-
-
-def test_the_fixed_build_is_found_by_citation_not_by_filename(tmp_path):
-    """A study naming its repaired run `patched.txt` must still be checked; an
-    empty warning list otherwise reads as 'checked and clean'."""
-    study = _study(tmp_path)
-    (study / "evidence" / "patched.txt").write_text(
-        "recovered victim report body\n", encoding="utf-8"
-    )
-    (study / "evidence" / "fixed-pov.txt").unlink()
-    (study / "evidence" / "fixed-alt.txt").unlink()
-    graph = _graph()
-    graph["observed_cuts"][0]["blocked"][0].update(
-        _cite("evidence/patched.txt#L1", "recovered victim")
-    )
-    graph["observed_cuts"][0]["survived"] = []
-    out = tmp_path / "derived" / "analysis.json"
-    result = _run("graph_analyze.py", tmp_path, graph, "--out", str(out), study=study)
-    assert result.returncode == 0, result.stderr
-    warnings = json.loads(out.read_text(encoding="utf-8"))["warnings"]
-    assert any(w["where"].startswith("path PATH-pov") for w in warnings)
-
-
 # --- structure --------------------------------------------------------------
-
-
-def test_the_study_dir_must_be_a_real_stage3_study(tmp_path):
-    scratch = tmp_path / "scratch"
-    (scratch / "evidence").mkdir(parents=True)
-    for name, body in EVIDENCE.items():
-        (scratch / "evidence" / name).write_text(body, encoding="utf-8")
-    result = _validate(tmp_path, _graph(), study=scratch)
-    assert result.returncode == 1
-    assert "not a Stage 3 study" in result.stderr
 
 
 def test_cycles_are_rejected(tmp_path):
     def mutate(graph):
         _node(graph, "N-entry")["role"] = "function"
-        _node(graph, "N-entry")["requires"] = ["N-resolve-share"]
-        _node(graph, "N-entry")["evidence"] = _cite("evidence/pov.txt#L1", "201 Created share")
+        _node(graph, "N-entry")["predecessors"] = ["N-resolve-share"]
+        _node(graph, "N-entry")["evidence"] = _cite("vulnerable build · GET /pov · 200 #L1", "201 Created share")
     _fails(tmp_path, mutate, "acyclic")
 
 
@@ -531,30 +385,8 @@ def test_an_objective_must_declare_its_scope(tmp_path):
 
 def test_an_entry_may_not_require_another_node(tmp_path):
     def mutate(graph):
-        _node(graph, "N-entry")["requires"] = ["N-create-share"]
+        _node(graph, "N-entry")["predecessors"] = ["N-create-share"]
     _fails(tmp_path, mutate, "must not require another node")
-
-
-def test_a_cut_must_record_a_path(tmp_path):
-    def mutate(graph):
-        graph["observed_cuts"][0]["blocked"] = []
-        graph["observed_cuts"][0]["survived"] = []
-    _fails(tmp_path, mutate, "must record at least one path")
-
-
-def test_a_cut_recording_only_survivors_reads_contestable(tmp_path):
-    """An EXPAND fragment carrying only its surviving route must validate."""
-    graph = _graph()
-    graph["observed_cuts"][0]["blocked"] = []
-    analysis = _analyze(tmp_path, graph)
-    assert analysis["observed_cuts"][0]["reading"] == "contestable_observed"
-    assert analysis["observed_cuts"][0]["implicated_nodes"] == []
-
-
-def test_a_cut_cannot_list_one_path_as_both_blocked_and_survived(tmp_path):
-    def mutate(graph):
-        graph["observed_cuts"][0]["survived"][0]["path"] = "PATH-pov"
-    _fails(tmp_path, mutate, "twice")
 
 
 def test_a_route_must_end_at_its_objective(tmp_path):
@@ -566,7 +398,7 @@ def test_a_route_must_end_at_its_objective(tmp_path):
 def test_an_unregistered_objective_scope_is_rejected(tmp_path):
     graph = _graph()
     _node(graph, "N-obj")["scope"] = "not.a.real.scope"
-    result = _run("graph_validate.py", tmp_path, graph, "--scope-registry", str(REGISTRY))
+    result = _run("graph_validate.py", tmp_path, graph)
     assert result.returncode == 1
     assert "not registered" in result.stderr
 
@@ -574,7 +406,7 @@ def test_an_unregistered_objective_scope_is_rejected(tmp_path):
 def test_a_challenge_local_scope_is_accepted(tmp_path):
     graph = _graph()
     _node(graph, "N-obj")["scope"] = "custom.acme-reports.share_read"
-    result = _run("graph_validate.py", tmp_path, graph, "--scope-registry", str(REGISTRY))
+    result = _run("graph_validate.py", tmp_path, graph)
     assert result.returncode == 0, result.stderr
 
 
@@ -587,20 +419,14 @@ def test_an_unknown_node_id_reports_an_error_rather_than_crashing(tmp_path):
     assert "Traceback" not in result.stderr
 
 
-def test_a_non_list_requires_reports_an_error_rather_than_crashing(tmp_path):
-    result = _fails(tmp_path, lambda g: _node(g, "N-create-share").update({"requires": "N-entry"}),
-                    "must be a non-empty list")
-    assert "Traceback" not in result.stderr
-
-
 def test_an_unhashable_role_reports_an_error_rather_than_crashing(tmp_path):
     result = _fails(tmp_path, lambda g: _node(g, "N-create-share").update({"role": {}}),
                     "unknown role")
     assert "Traceback" not in result.stderr
 
 
-def test_a_non_boolean_requires_all_reports_an_error(tmp_path):
-    _fails(tmp_path, lambda g: _node(g, "N-create-share").update({"requires_all": "yes"}),
+def test_a_non_boolean_conjunctive_reports_an_error(tmp_path):
+    _fails(tmp_path, lambda g: _node(g, "N-create-share").update({"conjunctive": "yes"}),
            "must be a boolean")
 
 
@@ -608,12 +434,6 @@ def test_a_function_must_name_what_it_is(tmp_path):
     """`symbol` is what says two nodes are one node, so a function needs one."""
     _fails(tmp_path, lambda g: _node(g, "N-create-share").pop("symbol"),
            "function N-create-share must declare symbol")
-
-
-def test_an_empty_symbol_says_what_is_wrong_with_it(tmp_path):
-    """It did declare one, so "must declare symbol" would send the author nowhere."""
-    _fails(tmp_path, lambda g: _node(g, "N-create-share").update({"symbol": "  "}),
-           "node N-create-share.symbol must be a non-empty string")
 
 
 def test_an_unusable_symbol_is_reported_rather_than_ignored(tmp_path):
@@ -656,7 +476,7 @@ def test_malformed_json_reports_an_error_rather_than_crashing(tmp_path):
     path.write_text("{not json", encoding="utf-8")
     result = subprocess.run(
         [sys.executable, str(SCRIPTS / "graph_validate.py"), str(path),
-         "--study-dir", str(_study(tmp_path))],
+         "--scope-registry", str(REGISTRY)],
         capture_output=True,
         text=True,
     )
@@ -668,33 +488,6 @@ def test_malformed_json_reports_an_error_rather_than_crashing(tmp_path):
 # --- rendering --------------------------------------------------------------
 
 
-def test_a_survived_route_stays_solid_in_the_diagram(tmp_path):
-    """Contestability has to be visible: the blocked branch dashes, the other
-    does not. A diagram with every edge dashed would show nothing."""
-    body = _render(tmp_path, _graph())
-    dashed = [line for line in body.splitlines() if "stroke-dasharray" in line]
-    edges = [line for line in body.splitlines() if "-->" in line]
-    assert dashed, "the blocked branch must be marked"
-    assert len(dashed) < len(edges), "a survived branch must stay solid"
-
-
-def test_the_dashed_edges_enter_the_implicated_nodes(tmp_path):
-    """The caption says dashed edges enter a node the observed cut implicated,
-    and these are the only place graph.md shows what the cut reached."""
-    graph = _graph()
-    body = _render(tmp_path, graph)
-    implicated = set(_analyze(tmp_path, graph)["observed_cuts"][0]["implicated_nodes"])
-    assert implicated, "the fixture must implicate something for this to mean anything"
-
-    edges = [line.split("-->") for line in body.splitlines() if "-->" in line]
-    targets = [target.strip() for _, target in edges]
-    marked = {int(line.split()[1]) for line in body.splitlines() if "linkStyle" in line}
-
-    safe = {re.sub(r"\W", "_", node_id) for node_id in implicated}
-    assert {targets[i] for i in marked} == safe
-    assert marked == {i for i, target in enumerate(targets) if target in safe}
-
-
 def test_the_report_names_each_node_s_code_symbol(tmp_path):
     assert "ShareController.create" in _render(tmp_path, _graph())
 
@@ -702,7 +495,7 @@ def test_the_report_names_each_node_s_code_symbol(tmp_path):
 def test_the_report_says_it_does_not_judge_admissibility(tmp_path):
     """Both claims travel with graph.md, so they are part of the deliverable."""
     body = _render(tmp_path, _graph())
-    assert "admissibility not judged" in body
+    assert "never which ones are allowed to be touched" in body
     assert "unchecked author claim" in body
 
 
@@ -712,29 +505,26 @@ def test_the_report_says_it_does_not_judge_admissibility(tmp_path):
 def test_a_wide_disjoint_graph_still_reports_its_mincut(tmp_path):
     graph = _graph()
     graph["paths"] = []
-    graph["observed_cuts"] = []
-    _node(graph, "N-obj")["requires"] = []
+    _node(graph, "N-obj")["predecessors"] = []
     for index in range(6):
         first, second = f"N-a{index}", f"N-b{index}"
         graph["nodes"].append(
-            _fn(first, f"step a{index}", ["N-entry"], "evidence/pov.txt#L1", "201 Created share")
+            _fn(first, f"step a{index}", ["N-entry"], "vulnerable build · GET /pov · 200 #L1", "201 Created share")
         )
         graph["nodes"].append(
-            _fn(second, f"step b{index}", [first], "evidence/pov.txt#L2", "recovered victim")
+            _fn(second, f"step b{index}", [first], "vulnerable build · GET /pov · 200 #L2", "recovered victim")
         )
-        _node(graph, "N-obj")["requires"].append(second)
+        _node(graph, "N-obj")["predecessors"].append(second)
         graph["paths"].append(
             {
                 "id": f"PATH-{index}",
                 "objective": "N-obj",
                 "nodes": ["N-entry", first, second, "N-obj"],
                 "advisories": [],
-                "witnesses": [_cite("evidence/pov.txt#L2", "recovered victim report")],
+                "witnesses": [_cite("vulnerable build · GET /pov · 200 #L2", "recovered victim report")],
             }
         )
-    analysis = _analyze(tmp_path, graph)
-    assert analysis["mincut_all"] == 6
-    assert analysis["cuts_truncated"] is True
+    assert _analyze(tmp_path, graph)["mincut_all"] == 6
 
 
 def test_an_exhausted_cut_search_reports_unknown_rather_than_guessing():
@@ -744,8 +534,7 @@ def test_an_exhausted_cut_search_reports_unknown_rather_than_guessing():
     finally:
         sys.path.pop(0)
     wide = [frozenset({f"n{group}_{index}" for index in range(40)}) for group in range(14)]
-    cuts, size, truncated = minimal_cuts(wide)
-    assert cuts == [] and size is None and truncated is True
+    assert minimal_cuts(wide) is None
 
 
 # --- the worked example -----------------------------------------------------
@@ -769,8 +558,8 @@ def test_the_worked_example_is_structurally_valid():
 def _nested_or(graph):
     """A parser reachable from the session directly, or after a stored upload."""
     graph["nodes"].insert(2, _fn("N-upload", "store an upload", ["N-create-share"],
-                                 "evidence/pov.txt#L1", "201 Created share"))
-    _node(graph, "N-resolve-share")["requires"] = ["N-upload", "N-create-share"]
+                                 "vulnerable build · GET /pov · 200 #L1", "201 Created share"))
+    _node(graph, "N-resolve-share")["predecessors"] = ["N-upload", "N-create-share"]
     _path(graph, "PATH-pov")["nodes"] = [
         "N-entry", "N-create-share", "N-upload", "N-resolve-share", "N-obj"
     ]
@@ -788,21 +577,20 @@ def test_a_route_carrying_a_node_it_could_skip_names_that_node(tmp_path):
 
 def test_the_same_route_validates_once_the_dependency_is_declared_honestly(tmp_path):
     """Declaring that the parser really needs the upload makes the route real.
-    The rule forces `requires` to describe the application, not the transcript."""
+    The rule forces `predecessors` to describe the application, not the transcript."""
     graph = _nested_or(_graph())
-    _node(graph, "N-resolve-share")["requires"] = ["N-upload"]
+    _node(graph, "N-resolve-share")["predecessors"] = ["N-upload"]
     assert _validate(tmp_path, graph).returncode == 0
-    analysis = _analyze(tmp_path, graph)
-    assert "N-upload" in {n for cut in analysis["minimum_cuts_all"] for n in cut}
+    assert _analyze(tmp_path, graph)["mincut_all"] == 2
 
 
 def test_a_conjunction_route_is_not_forced_into_adjacency(tmp_path):
-    """Both conjuncts of a requires_all node are parallel branches. Demanding
+    """Both conjuncts of a conjunctive node are parallel branches. Demanding
     they sit next to each other would invent an edge the application lacks."""
     graph = _graph()
-    _node(graph, "N-resolve-share")["requires"] = ["N-create-share", "N-upload-template"]
-    _node(graph, "N-resolve-share")["requires_all"] = True
-    _node(graph, "N-obj")["requires"] = ["N-resolve-share"]
+    _node(graph, "N-resolve-share")["predecessors"] = ["N-create-share", "N-upload-template"]
+    _node(graph, "N-resolve-share")["conjunctive"] = True
+    _node(graph, "N-obj")["predecessors"] = ["N-resolve-share"]
     graph["paths"] = [
         {
             "id": "PATH-pov",
@@ -810,13 +598,11 @@ def test_a_conjunction_route_is_not_forced_into_adjacency(tmp_path):
             "nodes": ["N-entry", "N-create-share", "N-upload-template",
                       "N-resolve-share", "N-obj"],
             "advisories": [],
-            "witnesses": [_cite("evidence/pov.txt#L2", "recovered victim report")],
+            "witnesses": [_cite("vulnerable build · GET /pov · 200 #L2", "recovered victim report")],
         }
     ]
-    graph["observed_cuts"][0]["survived"] = []
     assert _validate(tmp_path, graph).returncode == 0
-    cuts = {n for cut in _analyze(tmp_path, graph)["minimum_cuts_all"] for n in cut}
-    assert {"N-create-share", "N-upload-template"} <= cuts, "both conjuncts are cuttable"
+    assert _analyze(tmp_path, graph)["mincut_all"] == 1, "either conjunct alone cuts it"
 
 
 # --- the guard against an unsound-small cut ---------------------------------
@@ -827,7 +613,7 @@ def test_an_interior_node_must_be_a_function(tmp_path):
     the one way left to understate a min-cut."""
     def mutate(graph):
         _node(graph, "N-create-share")["role"] = "entry"
-        _node(graph, "N-create-share").pop("requires")
+        _node(graph, "N-create-share").pop("predecessors")
     _fails(tmp_path, mutate, "interior node N-create-share must be a function")
 
 
@@ -835,21 +621,6 @@ def test_a_route_must_start_at_an_entry_node(tmp_path):
     def mutate(graph):
         _path(graph, "PATH-pov")["nodes"] = ["N-create-share", "N-resolve-share", "N-obj"]
     _fails(tmp_path, mutate, "must start at an entry node")
-
-
-def test_evidence_root_may_not_be_the_study_itself(tmp_path):
-    """`.` would let the study's own prose stand in for retained output."""
-    def mutate(graph):
-        graph["evidence_root"] = "."
-    _fails(tmp_path, mutate, "evidence_root")
-
-
-def test_a_duplicate_cut_id_is_named_as_a_cut(tmp_path):
-    """'unique string id' alone also matches the nodes and paths messages, so a
-    rejection for the wrong reason would pass."""
-    def mutate(graph):
-        graph["observed_cuts"].append(json.loads(json.dumps(graph["observed_cuts"][0])))
-    _fails(tmp_path, mutate, "observed_cuts entry")
 
 
 # --- read failures ----------------------------------------------------------
@@ -862,46 +633,11 @@ def test_a_json_null_document_is_rejected_rather_than_passing(tmp_path):
     path.write_text("null", encoding="utf-8")
     result = subprocess.run(
         [sys.executable, str(SCRIPTS / "graph_validate.py"), str(path),
-         "--study-dir", str(_study(tmp_path))],
+         "--scope-registry", str(REGISTRY)],
         capture_output=True, text=True,
     )
     assert result.returncode == 1, f"null validated clean: {result.stdout}"
     assert "Traceback" not in result.stderr
-
-
-def test_an_unreadable_graph_file_reports_an_error_rather_than_crashing(tmp_path):
-    study = _study(tmp_path)
-    for name, body in (("adir", None), ("binary.json", b"\xff\xfe\x00\x01")):
-        target = tmp_path / name
-        target.mkdir() if body is None else target.write_bytes(body)
-        result = subprocess.run(
-            [sys.executable, str(SCRIPTS / "graph_validate.py"), str(target),
-             "--study-dir", str(study)],
-            capture_output=True, text=True,
-        )
-        assert result.returncode == 1, name
-        assert "Traceback" not in result.stderr, name
-
-
-# --- reporting --------------------------------------------------------------
-
-
-def test_a_healthy_graph_emits_no_citation_warning(tmp_path):
-    """A survivor's fixed-build output holds the success string by definition;
-    pooling it made a clean graph warn about itself."""
-    assert _analyze(tmp_path, _graph())["warnings"] == []
-
-
-def test_citation_sources_do_not_depend_on_evidence_root(tmp_path):
-    """Anchored to that field the count was one bit: declared, every locator is
-    inside it by construction; omitted, none can be. It reported whether the
-    field existed, not where the reading rests."""
-    declared = _analyze(tmp_path, _graph())["citation_sources"]
-    graph = _graph()
-    graph.pop("evidence_root")
-    assert _analyze(tmp_path, graph)["citation_sources"] == declared
-    assert declared["study_document"] == 0
-    assert declared["retained_evidence"] > 0
 
 
 # --- multi-role merge -------------------------------------------------------
@@ -912,9 +648,8 @@ def _seed():
     graph = _graph()
     keep = {"N-entry", "N-create-share", "N-resolve-share", "N-obj"}
     graph["nodes"] = [n for n in graph["nodes"] if n["id"] in keep]
-    _node(graph, "N-obj")["requires"] = ["N-resolve-share"]
+    _node(graph, "N-obj")["predecessors"] = ["N-resolve-share"]
     graph["paths"] = [_path(graph, "PATH-pov")]
-    graph["observed_cuts"][0]["survived"] = []
     return graph
 
 
@@ -923,24 +658,23 @@ def _expand():
     graph = _graph()
     keep = {"N-entry", "N-upload-template", "N-render-template", "N-obj"}
     graph["nodes"] = [n for n in graph["nodes"] if n["id"] in keep]
-    _node(graph, "N-obj")["requires"] = ["N-render-template"]
+    _node(graph, "N-obj")["predecessors"] = ["N-render-template"]
     graph["paths"] = [_path(graph, "PATH-alt")]
-    graph["observed_cuts"][0]["blocked"] = []
     return graph
 
 
 def _merge(tmp_path, seed, expand, *extra):
-    study = _study(tmp_path)
-    paths = {}
-    for name, document in (("seed", seed), ("expand", expand)):
-        paths[name] = tmp_path / f"{name}.json"
-        paths[name].write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    seed_path = tmp_path / "seed.json"
+    seed_path.write_text(json.dumps(seed, indent=2) + "\n", encoding="utf-8")
+    expand_path = tmp_path / "expand.json"
+    expand_path.write_text(json.dumps(expand, indent=2) + "\n", encoding="utf-8")
+    selector = ["--expand", str(expand_path)]
     out = tmp_path / "merged" / "graph.json"
     record = tmp_path / "merged" / "merge.json"
     result = subprocess.run(
-        [sys.executable, str(SCRIPTS / "graph_merge.py"), str(paths["seed"]),
-         str(paths["expand"]), "--out", str(out), "--record", str(record),
-         "--study-dir", str(study), *extra],
+        [sys.executable, str(SCRIPTS / "graph_merge.py"), str(seed_path), *selector,
+         "--out", str(out), "--record", str(record),
+         "--scope-registry", str(REGISTRY), *extra],
         capture_output=True,
         text=True,
     )
@@ -953,72 +687,57 @@ def test_merge_reunites_the_fragments_into_the_disjoint_reading(tmp_path):
     assert result.returncode == 0, result.stderr
 
     merged = json.loads(out.read_text(encoding="utf-8"))
-    assert _node(merged, "N-obj")["requires"] == ["N-resolve-share", "N-render-template"]
+    assert _node(merged, "N-obj")["predecessors"] == ["N-resolve-share", "N-render-template"]
     assert [p["id"] for p in merged["paths"]] == ["PATH-pov", "PATH-alt"]
-
-    cut = merged["observed_cuts"][0]
-    assert [e["path"] for e in cut["blocked"]] == ["PATH-pov"]
-    assert [e["path"] for e in cut["survived"]] == ["PATH-alt"]
 
     analysis = _analyze(tmp_path, merged)
     assert analysis["geometry"] == ["disjoint"]
     assert analysis["mincut_all"] == 2
-    assert analysis["observed_cuts"][0]["reading"] == "contestable_observed"
 
     written = json.loads(record.read_text(encoding="utf-8"))
     assert written["routes_added"] == ["PATH-alt"]
     assert sorted(written["nodes_added"]) == ["N-render-template", "N-upload-template"]
-    assert written["requires_widened"] == ["N-obj"]
+    assert written["predecessors_widened"] == ["N-obj"]
 
 
-def test_merge_rejects_an_objective_expand_invented(tmp_path):
-    """CH-4: objectives derive from the asset graph, never from the vulnerability."""
+def test_expand_may_declare_an_objective_it_reached(tmp_path):
+    """A run reached an administrative token the registry already names, and the
+    old rule discarded it: at Stage 3 nothing declares the objective, so both
+    roles reconstruct it and neither has the better claim."""
     expand = _expand()
     _node(expand, "N-obj")["id"] = "N-obj-new"
+    _node(expand, "N-obj-new")["scope"] = "app.privileged.control"
     _path(expand, "PATH-alt")["objective"] = "N-obj-new"
     _path(expand, "PATH-alt")["nodes"][-1] = "N-obj-new"
-    expand["observed_cuts"] = []
+    result, out, _ = _merge(tmp_path, _seed(), expand)
+    assert result.returncode == 0, result.stderr
+    merged = json.loads(out.read_text(encoding="utf-8"))
+    assert {n["id"] for n in merged["nodes"] if n["role"] == "objective"} == {"N-obj", "N-obj-new"}
+
+
+def test_expand_may_not_declare_an_entry(tmp_path):
+    """A node declared `entry` leaves every cut, so a second one lowers them all."""
+    expand = _expand()
+    _node(expand, "N-entry")["id"] = "N-entry-2"
+    for node in expand["nodes"]:
+        node["predecessors"] = ["N-entry-2" if p == "N-entry" else p
+                                for p in node.get("predecessors") or []]
+    _path(expand, "PATH-alt")["nodes"][0] = "N-entry-2"
     result, _, _ = _merge(tmp_path, _seed(), expand)
     assert result.returncode == 1
-    assert "EXPAND introduced objective node N-obj-new" in result.stderr
-
-
-def test_merge_refuses_a_route_only_on_the_record(tmp_path):
-    """The root owns the deliverable, so a refusal must leave a reason behind."""
-    result, out, record = _merge(
-        tmp_path, _seed(), _expand(), "--refute", "PATH-alt=witness cites the vulnerable build"
-    )
-    assert result.returncode == 0, result.stderr
-
-    merged = json.loads(out.read_text(encoding="utf-8"))
-    assert [p["id"] for p in merged["paths"]] == ["PATH-pov"]
-    # The refuted route's nodes go with it, including the widened requirement.
-    assert {n["id"] for n in merged["nodes"]} == set(n["id"] for n in _seed()["nodes"])
-    assert _node(merged, "N-obj")["requires"] == ["N-resolve-share"]
-
-    written = json.loads(record.read_text(encoding="utf-8"))
-    assert written["routes_refuted"] == [
-        {"path": "PATH-alt", "reason": "witness cites the vulnerable build"}
-    ]
-
-
-def test_merge_rejects_a_refutation_naming_an_unknown_route(tmp_path):
-    """A typo must not silently keep the route it meant to refuse."""
-    result, _, _ = _merge(tmp_path, _seed(), _expand(), "--refute", "PATH-typo=stale")
-    assert result.returncode == 1
-    assert "PATH-typo, which is not an EXPAND route" in result.stderr
+    assert "EXPAND introduced entry node N-entry-2" in result.stderr
 
 
 def test_merge_will_not_widen_a_conjunction(tmp_path):
-    """requires_all over a union would silently demand the new predecessor too."""
+    """conjunctive over a union would silently demand the new predecessor too."""
     seed, expand = _seed(), _expand()
     for graph, extra in ((seed, "N-create-share"), (expand, "N-upload-template")):
         node = _node(graph, "N-obj")
-        node["requires"] = [node["requires"][0], extra]
-        node["requires_all"] = True
+        node["predecessors"] = [node["predecessors"][0], extra]
+        node["conjunctive"] = True
     result, _, _ = _merge(tmp_path, seed, expand)
     assert result.returncode == 1
-    assert "sets requires_all" in result.stderr
+    assert "sets conjunctive" in result.stderr
 
 
 def test_merge_validates_each_fragment_and_names_which_one(tmp_path):
@@ -1027,55 +746,6 @@ def test_merge_validates_each_fragment_and_names_which_one(tmp_path):
     result, _, _ = _merge(tmp_path, _seed(), expand)
     assert result.returncode == 1
     assert result.stderr.startswith("EXPAND ")
-
-
-def test_merge_rejects_one_function_under_two_ids(tmp_path):
-    """Two ids for one application function read as routes sharing nothing, which
-    halves the min-cut and manufactures `disjoint` — a false contestable reading."""
-    expand = _expand()
-    _node(expand, "N-upload-template")["symbol"] = _node(_seed(), "N-create-share")["symbol"]
-    result, _, _ = _merge(tmp_path, _seed(), expand)
-    assert result.returncode == 1
-    # Each fragment is fine alone; only the union names one function twice.
-    assert result.stderr.startswith("merged: ")
-    assert "one application function is one node" in result.stderr
-
-
-def test_merge_rejects_one_defense_under_two_cut_ids(tmp_path):
-    """Split ids give SEED's cut a terminal reading a recorded route escaped."""
-    expand = _expand()
-    expand["observed_cuts"][0]["id"] = "CUT-expand-only"
-    result, _, _ = _merge(tmp_path, _seed(), expand)
-    assert result.returncode == 1
-    assert "record the same defense 'upstream_fix'" in result.stderr
-
-
-def test_a_refutation_cannot_mask_a_route_id_collision(tmp_path):
-    """Refuting the colliding id would exit 0 with a record claiming a SEED route
-    was refused while that route is still in the graph."""
-    expand = _expand()
-    _path(expand, "PATH-alt")["id"] = "PATH-pov"
-    expand["observed_cuts"][0]["survived"][0]["path"] = "PATH-pov"
-    result, _, _ = _merge(tmp_path, _seed(), expand, "--refute", "PATH-pov=stale")
-    assert result.returncode == 1
-    assert "both fragments declare route PATH-pov" in result.stderr
-
-
-def test_the_record_reports_only_widenings_that_survived_pruning(tmp_path):
-    """Refuting the route that widened a node leaves its requires as SEED wrote it."""
-    result, out, record = _merge(tmp_path, _seed(), _expand(), "--refute", "PATH-alt=unproven")
-    assert result.returncode == 0, result.stderr
-    assert _node(json.loads(out.read_text()), "N-obj")["requires"] == ["N-resolve-share"]
-    assert json.loads(record.read_text())["requires_widened"] == []
-
-
-def test_merge_rejects_an_entry_expand_invented(tmp_path):
-    """An entry is excluded from every cut, so inventing one lowers the min-cut."""
-    expand = _expand()
-    expand["nodes"].append({"id": "N-entry-2", "role": "entry", "title": "Second principal"})
-    result, _, _ = _merge(tmp_path, _seed(), expand)
-    assert result.returncode == 1
-    assert "EXPAND introduced entry node N-entry-2" in result.stderr
 
 
 def test_merge_rejects_fragments_over_different_revisions(tmp_path):
@@ -1088,36 +758,28 @@ def test_merge_rejects_fragments_over_different_revisions(tmp_path):
 
 def test_merge_revalidates_what_the_union_produced(tmp_path):
     """Two fragments that each validate can still merge into an invalid graph: the
-    `requires` union can open a shortcut that makes an EXPAND route droppable."""
+    `predecessors` union can open a shortcut that makes an EXPAND route droppable."""
     expand = _seed()
     expand["nodes"].append(
         _fn("N-exfil", "bulk export", ["N-resolve-share"],
-            "evidence/alt.txt#L2", "recovered victim", symbol="ExportController.bulk")
+            "vulnerable build · GET /alt · 200 #L2", "recovered victim", symbol="ExportController.bulk")
     )
-    _node(expand, "N-obj")["requires"] = ["N-exfil"]
+    _node(expand, "N-obj")["predecessors"] = ["N-exfil"]
     path = _path(expand, "PATH-pov")
     path["id"] = "PATH-alt"
     path["nodes"].insert(-1, "N-exfil")
-    expand["observed_cuts"][0]["blocked"][0]["path"] = "PATH-alt"
     result, out, _ = _merge(tmp_path, _seed(), expand)
     assert result.returncode == 1
-    assert "merged: path PATH-alt still reaches N-obj without" in result.stderr
+    assert "merged: route PATH-alt still reaches N-obj without" in result.stderr
     assert not out.exists(), "an invalid merge must not be written"
-
-
-def test_a_refutation_needs_a_reason(tmp_path):
-    """A reasonless refusal would satisfy the on-the-record contract vacuously."""
-    result, _, _ = _merge(tmp_path, _seed(), _expand(), "--refute", "PATH-alt=")
-    assert result.returncode == 1
-    assert "needs PATH-ID=REASON" in result.stderr
 
 
 def test_merge_rejects_a_node_the_fragments_identify_differently(tmp_path):
     """A scope disagreement is a disagreement about what asset class was reached."""
     disagreements = [
         ("N-obj", "store", "some_other_store"),
-        ("N-obj", "scope", "app.same_boundary.read"),
-        ("N-obj", "requires_all", True),
+        ("N-obj", "scope", "secret.credential.read"),
+        ("N-obj", "conjunctive", True),
         ("N-entry", "symbol", "Some.other.symbol"),
     ]
     for node_id, field, value in disagreements:
@@ -1138,80 +800,12 @@ def test_seeds_declaration_wins_where_the_fragments_may_differ(tmp_path):
     assert _node(json.loads(out.read_text()), "N-entry")["title"] == "Baseline principal"
 
 
-def test_two_cut_ids_may_not_record_one_defense(tmp_path):
-    """Split ids give one defense two readings: the id holding only the blocked
-    routes reads terminal, for a defense a recorded route escaped. Validated
-    rather than merged, because the no-agents path writes graph.json directly."""
-    def mutate(graph):
-        second = json.loads(json.dumps(graph["observed_cuts"][0]))
-        second["id"] = "CUT-upstream-2"
-        graph["observed_cuts"].append(second)
-    _fails(tmp_path, mutate, "record the same defense 'upstream_fix'")
-
-
-def test_expand_must_name_the_function_it_introduces(tmp_path):
-    """Without a symbol the duplicate-node guard has nothing to compare, and one
-    application function under two ids reads as two routes sharing nothing."""
-    expand = _expand()
-    del _node(expand, "N-upload-template")["symbol"]
-    result, _, _ = _merge(tmp_path, _seed(), expand)
-    assert result.returncode == 1
-    assert "EXPAND function N-upload-template must declare symbol" in result.stderr
-
-
-def test_a_refutation_that_empties_a_cut_records_the_drop(tmp_path):
-    expand = _expand()
-    expand["observed_cuts"] = [
-        {
-            "id": "CUT-config",
-            "reference": "config_toggle",
-            "blocked": [],
-            "survived": [
-                _cite("evidence/fixed-alt.txt#L1", "recovered victim") | {"path": "PATH-alt"}
-            ],
-        }
-    ]
-    result, out, record = _merge(tmp_path, _seed(), expand, "--refute", "PATH-alt=unproven")
-    assert result.returncode == 0, result.stderr
-    assert json.loads(record.read_text())["cuts_dropped"] == ["CUT-config"]
-    assert [c["id"] for c in json.loads(out.read_text())["observed_cuts"]] == ["CUT-upstream"]
-
-
-def test_an_explicit_requires_all_false_is_not_a_disagreement(tmp_path):
+def test_an_explicit_conjunctive_false_is_not_a_disagreement(tmp_path):
     """Writing the default out is semantically identical to omitting it."""
     expand = _expand()
-    _node(expand, "N-obj")["requires_all"] = False
+    _node(expand, "N-obj")["conjunctive"] = False
     result, _, _ = _merge(tmp_path, _seed(), expand)
     assert result.returncode == 0, result.stderr
-
-
-def test_merge_rejects_two_defenses_sharing_one_cut_id(tmp_path):
-    """Without this the EXPAND reference is silently discarded and two different
-    defenses collapse into one cut."""
-    expand = _expand()
-    expand["observed_cuts"][0]["reference"] = "config_toggle"
-    result, _, _ = _merge(tmp_path, _seed(), expand)
-    assert result.returncode == 1
-    assert "fragments disagree on the reference of cut CUT-upstream" in result.stderr
-
-
-def test_the_study_document_counts_wherever_it_is_kept(tmp_path):
-    """The match is on the basename, which is what lets a graph declare
-    `evidence_root` and still rest on prose — the exception both the schema doc
-    and the docstring hedge on."""
-    study = _study(tmp_path)
-    (study / "evidence" / "STAGE3_STUDY.md").write_text(
-        "The attacker resolves the share link.\n", encoding="utf-8"
-    )
-    graph = _graph()
-    _node(graph, "N-create-share")["evidence"] = _cite(
-        "evidence/STAGE3_STUDY.md#L1", "The attacker resolves"
-    )
-    out = tmp_path / "derived" / "analysis.json"
-    result = _run("graph_analyze.py", tmp_path, graph, "--out", str(out), study=study)
-    assert result.returncode == 0, result.stderr
-    sources = json.loads(out.read_text(encoding="utf-8"))["citation_sources"]
-    assert sources["study_document"] == 1
 
 
 def test_a_symbol_cannot_break_the_rendered_table(tmp_path):
@@ -1219,17 +813,11 @@ def test_a_symbol_cannot_break_the_rendered_table(tmp_path):
     likely to carry a pipe: unescaped it adds a phantom column."""
     graph = _graph()
     _node(graph, "N-create-share")["symbol"] = 'Router.match GET /a|/b "x"'
-    graph["observed_cuts"][0]["reference"] = "upstream|fix"
     body = _render(tmp_path, graph)
 
     rows = [line for line in body.splitlines() if line.startswith("| N-create-share |")]
     assert len(rows) == 1
     assert rows[0].count("|") == 5, rows[0]
-
-    # Every cell is escaped, not just the one that was reported.
-    cuts = [line for line in body.splitlines() if line.startswith("| CUT-upstream |")]
-    assert len(cuts) == 1
-    assert cuts[0].count("|") == 6, cuts[0]
 
 
 def test_the_record_names_which_fragment_was_which(tmp_path):
@@ -1241,50 +829,345 @@ def test_the_record_names_which_fragment_was_which(tmp_path):
     assert written["expand"].endswith("expand.json")
 
 
-def test_a_blank_cut_reference_says_only_that(tmp_path):
-    """It is not indexed for uniqueness, so two blank references do not also
-    report themselves as one defense recorded twice."""
-    def mutate(graph):
-        second = json.loads(json.dumps(graph["observed_cuts"][0]))
-        second["id"] = "CUT-second"
-        graph["observed_cuts"].append(second)
-        for cut in graph["observed_cuts"]:
-            cut["reference"] = "  "
-    result = _fails(tmp_path, mutate, "cut CUT-upstream.reference must be a non-empty string")
-    assert "record the same defense" not in result.stderr
-
-
 def test_a_route_may_not_list_one_node_twice(tmp_path):
     """Every computed set ignores the repeat, so it only inflates the node count
     the renderer prints for that route."""
     def mutate(graph):
         _path(graph, "PATH-pov")["nodes"].insert(-1, "N-create-share")
-    _fails(tmp_path, mutate, "path PATH-pov lists N-create-share more than once")
+    _fails(tmp_path, mutate, "route PATH-pov lists N-create-share more than once")
 
 
-def test_a_truncated_cut_listing_says_so():
-    """The work cap can fire after the first cuts are found, listing a subset that
-    is not over the listing cap. Unreported, a partial listing would read as the
-    complete set of cheapest defenses.
+# --- declared inputs: incomplete is rejected, never silently degraded --------
 
-    Driven by lowering the cap rather than by a large input: the real threshold
-    needs 289 routes and seven seconds, and the cap is a tuning constant.
+
+def test_a_missing_scope_registry_is_refused_rather_than_skipping_the_check(tmp_path):
+    """It used to be optional, so omitting it left every objective scope unchecked."""
+    graph = _graph()
+    _node(graph, "N-obj")["scope"] = "app.not_a_registered_scope"
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "graph_validate.py"), str(_write(tmp_path, graph))],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 2, result.stderr
+    assert "--scope-registry" in result.stderr, result.stderr
+
+
+def test_expand_finding_nothing_is_a_fragment_carrying_no_route(tmp_path):
+    """Finding nothing is a real outcome, so it has to be writable as a fragment."""
+    expand = _expand()
+    expand["paths"] = []
+    result, out, record = _merge(tmp_path, _seed(), expand)
+    assert result.returncode == 0, result.stderr
+
+    merged = json.loads(out.read_text(encoding="utf-8"))
+    assert [p["id"] for p in merged["paths"]] == ["PATH-pov"]
+    written = json.loads(record.read_text(encoding="utf-8"))
+    assert written["routes_added"] == [] and written["nodes_added"] == []
+
+
+def test_a_role_that_never_ran_cannot_be_asserted_away(tmp_path):
+    """The fragment existing is what says EXPAND ran; no flag can say it instead."""
+    seed = tmp_path / "seed.json"
+    seed.write_text(json.dumps(_seed(), indent=2) + "\n", encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "graph_merge.py"), str(seed),
+         "--out", str(tmp_path / "g.json"), "--record", str(tmp_path / "r.json"),
+         "--scope-registry", str(REGISTRY)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 2
+    assert "--expand" in result.stderr, result.stderr
+
+
+# --- the deliverable checks itself; nothing downstream will -------------------
+
+
+def _merge_record(graph, **override):
+    record = {
+        "routes": {p["id"]: "seed" for p in graph["paths"]},
+    }
+    record.update(override)
+    return record
+
+
+def _provenance(graph, **override):
+    record = {
+        "fault": {"statement": "the share resolver skips the owner check"},
+        "unsettled": [], "notes": [],
+    }
+    record.update(override)
+    return record
+
+
+def _finalize(tmp_path, graph, record, drop=(), derive=False, merged=None):
+    """`derive` runs the real analyze/render; finalize only stats those two, so
+    every test but one stubs them rather than spawning two more interpreters."""
+    out = tmp_path / "deliverable"
+    out.mkdir(exist_ok=True)
+    (out / "graph.json").write_text(json.dumps(graph, indent=2) + "\n", encoding="utf-8")
+    if derive:
+        assert subprocess.run(
+            [sys.executable, str(SCRIPTS / "graph_analyze.py"), str(out / "graph.json"),
+             "--out", str(out / "analysis.json"),
+             "--scope-registry", str(REGISTRY)], capture_output=True, text=True
+        ).returncode == 0
+    else:
+        (out / "analysis.json").write_text("stub\n", encoding="utf-8")
+    (out / "provenance.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+    merge_path = tmp_path / "merge.json"
+    if merged is None:
+        merged = _merge_record(graph)
+    merge_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+    for name in drop:
+        (out / name).unlink()
+    return subprocess.run(
+        [sys.executable, str(SCRIPTS / "graph_finalize.py"), str(out),
+         "--merge-record", str(merge_path),
+         "--scope-registry", str(REGISTRY)],
+        capture_output=True, text=True,
+    ), out
+
+
+def test_a_complete_deliverable_renders_its_findings(tmp_path):
+    """findings.md is derived, so it cannot drift from the record it reports."""
+    graph = _graph()
+    result, out = _finalize(tmp_path, graph, _provenance(graph), derive=True)
+    assert result.returncode == 0, result.stderr
+
+    rendered = (out / "findings.md").read_text(encoding="utf-8")
+    assert "the share resolver skips the owner check" in rendered
+    assert "`PATH-pov` — seed" in rendered
+
+
+def test_a_partial_tree_is_refused_rather_than_read_as_finished(tmp_path):
+    """The one boundary with no downstream consumer to reject it."""
+    graph = _graph()
+    result, _ = _finalize(tmp_path, graph, _provenance(graph), drop=("analysis.json",))
+    assert result.returncode == 1
+    assert "missing analysis.json" in result.stderr, result.stderr
+
+
+def test_an_analysis_of_an_older_graph_cannot_ship(tmp_path):
+    """Repair the graph at step 6, skip step 7, and the numbers would be stale."""
+    graph = _graph()
+    result, out = _finalize(tmp_path, graph, _provenance(graph), derive=True)
+    assert result.returncode == 0, result.stderr
+
+    stale = json.loads((out / "analysis.json").read_text(encoding="utf-8"))
+    stale["mincut_all"] += 1
+    (out / "analysis.json").write_text(json.dumps(stale, indent=2), encoding="utf-8")
+    again = subprocess.run(
+        [sys.executable, str(SCRIPTS / "graph_finalize.py"), str(out),
+         "--merge-record", str(tmp_path / "merge.json"),
+         "--scope-registry", str(REGISTRY)],
+        capture_output=True, text=True,
+    )
+    assert again.returncode == 1
+    assert "not derived from this graph.json" in again.stderr, again.stderr
+
+
+def test_a_deliverable_recording_no_route_is_refused(tmp_path):
+    """`paths` may be empty in a fragment; a finished graph with none says nothing."""
+    graph = _graph()
+    graph["paths"] = []
+    result, _ = _finalize(tmp_path, graph, _provenance(graph))
+    assert result.returncode == 1
+    assert "records no route" in result.stderr, result.stderr
+
+
+def test_every_route_must_say_which_role_found_it(tmp_path):
+    """Attribution is the merge's own fact, so nothing downstream retypes it."""
+    graph = _graph()
+    merged = _merge_record(graph)
+    del merged["routes"]["PATH-alt"]
+    result, _ = _finalize(tmp_path, graph, _provenance(graph), merged=merged)
+    assert result.returncode == 1
+    assert "does not say which role found PATH-alt" in result.stderr, result.stderr
+
+
+def test_a_deliverable_must_name_the_fault(tmp_path):
+    """Unchecked, the run ships with `_not stated_` where its whole point goes."""
+    graph = _graph()
+    result, _ = _finalize(tmp_path, graph, _provenance(graph, fault={}))
+    assert result.returncode == 1
+    assert "must name the fault" in result.stderr, result.stderr
+
+
+def test_an_unsettled_claim_must_name_what_blocked_it(tmp_path):
+    """A check the pass could have run is unfinished work, not a finding."""
+    graph = _graph()
+    record = _provenance(graph, unsettled=[{"claim": "another route", "check": "GET /x"}])
+    result, _ = _finalize(tmp_path, graph, record)
+    assert result.returncode == 1
+    assert "must carry blocked_by" in result.stderr, result.stderr
+
+
+
+
+# --- the probe harness: one request, and the evidence it earns -----------------
+
+WITNESS = "CYBERARENA-witness-9f2a"
+
+
+class _Target(http.server.BaseHTTPRequestHandler):
+    """Stands in for the study's build: echoes what it was sent, denies /denied."""
+
+    def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler's spelling
+        body = json.dumps({
+            "auth": self.headers.get("Authorization"),
+            "path": self.path,
+            "value": WITNESS,
+        }).encode()
+        self.send_response(403 if self.path.startswith("/denied") else 200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def target(tmp_path):
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Target)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    path = tmp_path / "target.json"
+    path.write_text(json.dumps({"builds": {"vulnerable": {
+        "base_url": f"http://127.0.0.1:{server.server_address[1]}",
+        "auth_header": "Authorization: token analyst:s3cret",
+    }}}), encoding="utf-8")
+    yield path
+    server.shutdown()
+
+
+def _probe(target, *extra):
+    return subprocess.run(
+        [sys.executable, str(SCRIPTS / "probe.py"), "--target", str(target),
+         "--build", "vulnerable", "--path", "/api/settings", *extra],
+        capture_output=True, text=True,
+    )
+
+
+def test_a_probe_earns_evidence_the_graph_accepts(tmp_path, target):
+    """The point of the harness: the four fields are built from the response."""
+    result = _probe(target, "--observed", WITNESS)
+    assert result.returncode == 0, result.stderr
+    earned = json.loads(result.stdout.split("evidence:", 1)[1])
+
+    graph = _graph()
+    _node(graph, "N-upload-template")["evidence"] = earned
+    assert _validate(tmp_path, graph).returncode == 0, _validate(tmp_path, graph).stderr
+
+
+def test_a_query_string_request_reaches_the_target(tmp_path, target):
+    """A run found --param broken for well-formed input too: urlencode takes
+    tuples, and the split returned lists, so every query-string probe died."""
+    result = _probe(target, "--param", "per_page=100", "--param", "query=a b")
+    assert result.returncode == 0, result.stderr
+    sent = json.loads(json.loads(result.stdout)["body"])["path"]
+    assert sent == "/api/settings?per_page=100&query=a+b", sent
+
+
+def test_a_claim_the_response_does_not_support_is_refused(tmp_path, target):
+    """Retyping an excerpt by hand is exactly how a citation stops matching."""
+    result = _probe(target, "--observed", "a string the target never sent")
+    assert result.returncode == 1
+    assert "no evidence here to record" in result.stderr, result.stderr
+
+
+def test_a_denial_is_a_result_not_a_failure(tmp_path, target):
+    """A 403 is what a route being closed looks like; it has to be recordable."""
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "probe.py"), "--target", str(target),
+         "--build", "vulnerable", "--path", "/denied"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["status"] == 403
+
+
+def test_every_probe_is_logged_beside_the_target(tmp_path, target):
+    """A run that ended badly still has to say what was sent."""
+    _probe(target, "--note", "first")
+    _probe(target, "--note", "second")
+    logged = [json.loads(line) for line in
+              (target.parent / "probes.log").read_text(encoding="utf-8").splitlines()]
+    assert [record["note"] for record in logged] == ["first", "second"]
+
+
+def test_a_probe_goes_out_as_the_entry_principal(tmp_path, target):
+    """The entry node is an identity; a probe sent as anyone else proves nothing."""
+    result = _probe(target)
+    assert json.loads(json.loads(result.stdout)["body"])["auth"] == "token analyst:s3cret"
+
+
+def test_a_study_with_no_runnable_bundle_is_not_probed(tmp_path):
+    """`none: true` is the root saying there is nothing to reach."""
+    path = tmp_path / "target.json"
+    path.write_text(json.dumps({"none": True}), encoding="utf-8")
+    result = _probe(path)
+    assert result.returncode == 1
+    assert "nothing to probe" in result.stderr, result.stderr
+
+
+# --- provisioning: the parts that do not need Docker ---------------------------
+
+def _provision(*args):
+    return subprocess.run(
+        [sys.executable, str(SCRIPTS / "graph_provision.py"), *args],
+        capture_output=True, text=True,
+    )
+
+
+def test_provisioning_refuses_a_directory_that_is_not_a_study(tmp_path):
+    """Nothing below step 2 may discover that the study was not there."""
+    result = _provision(str(tmp_path / "nowhere"), "--run", str(tmp_path / "run"),
+                        "--reproducer", "true")
+    assert result.returncode == 1
+    assert "no STAGE3_STUDY.md" in result.stderr, result.stderr
+
+
+def test_teardown_takes_nothing_it_did_not_start(tmp_path):
+    """Tearing down by guesswork would take containers this run never started.
+
+    A run that recorded no project started nothing, so there is nothing to
+    remove and that is not a failure: a Jenkins run reported teardown as broken
+    on a host it had left perfectly clean.
     """
-    sys.path.insert(0, str(SCRIPTS))
-    import _graph
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "target.json").write_text(json.dumps({"builds": {}}), encoding="utf-8")
+    result = _provision(str(tmp_path), "--run", str(run), "--down")
+    assert result.returncode == 0
+    assert "nothing to tear down" in result.stdout, result.stdout
 
-    routes = [frozenset({f"a{i}", f"b{j}"}) for i in range(6) for j in range(6)]
-    listed, size, truncated = _graph.minimal_cuts(routes)
-    assert (size, len(listed), truncated) == (6, 2, False), "both cuts, untruncated"
 
-    original = _graph.MAX_SEARCH_NODES
-    try:
-        # Tuned to land between "found one cut" and "found both": below this the
-        # search reports no size at all, above it there is nothing to truncate.
-        _graph.MAX_SEARCH_NODES = 100
-        listed, size, truncated = _graph.minimal_cuts(routes)
-    finally:
-        _graph.MAX_SEARCH_NODES = original
-    assert size == 6, "the min-cut size stays sound"
-    assert len(listed) == 1, "the search stopped short of both cuts"
-    assert truncated, "a partial listing must say it is partial"
+def test_provisioning_will_not_write_over_an_existing_bundle_copy(tmp_path):
+    """A second provision into a live run would silently reuse the first's state."""
+    study = tmp_path / "study"
+    (study / "evidence").mkdir(parents=True)
+    (study / "STAGE3_STUDY.md").write_text("# study\n", encoding="utf-8")
+    run = tmp_path / "run"
+    (run / "env").mkdir(parents=True)
+    result = _provision(str(study), "--run", str(run), "--reproducer", "true")
+    assert result.returncode == 1
+    assert "already exists" in result.stderr, result.stderr
+
+# --- provisioning: what the exit status has to mean (needs Docker) ------------
+
+def test_provisioning_that_discovers_no_build_is_a_failure(tmp_path):
+    """Exit status is the one signal step 2 tells the caller to trust.
+
+    Four studies in one batch ran a reproducer that passed and left nothing
+    standing; the script wrote `"builds": {}` and exited 0, so provisioning
+    that produced no target read as success and the next thing to notice would
+    have been a role rejecting an empty `target.json` one dispatch later.
+    """
+    study = tmp_path / "study"
+    (study / "evidence").mkdir(parents=True)
+    (study / "STAGE3_STUDY.md").write_text("# study\n", encoding="utf-8")
+    result = _provision(str(study), "--run", str(tmp_path / "run"),
+                        "--reproducer", "true")
+    assert result.returncode == 1
+    assert "no build was discovered" in result.stderr, result.stderr

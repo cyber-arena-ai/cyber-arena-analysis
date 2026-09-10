@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Render a challenge graph as a Mermaid diagram with summary tables."""
+"""Render a challenge graph as a Mermaid diagram with summary tables.
+
+Imported by `graph_finalize.py`, which writes `graph.md` as part of checking the
+deliverable. There is no CLI: a derived artifact the root produces by hand is one
+the last step has to verify, and deriving it there instead removes both.
+"""
 
 from __future__ import annotations
 
-import argparse
 import re
-import sys
 from pathlib import Path
 
-from _graph import Graph, analyze, discriminator_warnings, load
+from _graph import Graph, analyze, load
 
 SHAPES = {
     "entry": '{id}(["{label}"]):::entry',
@@ -46,7 +49,7 @@ def _node_label(node: dict) -> str:
     return node.get("title") or node["id"]
 
 
-def diagram(graph: Graph, analysis: dict) -> str:
+def diagram(graph: Graph) -> str:
     seen: dict[str, str] = {}
     # Top-down: authored node titles run long, and a left-to-right chain of them
     # is many screens wide.
@@ -58,17 +61,9 @@ def diagram(graph: Graph, analysis: dict) -> str:
         )
     lines.append("")
 
-    implicated = {n for cut in analysis["observed_cuts"] for n in cut["implicated_nodes"]}
-    marked: list[int] = []
-    index = 0
     for node_id, node in graph.nodes.items():
-        for required in node.get("requires", []) or []:
+        for required in node.get("predecessors", []) or []:
             lines.append(f"  {_node(required, seen)} --> {_node(node_id, seen)}")
-            if node_id in implicated:
-                marked.append(index)
-            index += 1
-    for edge in marked:
-        lines.append(f"  linkStyle {edge} stroke:#a44,stroke-dasharray:4")
     lines.append("```")
     return "\n".join(lines)
 
@@ -81,7 +76,7 @@ def _table(header: list[str], rows: list[list[str]]) -> str:
     return "\n".join(out) + "\n"
 
 
-def report(graph: Graph, analysis: dict, warnings: list[dict]) -> str:
+def report(graph: Graph, analysis: dict) -> str:
     target = graph.document["target"]
     parts = [
         f"# Challenge graph: {target['id']}",
@@ -91,29 +86,28 @@ def report(graph: Graph, analysis: dict, warnings: list[dict]) -> str:
         f"`mincut_all` **{analysis['mincut_all']}**, "
         f"{len(graph.paths)} recorded path(s), {len(graph.by_role('objective'))} objective(s).",
         "",
-        "Cuts are computed over the *recorded* routes and exclude the terminals, "
-        "so a larger min-cut is sound while a small one may only mean no further "
-        "route was recorded yet. **This graph does not say which cuts are "
-        "allowed** — that needs the functionality checker and belongs to challenge "
-        "authoring. The entry set is an unchecked author claim: a node declared "
-        "`entry` leaves every cut, so check that it really is the identity the "
-        "challenge grants the attacker.",
+        "The min-cut is computed over the *recorded* routes and excludes the "
+        "terminals, so a larger size is sound while a small one may only mean no "
+        "further route was recorded yet. It says how many nodes a defender would "
+        "have to touch, never which ones are allowed to be touched — that needs "
+        "the functionality checker and belongs to challenge authoring. The entry "
+        "set is an unchecked author claim: a node declared `entry` leaves every "
+        "cut, so check that it really is the identity the challenge grants the "
+        "attacker.",
         "",
-        diagram(graph, analysis),
-        "",
-        "Dashed red edges enter a node an observed cut implicated.",
+        diagram(graph),
         "",
         "## Nodes",
         "",
         _table(
-            ["node", "role", "symbol", "requires"],
+            ["node", "role", "symbol", "predecessors"],
             [
                 [
                     node_id,
                     str(node.get("role")),
                     str(node.get("symbol") or "—"),
-                    (" **and** " if node.get("requires_all") else " *or* ").join(
-                        node.get("requires") or []
+                    (" **and** " if node.get("conjunctive") else " *or* ").join(
+                        node.get("predecessors") or []
                     )
                     or "—",
                 ]
@@ -123,101 +117,45 @@ def report(graph: Graph, analysis: dict, warnings: list[dict]) -> str:
         "## Routes",
         "",
         _table(
-            ["path", "objective", "nodes", "interior", "chain", "advisories", "witnesses"],
+            ["route", "objective", "walk", "advisories", "witnesses"],
             [
                 [
                     path_id,
                     str(path.get("objective")),
-                    str(len(path.get("nodes", []))),
-                    str(len(graph.interior(path_id))),
-                    "yes" if analysis["nontrivial_paths"][path_id] else "**no**",
+                    " → ".join(path.get("nodes", [])),
                     ", ".join(path.get("advisories") or []) or "—",
                     str(len(path.get("witnesses") or [])),
                 ]
                 for path_id, path in graph.paths.items()
             ],
         ),
-        "## Candidate cuts (cheapest, admissibility not judged)",
+        "## The cut the advisory accepted",
         "",
         _table(
-            ["size", "nodes"],
-            [[str(len(c)), ", ".join(c)] for c in analysis["minimum_cuts_all"]],
+            ["", "value"],
+            [
+                ["advisory", str(cut.get("advisory") or "—")],
+                ["nodes it guarded", ", ".join(cut.get("nodes") or []) or "—"],
+                ["routes that refused every request tried",
+                 ", ".join(e["path"] for e in cut.get("refused") or []) or "—"],
+                ["routes it left open",
+                 ", ".join(e["path"] for e in cut.get("survived") or []) or "—"],
+            ] if (cut := graph.advisory_cut) else [],
         ),
+        "This is the one cut here whose admissibility is known: upstream shipped "
+        "it and the project kept working. Every cut *size* above is a candidate "
+        "nobody has judged. A route under **left open** reached the objective "
+        "with this repair applied.",
+        "",
         "## Objective coverage",
         "",
         _table(
             ["objective", "scope", "routes", "mincut"],
             [
-                [objective, str(detail["scope"]), str(len(detail["paths"])), str(detail["mincut"])]
+                [objective, str(detail["scope"]), str(detail["routes"]), str(detail["mincut"])]
                 for objective, detail in analysis["objective_coverage"].items()
             ],
         ),
-        "## Observed cuts",
         "",
-        _table(
-            ["cut", "reference", "blocked", "survived", "reading"],
-            [
-                [
-                    cut["id"],
-                    str(cut["reference"]),
-                    ", ".join(cut["blocked"]) or "—",
-                    ", ".join(cut["survived"]) or "—",
-                    cut["reading"],
-                ]
-                for cut in analysis["observed_cuts"]
-            ],
-        ),
-        "## Frontier",
-        "",
-        _table(
-            ["kind", "target"],
-            [[item["kind"], item["target"]] for item in analysis["frontier"]],
-        ),
-        f"Citations resting on the study document: "
-        f"**{analysis['citation_sources']['study_document']}**; "
-        f"citing retained output: "
-        f"**{analysis['citation_sources']['retained_evidence']}**.",
-        "",
-        "## Citation warnings",
-        "",
-        _table(
-            ["where", "detail"],
-            [[w["where"], w["detail"]] for w in warnings],
-        ),
     ]
     return "\n".join(parts)
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("graph", type=Path)
-    parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument(
-        "--study-dir",
-        type=Path,
-        required=True,
-        help="Stage 3 study directory; the graph is fully validated before use",
-    )
-    parser.add_argument(
-        "--scope-registry",
-        type=Path,
-        help="attack-scopes.json; when given, objective scopes are checked against it",
-    )
-    args = parser.parse_args()
-
-    document, errors = load(args.graph, args.study_dir, args.scope_registry)
-    if errors:
-        for error in errors:
-            print(error, file=sys.stderr)
-        return 1
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-
-    graph = Graph(document)
-    warnings = discriminator_warnings(graph, args.study_dir)
-    args.out.write_text(report(graph, analyze(graph), warnings), encoding="utf-8")
-    print(f"{args.out}: rendered")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -1,3 +1,4 @@
+import base64
 import http.server
 import json
 import re
@@ -1051,6 +1052,7 @@ class _Target(http.server.BaseHTTPRequestHandler):
         self._respond(200, json.dumps({
             "content_type": self.headers.get("Content-Type"),
             "body": raw.decode("utf-8", "replace"),
+            "body_hex": raw.hex(),
             "value": WITNESS,
         }).encode())
 
@@ -1099,11 +1101,22 @@ def test_a_query_string_request_reaches_the_target(tmp_path, target):
     assert sent == "/api/settings?per_page=100&query=a+b", sent
 
 
-def test_a_claim_the_response_does_not_support_is_refused(tmp_path, target):
-    """Retyping an excerpt by hand is exactly how a citation stops matching."""
-    result = _probe(target, "--observed", "a string the target never sent")
+@pytest.mark.parametrize("observed, message", [
+    ("a string the target never sent", "no evidence here to record"),
+    ("short", "observed must carry at least"),
+])
+def test_a_rejected_observation_keeps_the_exchange(tmp_path, target, observed, message):
+    """An unsupported claim must not erase the response that refuted it."""
+    result = _probe(target, "--observed", observed)
     assert result.returncode == 1
-    assert "no evidence here to record" in result.stderr, result.stderr
+    assert message in result.stderr, result.stderr
+    logged = [json.loads(line) for line in
+              (target.parent / "probes.log").read_text().splitlines()]
+    assert len(logged) == 1
+    assert logged[0] == json.loads(result.stdout)
+    assert logged[0]["status"] == 200
+    assert json.loads(logged[0]["body"])["value"] == WITNESS
+    assert "evidence" not in logged[0]
 
 
 def test_a_denial_is_a_result_not_a_failure(tmp_path, target):
@@ -1160,6 +1173,26 @@ def test_a_form_body_is_sent_form_encoded(tmp_path, target):
     echoed = json.loads(json.loads(result.stdout)["body"])
     assert echoed["content_type"] == "application/x-www-form-urlencoded"
     assert echoed["body"] == "query=a+b&page=2"
+
+
+@pytest.mark.parametrize("payload", [b"\x00\xffA\n", b"\x00\xfeB\n"])
+def test_a_binary_request_keeps_its_bytes_in_the_evidence(tmp_path, target, payload):
+    """Equal-size files with the same name must retain their distinct contents."""
+    source = tmp_path / "upload.bin"
+    source.write_bytes(payload)
+    result = _probe(target, "--method", "POST", "--data-file", str(source),
+                    "--observed", WITNESS)
+    assert result.returncode == 0, result.stderr
+    source.unlink()
+
+    logged = json.loads((target.parent / "probes.log").read_text().splitlines()[-1])
+    received = json.loads(logged["body"])
+    assert bytes.fromhex(received["body_hex"]) == payload
+    assert logged["sent"].startswith("base64:")
+    assert base64.b64decode(logged["sent"].removeprefix("base64:")) == payload
+    earned = json.loads(result.stdout.split("evidence:", 1)[1])
+    assert f"body {logged['sent']}" in earned["source"]
+    assert logged["evidence"] == earned
 
 
 def test_a_claim_deeper_than_the_log_excerpt_still_earns_evidence(tmp_path, target):
@@ -1228,11 +1261,30 @@ def test_a_cookie_is_merged_into_a_cookie_principal_the_granted_one_winning(tmp_
     spec["builds"]["vulnerable"]["auth_header"] = "Cookie: i_like_gogs=GRANTED; seat=1"
     target.write_text(json.dumps(spec), encoding="utf-8")
 
-    result = _probe(target, "--header", "Cookie: session=MINTED; i_like_gogs=ROTATED")
+    result = _probe(target, "--header", "Cookie: session=MINTED; i_like_gogs=ROTATED",
+                    "--observed", WITNESS)
     assert result.returncode == 0, result.stderr
-    seen = json.loads(json.loads(result.stdout)["body"])["cookie"]
+    record = json.loads(result.stdout.split("evidence:", 1)[0])
+    seen = json.loads(record["body"])["cookie"]
     assert "session=MINTED" in seen and "i_like_gogs=GRANTED" in seen, seen
     assert "ROTATED" not in seen, seen
+    assert record["added"]["Cookie"] == seen
+    earned = json.loads(result.stdout.split("evidence:", 1)[1])
+    assert f"Cookie: {seen}" in earned["source"]
+    assert "ROTATED" not in earned["source"]
+
+
+def test_case_variant_headers_record_only_the_value_sent(tmp_path, target):
+    result = _probe(target, "--header", "X-Extra: first", "--header", "x-extra: second",
+                    "--observed", WITNESS)
+    assert result.returncode == 0, result.stderr
+    record = json.loads(result.stdout.split("evidence:", 1)[0])
+    seen = json.loads(record["body"])["extra"]
+    assert seen == "second"
+    assert record["added"] == {"X-Extra": seen}
+    earned = json.loads(result.stdout.split("evidence:", 1)[1])
+    assert f"X-Extra: {seen}" in earned["source"]
+    assert "first" not in earned["source"]
 
 
 def test_a_redirect_is_a_result_and_is_not_followed(tmp_path, target):

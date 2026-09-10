@@ -110,11 +110,15 @@ python3 <scripts>/probe.py --target <run>/target.json --build <name> \
   [--note "<what this is for>"] [--observed "<the string carrying the claim>"]
 ```
 Sends one request as that build's entry principal, appends it to
-`<run>/probes.log` with the headers it sent, the request body it sent, the
+`<run>/probes.log` with the effective extra headers, the request body it sent, the
 response's own headers and a UTC timestamp, and prints it. A request has one body: `--data` is JSON,
 `--form` is form-encoded, `--data-file` is bytes, for a payload that is not text.
+Binary bodies are retained as `base64:<encoded bytes>` in the log's `sent` field
+and the evidence `source`, so neither depends on the original file. The record
+grows with the file size.
 `--header` adds a header; it may not replace the entry principal's, though a
-cookie is merged into it, the granted one winning. What was added is recorded and
+cookie is merged into it, the granted one winning. Extra headers are recorded
+after cookie merging and case-insensitive request-header normalization, then
 named in the evidence `source`, so a route opened by a second header is not read
 as one the entry principal walked alone. **One invocation is one request**:
 redirects are not followed, and a 302 is returned as the result it is, with its
@@ -124,7 +128,9 @@ contain that string, which is the one thing hand-assembled evidence cannot check
 about itself; when the claim lands deeper than the excerpt the log keeps, the
 evidence excerpt follows the match rather than the start, and a claim carried by
 a response header rather than the body is quotable too. A 403 is a result, not
-a failure; a request that never arrived is logged too, and exits 1.
+a failure; a request that never arrived is logged too, and exits 1. A rejected
+`--observed` also exits 1, after logging and printing the completed exchange
+without an evidence claim.
 
 ```text
 python3 <scripts>/probe.py --target <run>/target.json --build <name> --record \

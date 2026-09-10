@@ -20,6 +20,7 @@ page it points at are two requests and one record cannot honestly be both.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import sys
 import urllib.error
@@ -101,9 +102,8 @@ def _body(data: str | None, form: list[str],
         return encoded.encode("utf-8"), "application/x-www-form-urlencoded", encoded
     if data_file is not None:
         raw = data_file.read_bytes()
-        # Logged by shape, not content: a packfile or an upload is not text, and
-        # putting it in the log would make the log unreadable.
-        return raw, "application/octet-stream", f"<{len(raw)} bytes from {data_file.name}>"
+        # The record must retain the bytes after the original file is gone.
+        return raw, "application/octet-stream", "base64:" + base64.b64encode(raw).decode("ascii")
     return None, None, None
 
 
@@ -116,6 +116,11 @@ def send(build: dict, args: argparse.Namespace) -> dict:
     if content_type and not any(key.lower() == "content-type" for key in headers):
         headers["Content-Type"] = content_type
     request = urllib.request.Request(url, data=payload, method=args.method, headers=headers)
+    # Record effective additions after cookie merging and urllib's
+    # case-insensitive header normalization, not the original flag values.
+    added_names = {name.lower() for name in added}
+    added = {name.title(): value for name, value in request.header_items()
+             if name.lower() in added_names}
     opener = urllib.request.build_opener(_NoRedirect)
     at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     base = {"at": at, "witness": "probe", "method": args.method, "url": url,
@@ -264,34 +269,32 @@ def main() -> int:
     record = {"build": args.build, "note": args.note, **sent}
     whole = record["body"]
     record["body"] = whole[:BODY_LIMIT]
-    if record["status"] is None:
-        with (args.target.parent / "probes.log").open("a", encoding="utf-8") as log:
-            log.write(json.dumps(record) + "\n")
-        print(json.dumps(record, indent=2))
-        print(f"\nthe request did not reach {args.build}: {record['error']}", file=sys.stderr)
-        return 1
-
     earned = None
-    if args.observed is not None:
+    failure = None
+    if record["status"] is None:
+        failure = f"the request did not reach {args.build}: {record['error']}"
+    elif args.observed is not None:
         if len(args.observed.strip()) < MIN_OBSERVED:
-            print(f"\nobserved must carry at least {MIN_OBSERVED} characters of the "
-                  "response; a shorter one is rejected at validation", file=sys.stderr)
-            return 1
-        # A claim can live in a header rather than the body: a study returned its
-        # archive as ciphertext with the key that decrypts it in one.
-        carrier = whole if args.observed in whole else header_text(record)
-        if args.observed not in carrier:
-            print(f"\n{args.observed!r} is in neither the response body nor its "
-                  "headers; there is no evidence here to record", file=sys.stderr)
-            return 1
-        earned = evidence(record, args.build, args.observed, carrier)
-        # Kept in the log as well as printed: the excerpt can follow a match past
-        # the head this log keeps, and the root's citation check reads this file.
-        record["evidence"] = earned
+            failure = (f"observed must carry at least {MIN_OBSERVED} characters of the "
+                       "response; a shorter one is rejected at validation")
+        else:
+            # A claim can live in a header rather than the body: a study returned its
+            # archive as ciphertext with the key that decrypts it in one.
+            carrier = whole if args.observed in whole else header_text(record)
+            if args.observed not in carrier:
+                failure = (f"{args.observed!r} is in neither the response body nor its "
+                           "headers; there is no evidence here to record")
+            else:
+                earned = evidence(record, args.build, args.observed, carrier)
+                # The excerpt may follow a match past the head the log keeps.
+                record["evidence"] = earned
 
     with (args.target.parent / "probes.log").open("a", encoding="utf-8") as log:
         log.write(json.dumps(record) + "\n")
     print(json.dumps(record, indent=2))
+    if failure is not None:
+        print(f"\n{failure}", file=sys.stderr)
+        return 1
     if earned is not None:
         print("\nevidence:")
         print(json.dumps(earned, indent=2))

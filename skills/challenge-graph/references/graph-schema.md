@@ -105,21 +105,20 @@ it really is the granted starting identity.
 A path is one **route**: an ordered walk from an entry node to an objective,
 over distinct nodes.
 
-**Naming.** `PATH-<the node it enters through>-<the node that reaches the
-objective>`, using those two nodes' ids with the `N-` dropped. Both are the
-route's own interior endpoints, so a role can name its routes without knowing
-what any other role found — which is why nothing cleverer will work here: SEED
-names its routes before EXPAND exists. Where it enters is the attack surface;
-what finally executes is what crosses the boundary. The nodes between are
-plumbing, and are read off `nodes`.
+**Naming.** A route id is a short reference, not a description. Fragments use
+`PATH-1`, `PATH-2`, and so on in their own document order. `graph_merge.py`
+assigns the final sequence in SEED-then-EXPAND order and rewrites references in
+the advisory cut and merge record. Inserting a route may therefore renumber
+later routes; nothing outside the generated deliverable treats the id as
+stable. The complete ordered walk is `nodes` and is printed in `graph.md`.
 
-A name is the author's choice and so can never be what says two routes differ.
+An identifier can never be what says two routes differ.
 **Two routes over the same walk are one route recorded twice** and are rejected,
 however they are named — otherwise a duplicate inflates the route count and can
 manufacture a `fan_in` reading out of a single way in.
 
 ```json
-{"id": "PATH-create-share-resolve-share", "objective": "N-obj-report",
+{"id": "PATH-1", "objective": "N-obj-report",
  "nodes": ["N-entry", "N-create-share", "N-resolve-share", "N-obj-report"],
  "advisories": ["CVE-2026-11111"],
  "witnesses": [{"source": "vulnerable build · GET /reports/9 · 200",
@@ -165,12 +164,12 @@ running the repaired build.
 {"advisory_cut": {
    "advisory": "CVE-2026-11111",
    "nodes": ["N-resolve-share"],
-   "refused":  [{"path": "PATH-create-share-resolve-share",
+   "refused":  [{"path": "PATH-1",
                  "tried": "the study's payload, a direct object id, a re-signed token",
                  "source": "fixed build · GET /s/7f2a · 403",
                  "excerpt": "403 Forbidden owner_check=enforced",
                  "observed": "403 Forbidden owner_check=enforced"}],
-   "survived": [{"path": "PATH-upload-template-render-template",
+   "survived": [{"path": "PATH-2",
                  "source": "fixed build · GET /reports/9/export · 200",
                  "excerpt": "200 {\"body\": \"recovered victim report body\"}",
                  "observed": "recovered victim report body"}]}}

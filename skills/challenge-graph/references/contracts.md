@@ -59,7 +59,10 @@ python3 <scripts>/graph_merge.py <run>/seed.json \
   --out <out>/graph.json --record <run>/merge.json \
   --scope-registry <registry>
 ```
-Unions two fragments. **`--expand` is required**: EXPAND finding nothing is a
+Unions two fragments and assigns their routes the final ids `PATH-1`,
+`PATH-2`, and so on, in SEED-then-EXPAND document order. It rewrites every
+advisory-cut and attribution reference to those ids. **`--expand` is required**:
+EXPAND finding nothing is a
 fragment carrying no route, and the fragment existing is what says EXPAND ran.
 No flag lets the root assert that on a role's behalf, because a role that never
 ran and a role that found nothing are not the same run. Writes both files or

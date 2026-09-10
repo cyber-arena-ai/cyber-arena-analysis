@@ -75,8 +75,10 @@ objective it reached on the target is its own to declare.
    validator names a node the route did not need, either record the shorter
    route or narrow the `predecessors` that made the shortcut possible.
 
-   Name it `PATH-<node it enters through>-<node that reaches the objective>`,
-   `N-` dropped from both — see graph-schema.md. Do not invent a description.
+   Give routes fragment-local ids `PATH-1`, `PATH-2`, and so on, in document
+   order. The merger assigns the final sequence across both fragments; the id
+   is only a reference, while `nodes` records the ordered walk — see
+   graph-schema.md.
 
    A chain reproduced twice is better evidence for one route, not a second
    route: add the replay to that route's `witnesses`. Record `advisories`.

@@ -82,7 +82,7 @@
   ],
   "paths": [
     {
-      "id": "PATH-create-share-resolve-share",
+      "id": "PATH-1",
       "objective": "N-obj-report",
       "nodes": [
         "N-entry",
@@ -102,7 +102,7 @@
       ]
     },
     {
-      "id": "PATH-upload-template-render-template",
+      "id": "PATH-2",
       "objective": "N-obj-report",
       "nodes": [
         "N-entry",
@@ -127,7 +127,7 @@
     ],
     "refused": [
       {
-        "path": "PATH-create-share-resolve-share",
+        "path": "PATH-1",
         "source": "fixed build \u00b7 GET /s/7f2a \u00b7 403",
         "excerpt": "403 Forbidden owner_check=enforced share=7f2a",
         "observed": "403 Forbidden owner_check=enforced",
@@ -136,7 +136,7 @@
     ],
     "survived": [
       {
-        "path": "PATH-upload-template-render-template",
+        "path": "PATH-2",
         "source": "fixed build \u00b7 GET /reports/9/export \u00b7 200",
         "excerpt": "200 {\"body\": \"recovered victim report body\"}",
         "observed": "recovered victim report body"

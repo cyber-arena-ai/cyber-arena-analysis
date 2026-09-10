@@ -683,20 +683,27 @@ def _merge(tmp_path, seed, expand, *extra):
 
 
 def test_merge_reunites_the_fragments_into_the_disjoint_reading(tmp_path):
-    """Split authoring must reproduce exactly what one agent would have written."""
-    result, out, record = _merge(tmp_path, _seed(), _expand())
+    """Fragment-local ids may collide; the merged graph assigns its own sequence."""
+    seed = _cut(_seed(), refused=("PATH-pov",), survived=())
+    expand = _expand()
+    _path(expand, "PATH-alt")["id"] = "PATH-pov"
+    _cut(expand, refused=(), survived=("PATH-pov",), nodes=("N-render-template",))
+    result, out, record = _merge(tmp_path, seed, expand)
     assert result.returncode == 0, result.stderr
 
     merged = json.loads(out.read_text(encoding="utf-8"))
     assert _node(merged, "N-obj")["predecessors"] == ["N-resolve-share", "N-render-template"]
-    assert [p["id"] for p in merged["paths"]] == ["PATH-pov", "PATH-alt"]
+    assert [p["id"] for p in merged["paths"]] == ["PATH-1", "PATH-2"]
+    assert [entry["path"] for entry in merged["advisory_cut"]["refused"]] == ["PATH-1"]
+    assert [entry["path"] for entry in merged["advisory_cut"]["survived"]] == ["PATH-2"]
 
     analysis = _analyze(tmp_path, merged)
     assert analysis["geometry"] == ["disjoint"]
     assert analysis["mincut_all"] == 2
 
     written = json.loads(record.read_text(encoding="utf-8"))
-    assert written["routes_added"] == ["PATH-alt"]
+    assert written["routes"] == {"PATH-1": "seed", "PATH-2": "expand"}
+    assert written["routes_added"] == ["PATH-2"]
     assert sorted(written["nodes_added"]) == ["N-render-template", "N-upload-template"]
     assert written["predecessors_widened"] == ["N-obj"]
 
@@ -771,7 +778,7 @@ def test_merge_revalidates_what_the_union_produced(tmp_path):
     path["nodes"].insert(-1, "N-exfil")
     result, out, _ = _merge(tmp_path, _seed(), expand)
     assert result.returncode == 1
-    assert "merged: route PATH-alt still reaches N-obj without" in result.stderr
+    assert "merged: route PATH-2 still reaches N-obj without" in result.stderr
     assert not out.exists(), "an invalid merge must not be written"
 
 
@@ -861,7 +868,7 @@ def test_expand_finding_nothing_is_a_fragment_carrying_no_route(tmp_path):
     assert result.returncode == 0, result.stderr
 
     merged = json.loads(out.read_text(encoding="utf-8"))
-    assert [p["id"] for p in merged["paths"]] == ["PATH-pov"]
+    assert [p["id"] for p in merged["paths"]] == ["PATH-1"]
     written = json.loads(record.read_text(encoding="utf-8"))
     assert written["routes_added"] == [] and written["nodes_added"] == []
 

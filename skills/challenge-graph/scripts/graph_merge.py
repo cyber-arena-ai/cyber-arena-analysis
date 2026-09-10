@@ -77,7 +77,8 @@ def merge(seed: dict, expand: dict) -> tuple[dict | None, dict, list[str]]:
 
     There is no "EXPAND did not run" input. EXPAND always writes a fragment, and
     one carrying no route is what finding nothing looks like — the file existing
-    is what says EXPAND ran, which no flag from the root could say.
+    is what says EXPAND ran, which no flag from the root could say. Fragment-local
+    route ids are replaced by one sequence over the merged document.
     """
     seed_graph = Graph(seed)
     expand_graph = Graph(expand)
@@ -93,31 +94,37 @@ def merge(seed: dict, expand: dict) -> tuple[dict | None, dict, list[str]]:
         nodes[node_id], node_errors = _merge_node(nodes[node_id], node)
         errors += node_errors
 
-    paths = list(seed_graph.paths.values())
-    # A name is the author's choice, so it cannot be what says two routes differ:
-    # the walk is. Two names over one walk is one route recorded twice.
-    walks = {tuple(p["nodes"]) for p in paths}
+    source_paths = [("seed", path) for path in seed_graph.paths.values()]
+    # An id is only a reference, so it cannot be what says two routes differ: the
+    # walk is. Two ids over one walk is one route recorded twice.
+    walks = {tuple(path["nodes"]) for _, path in source_paths}
     for path_id, path in expand_graph.paths.items():
-        if path_id in seed_graph.paths:
-            errors.append(f"both fragments declare route {path_id}")
-            continue
         walk = tuple(path["nodes"])
         if walk in walks:
             errors.append(f"EXPAND route {path_id} walks nodes SEED already recorded")
             continue
         walks.add(walk)
-        paths.append(path)
+        source_paths.append(("expand", path))
 
     if errors:
         return None, {}, errors
+
+    paths: list[dict] = []
+    route_ids: dict[str, dict[str, str]] = {"seed": {}, "expand": {}}
+    route_roles: dict[str, str] = {}
+    for index, (role, path) in enumerate(source_paths, start=1):
+        path_id = f"PATH-{index}"
+        route_ids[role][path["id"]] = path_id
+        renamed = copy.deepcopy(path)
+        renamed["id"] = path_id
+        paths.append(renamed)
+        route_roles[path_id] = role
 
     dropped = _prune(nodes, paths, set(seed_graph.nodes))
     document = {k: seed[k] for k in SHARED}
     document["nodes"] = list(nodes.values())
     document["paths"] = paths
-    cut, cut_errors = _merge_cut(
-        seed_graph, expand_graph, {p["id"] for p in paths}, set(nodes)
-    )
+    cut, cut_errors = _merge_cut(seed_graph, expand_graph, route_ids, set(nodes))
     if cut_errors:
         return None, {}, cut_errors
     if cut is not None:
@@ -131,18 +138,20 @@ def merge(seed: dict, expand: dict) -> tuple[dict | None, dict, list[str]]:
         ],
         # Attribution is a fact of the union, not something the root should be
         # retyping downstream: the fragment a route arrived in *is* its author.
-        # Routes are addressed by their position in the merged document.
-        "routes": {
-            p["id"]: ("seed" if p["id"] in seed_graph.paths else "expand") for p in paths
-        },
-        "routes_added": [p["id"] for p in paths if p["id"] not in seed_graph.paths],
+        # Final ids follow the merged document, while attribution follows the
+        # fragment each route arrived in.
+        "routes": route_roles,
+        "routes_added": [path_id for path_id, role in route_roles.items() if role == "expand"],
         "nodes_dropped": dropped,
     }
     return document, record, []
 
 
 def _merge_cut(
-    seed: Graph, expand: Graph, kept: set[str], surviving_nodes: set[str]
+    seed: Graph,
+    expand: Graph,
+    route_ids: dict[str, dict[str, str]],
+    surviving_nodes: set[str],
 ) -> tuple[dict | None, list[str]]:
     """One advisory, one cut, so the two fragments' sides simply union.
 
@@ -159,7 +168,7 @@ def _merge_cut(
     advisory = named[0] if named else None
     nodes: list[str] = []
     merged: dict[str, list[dict]] = {key: [] for key in CUT_SIDES}
-    for fragment in (seed.advisory_cut, expand.advisory_cut):
+    for role, fragment in (("seed", seed.advisory_cut), ("expand", expand.advisory_cut)):
         for node_id in (fragment or {}).get("nodes") or []:
             # A pruned route can take the only node that reached a guarded
             # function with it; keeping the name would fail the merged graph
@@ -168,8 +177,12 @@ def _merge_cut(
                 nodes.append(node_id)
         for key in CUT_SIDES:
             for entry in (fragment or {}).get(key) or []:
-                if entry["path"] in kept and entry not in merged[key]:
-                    merged[key].append(entry)
+                path_id = route_ids[role].get(entry["path"])
+                if path_id is not None:
+                    renamed = copy.deepcopy(entry)
+                    renamed["path"] = path_id
+                    if renamed not in merged[key]:
+                        merged[key].append(renamed)
     if not nodes and not any(merged.values()):
         return None, []
     return {"advisory": advisory, "nodes": nodes, **merged}, []

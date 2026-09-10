@@ -1012,17 +1012,47 @@ WITNESS = "CYBERARENA-witness-9f2a"
 class _Target(http.server.BaseHTTPRequestHandler):
     """Stands in for the study's build: echoes what it was sent, denies /denied."""
 
-    def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler's spelling
-        body = json.dumps({
-            "auth": self.headers.get("Authorization"),
-            "path": self.path,
-            "value": WITNESS,
-        }).encode()
-        self.send_response(403 if self.path.startswith("/denied") else 200)
+    def _respond(self, status, body, extra=()):
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
+        self.send_header("X-Study-Witness", f"{WITNESS}-header")
+        for name, value in extra:
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler's spelling
+        if self.path.startswith("/redir"):
+            self._respond(302, b'{"moved": true}', [("Location", "/api/settings")])
+            return
+        if self.path.startswith("/login"):
+            # Two, because Set-Cookie is the header that repeats.
+            self._respond(200, b'{"logged_in": true}',
+                          [("Set-Cookie", "session=MINTED-BY-THE-RUN; Path=/"),
+                           ("Set-Cookie", "flavour=second; Path=/")])
+            return
+        if self.path.startswith("/deep"):
+            # The disclosure lands past the excerpt the log keeps, as it does in
+            # any application that renders it inside a page.
+            self._respond(200, ("." * 6000 + WITNESS + "tail").encode())
+            return
+        body = json.dumps({
+            "auth": self.headers.get("Authorization"),
+            "path": self.path,
+            "extra": self.headers.get("X-Extra"),
+            "cookie": self.headers.get("Cookie"),
+            "value": WITNESS,
+        }).encode()
+        self._respond(403 if self.path.startswith("/denied") else 200, body)
+
+    def do_POST(self):  # noqa: N802 - BaseHTTPRequestHandler's spelling
+        raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        self._respond(200, json.dumps({
+            "content_type": self.headers.get("Content-Type"),
+            "body": raw.decode("utf-8", "replace"),
+            "value": WITNESS,
+        }).encode())
 
     def log_message(self, *args):
         pass
@@ -1109,6 +1139,156 @@ def test_a_study_with_no_runnable_bundle_is_not_probed(tmp_path):
     result = _probe(path)
     assert result.returncode == 1
     assert "nothing to probe" in result.stderr, result.stderr
+
+
+def test_a_response_header_reaches_the_log(tmp_path, target):
+    """A study served its archive with the key that decrypts it in a header.
+
+    probe.py read the headers and kept only Content-Type, so the shipped witness
+    proved a zip had been served and not that the secret was recovered.
+    """
+    result = _probe(target, "--note", "headers")
+    assert result.returncode == 0, result.stderr
+    logged = json.loads((target.parent / "probes.log").read_text().splitlines()[-1])
+    assert ["X-Study-Witness", f"{WITNESS}-header"] in logged["headers"]
+
+
+def test_a_form_body_is_sent_form_encoded(tmp_path, target):
+    """Two studies needed request.form; --data is JSON, which leaves it empty."""
+    result = _probe(target, "--method", "POST", "--form", "query=a b", "--form", "page=2")
+    assert result.returncode == 0, result.stderr
+    echoed = json.loads(json.loads(result.stdout)["body"])
+    assert echoed["content_type"] == "application/x-www-form-urlencoded"
+    assert echoed["body"] == "query=a+b&page=2"
+
+
+def test_a_claim_deeper_than_the_log_excerpt_still_earns_evidence(tmp_path, target):
+    """A witness sat at character 22466 of a rendered page and was unrecordable.
+
+    The log excerpt stays capped, so the evidence excerpt has to follow the match
+    instead of the start — otherwise `observed` is not inside its own `excerpt`
+    and the graph is rejected at validation.
+    """
+    result = _probe(target, "--path", "/deep", "--observed", WITNESS)
+    assert result.returncode == 0, result.stderr
+    earned = json.loads(result.stdout.split("evidence:", 1)[1])
+    assert earned["observed"] in earned["excerpt"]
+    # A window, not the whole body — and the log excerpt stays capped regardless.
+    assert len(earned["excerpt"]) <= 4000
+    logged = json.loads((target.parent / "probes.log").read_text().splitlines()[-1])
+    assert len(logged["body"]) == 4000 and WITNESS not in logged["body"]
+
+    graph = _graph()
+    _node(graph, "N-upload-template")["evidence"] = earned
+    assert _validate(tmp_path, graph).returncode == 0, _validate(tmp_path, graph).stderr
+
+
+def test_a_header_may_not_replace_the_entry_principal(tmp_path, target):
+    """--header widens the request; it must not let a probe walk as someone else."""
+    result = _probe(target, "--header", "Authorization: token root:all")
+    assert result.returncode == 1
+    assert "may not replace the entry principal" in result.stderr, result.stderr
+
+
+def test_a_repeated_response_header_is_kept_whole(tmp_path, target):
+    """Set-Cookie is the header this keeps for, and the one that repeats.
+
+    A mapping kept only the first, losing a cookie the response actually set.
+    """
+    assert _probe(target, "--path", "/login").returncode == 0
+    logged = json.loads((target.parent / "probes.log").read_text().splitlines()[-1])
+    cookies = [value for name, value in logged["headers"] if name == "Set-Cookie"]
+    assert len(cookies) == 2, cookies
+
+
+def test_a_claim_carried_by_a_response_header_earns_evidence(tmp_path, target):
+    """A study served ciphertext with the key that decrypts it in a header.
+
+    Matching the body alone made that claim unrecordable, so the witness could
+    say only that an archive had been served.
+    """
+    result = _probe(target, "--path", "/deep",
+                    "--observed", f"X-Study-Witness: {WITNESS}-header")
+    assert result.returncode == 0, result.stderr
+    earned = json.loads(result.stdout.split("evidence:", 1)[1])
+    assert earned["observed"] in earned["excerpt"]
+
+    graph = _graph()
+    _node(graph, "N-upload-template")["evidence"] = earned
+    assert _validate(tmp_path, graph).returncode == 0, _validate(tmp_path, graph).stderr
+
+
+def test_a_cookie_is_merged_into_a_cookie_principal_the_granted_one_winning(tmp_path, target):
+    """A session alongside a cookie principal is ordinary; replacing it is not.
+
+    The principal is the identity the challenge granted, so where both name the
+    same cookie the granted value is the one the route is walked with.
+    """
+    spec = json.loads(target.read_text())
+    spec["builds"]["vulnerable"]["auth_header"] = "Cookie: i_like_gogs=GRANTED; seat=1"
+    target.write_text(json.dumps(spec), encoding="utf-8")
+
+    result = _probe(target, "--header", "Cookie: session=MINTED; i_like_gogs=ROTATED")
+    assert result.returncode == 0, result.stderr
+    seen = json.loads(json.loads(result.stdout)["body"])["cookie"]
+    assert "session=MINTED" in seen and "i_like_gogs=GRANTED" in seen, seen
+    assert "ROTATED" not in seen, seen
+
+
+def test_a_redirect_is_a_result_and_is_not_followed(tmp_path, target):
+    """One invocation is one request.
+
+    Following a 302 puts two requests behind one record, and lets a cookie the
+    first hop sets walk the second under the first's name. The Location is the
+    useful part, and it is in the headers.
+    """
+    result = _probe(target, "--path", "/redir")
+    assert result.returncode == 0, result.stderr
+    record = json.loads(result.stdout)
+    assert record["status"] == 302
+    assert ["Location", "/api/settings"] in record["headers"]
+
+
+def test_an_exchange_another_client_ran_can_be_recorded(tmp_path, target):
+    """probe.py sends HTTP; the studies in the corpus do not all speak it.
+
+    The record is what the graph rests on, so an exchange a role ran with its own
+    client earns evidence through the same containment check — and says so.
+    """
+    captured = tmp_path / "captured.txt"
+    captured.write_text(f"SUBACK 0x00\nretained: {WITNESS}\n", encoding="utf-8")
+    result = _probe(target, "--record", "--request", "MQTT SUBSCRIBE victim/+/report42",
+                    "--response-file", str(captured), "--status", "0",
+                    "--observed", WITNESS)
+    assert result.returncode == 0, result.stderr
+    earned = json.loads(result.stdout.split("evidence:", 1)[1])
+    assert "attested" in earned["source"]
+    assert "MQTT SUBSCRIBE victim/+/report42" in earned["source"]
+    assert json.loads(result.stdout.split("evidence:", 1)[0])["witness"] == "attested"
+
+    graph = _graph()
+    _node(graph, "N-upload-template")["evidence"] = earned
+    assert _validate(tmp_path, graph).returncode == 0, _validate(tmp_path, graph).stderr
+
+
+def test_the_evidence_a_probe_earned_is_kept_in_the_log(tmp_path, target):
+    """The root checks citations against probes.log, and an excerpt can follow a
+    match past the head the log keeps — so the log carries the excerpt too."""
+    assert _probe(target, "--path", "/deep", "--observed", WITNESS).returncode == 0
+    logged = json.loads((target.parent / "probes.log").read_text().splitlines()[-1])
+    assert logged["evidence"]["observed"] == WITNESS
+    assert WITNESS in logged["evidence"]["excerpt"]
+    assert WITNESS not in logged["body"]
+
+
+def test_an_added_header_reaches_the_target_and_is_named(tmp_path, target):
+    """Two studies needed a second header; the graph must show it was sent."""
+    result = _probe(target, "--header", "X-Extra: csrf-token", "--observed", WITNESS)
+    assert result.returncode == 0, result.stderr
+    record = json.loads(result.stdout.split("evidence:", 1)[0])
+    assert json.loads(record["body"])["extra"] == "csrf-token"
+    earned = json.loads(result.stdout.split("evidence:", 1)[1])
+    assert "X-Extra: csrf-token" in earned["source"]
 
 
 # --- provisioning: the parts that do not need Docker ---------------------------

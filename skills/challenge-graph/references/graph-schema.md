@@ -221,7 +221,9 @@ same shape:
 
 **Every observation is a response this run received.** There is no field saying
 where the text came from, because there is only one place it may come from: the
-study says where to look and never what to record. A line copied out of the
+study says where to look and never what to record. `source` does say how it was
+obtained — `probe.py` sent it, or a role attested an exchange it ran itself —
+and either way `<run>/probes.log` holds the matching record. A line copied out of the
 study's prose or its retained `evidence/` files is not a fact this run
 established, and no label could make it one.
 

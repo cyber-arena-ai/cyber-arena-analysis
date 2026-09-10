@@ -50,11 +50,20 @@ objective it reached on the target is its own to declare.
 3. **Wire `predecessors`.** They are OR by default — a route arrives through
    one of them. Set `conjunctive: true` only for a node that needs all of them.
 
-4. **Establish every node and route against the running target.** Use
-   `probe.py` (contracts.md) and paste what it prints under `evidence:`. It
-   builds the three fields from the response and refuses a claim the response
-   does not contain, which is the one thing hand-assembled evidence cannot check
-   about itself. Do not write your own request harness.
+4. **Establish every node and route against the running target.** Reach for
+   `probe.py` (contracts.md) first and paste what it prints under `evidence:`.
+   It builds the three fields from the response and refuses a claim the response
+   does not carry, which is the one thing hand-assembled evidence cannot check
+   about itself — and it is faster than doing that by hand.
+
+   Where it cannot send the request, **use a client that can.** A broker
+   protocol, a WebSocket, a packfile, a redirect chain you must follow: reach
+   the target however the target is reached, then bring the exchange back with
+   `probe.py --record`, which runs the same containment check and writes the
+   same log line. What the graph rests on is `probes.log`, not which client
+   spoke: **every observation you cite must match a record there.** A record you
+   attested says so in its own `source`, so the root knows to check it hardest;
+   an observation with no record behind it is not evidence at all.
 
    **Do not cite the study.** Its prose and its retained `evidence/` files say
    where to look; they are not facts this run established, and nothing in the
@@ -110,8 +119,9 @@ objective it reached on the target is its own to declare.
    Secondary and speculative. Do not go looking for ways around functions that
    work.
 
-4. **Run it, then record it.** Run the check with `probe.py` and carry what it
-   prints into the graph as the observation itself.
+4. **Run it, then record it.** Run the check with `probe.py`, or with a client
+   that can send it and then `probe.py --record`, and carry what it prints into
+   the graph as the observation itself.
 
 5. **Score what you did.** Do not assert a new `mincut_all`; the root re-runs
    the analyzer.

@@ -105,16 +105,41 @@ project failing does not strand the rest.
 
 ```text
 python3 <scripts>/probe.py --target <run>/target.json --build <name> \
-  --path </path> [--method GET] [--param NAME=VALUE]... [--data '<json body>'] \
+  --path </path> [--method GET] [--param NAME=VALUE]... [--header "NAME: VALUE"]... \
+  [--data '<json body>' | --form NAME=VALUE... | --data-file <path>] \
   [--note "<what this is for>"] [--observed "<the string carrying the claim>"]
 ```
 Sends one request as that build's entry principal, appends it to
-`<run>/probes.log` with the request body it sent and a UTC timestamp, and prints
-it. With `--observed`, it prints the graph
-evidence for it — and refuses when the response does not contain that string,
-which is the one thing hand-assembled evidence cannot check about itself. A 403
-is a result, not a failure; a request that never arrived is logged too, and
-exits 1.
+`<run>/probes.log` with the headers it sent, the request body it sent, the
+response's own headers and a UTC timestamp, and prints it. A request has one body: `--data` is JSON,
+`--form` is form-encoded, `--data-file` is bytes, for a payload that is not text.
+`--header` adds a header; it may not replace the entry principal's, though a
+cookie is merged into it, the granted one winning. What was added is recorded and
+named in the evidence `source`, so a route opened by a second header is not read
+as one the entry principal walked alone. **One invocation is one request**:
+redirects are not followed, and a 302 is returned as the result it is, with its
+`Location` among the response headers. With `--observed`, it
+prints the graph evidence for it — and refuses when the response does not
+contain that string, which is the one thing hand-assembled evidence cannot check
+about itself; when the claim lands deeper than the excerpt the log keeps, the
+evidence excerpt follows the match rather than the start, and a claim carried by
+a response header rather than the body is quotable too. A 403 is a result, not
+a failure; a request that never arrived is logged too, and exits 1.
+
+```text
+python3 <scripts>/probe.py --target <run>/target.json --build <name> --record \
+  --request "<the request you sent, verbatim>" --response-file <path> \
+  --status <code> [--note "..."] [--observed "<the string carrying the claim>"]
+```
+Records an exchange **you** performed, for a request this script cannot send —
+another protocol, a client the study ships, a chain it cannot hold. It runs the
+same containment check and writes the same log line, and its evidence `source`
+says `attested`, so a reader can see which claims rest on a client other than
+this one.
+
+`probe.py` sends HTTP. It is the fast path and not a fence: what the graph rests
+on is that **every observation it cites matches a record in `probes.log`**, not
+which client obtained it.
 
 ## provenance.json
 
@@ -186,7 +211,7 @@ Inputs — replace each name with an absolute path before sending:
   materials = <skill-root>/references/contracts.md, authoring.md,
               graph-schema.md
 
-You are the SEED role for the challenge graph over Stage 3 study <study>. Read the three materials listed above, in full, before anything else. Author the terminals and the routes the advisory describes, as one fragment at <run>/seed.json. You own the entry node, which no later role may add to. Declare every objective you reach; a later role may declare others it reaches. The live target is described in <run>/target.json: reach it with probe.py, as specified in contracts.md, and record what it prints as the observation on the node or route it establishes. Do not write your own request harness. Append one UTC-timestamped line to <run>/seed.progress as you begin each step of your procedure — reading, probing, authoring, validating, returning — so a dispatcher can tell you apart from a dead agent. Assert every input above on receipt and return REJECT if one is missing. Gate your own fragment with the graph_validate.py invocation in contracts.md before returning, and return only the SEED response.
+You are the SEED role for the challenge graph over Stage 3 study <study>. Read the three materials listed above, in full, before anything else. Author the terminals and the routes the advisory describes, as one fragment at <run>/seed.json. You own the entry node, which no later role may add to. Declare every objective you reach; a later role may declare others it reaches. The live target is described in <run>/target.json: reach it with probe.py, as specified in contracts.md, and record what it prints as the observation on the node or route it establishes. probe.py is your fast path, not your only one: where it cannot send the request, use a client that can and bring the exchange back with probe.py --record. Every observation you cite must match a record in <run>/probes.log. Append one UTC-timestamped line to <run>/seed.progress as you begin each step of your procedure — reading, probing, authoring, validating, returning — so a dispatcher can tell you apart from a dead agent. Assert every input above on receipt and return REJECT if one is missing. Gate your own fragment with the graph_validate.py invocation in contracts.md before returning, and return only the SEED response.
 ```
 
 ### Response
@@ -226,7 +251,7 @@ Inputs — replace each name with an absolute path before sending:
   materials = <skill-root>/references/contracts.md, authoring.md,
               graph-schema.md
 
-You are the EXPAND role for the challenge graph over Stage 3 study <study>. Read the three materials listed above, in full, before anything else. You are given SEED's fragment and its analysis; you are blind to nothing. Name the fault the study reproduced, find further routes that reach it, and declare any further objective you reached, with a scope from the registry. Run what you can against the target described in <run>/target.json using probe.py, as specified in contracts.md, recording what it prints as the observation. Redeclare any node SEED declared under its exact id and symbol, narrowing only its predecessors. You may add function nodes, routes, and an objective you reached on the target; you may not add an entry. Append one UTC-timestamped line to <run>/expand.progress as you begin each step of your procedure — reading, probing, authoring, validating, returning — so a dispatcher can tell you apart from a dead agent. Assert every input on receipt and return REJECT if one is missing. Gate your fragment with the graph_validate.py invocation in contracts.md, write your fault and unsettled claims for the root, and return only the EXPAND response.
+You are the EXPAND role for the challenge graph over Stage 3 study <study>. Read the three materials listed above, in full, before anything else. You are given SEED's fragment and its analysis; you are blind to nothing. Name the fault the study reproduced, find further routes that reach it, and declare any further objective you reached, with a scope from the registry. Run what you can against the target described in <run>/target.json using probe.py, as specified in contracts.md, recording what it prints as the observation; where probe.py cannot send the request, use a client that can and record the exchange with probe.py --record, so that every observation you cite matches a record in <run>/probes.log. Redeclare any node SEED declared under its exact id and symbol, narrowing only its predecessors. You may add function nodes, routes, and an objective you reached on the target; you may not add an entry. Append one UTC-timestamped line to <run>/expand.progress as you begin each step of your procedure — reading, probing, authoring, validating, returning — so a dispatcher can tell you apart from a dead agent. Assert every input on receipt and return REJECT if one is missing. Gate your fragment with the graph_validate.py invocation in contracts.md, write your fault and unsettled claims for the root, and return only the EXPAND response.
 ```
 
 ### Response

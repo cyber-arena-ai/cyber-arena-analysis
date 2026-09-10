@@ -109,9 +109,16 @@ roles. Read their values yourself, create an entry principal with the access the
 challenge grants, and record only that in `auth_header`. How to create a user is
 per-study work, and some studies configure no such credential at all. Verify the study's own baseline before dispatching anything. A study with no runnable bundle has no reproducer to run: skip
 `graph_provision.py` altogether, write `<run>/target.json` yourself with
-`none: true`, and the roles read it there. The script requires a reproducer and
-treats discovering no build as a failure, because for every other study it is
-one.
+`none: true`, and the roles read it there — `graph_provision.py` requires a
+reproducer and treats discovering no build as a failure, because for every other
+study it is one.
+
+`probe.py` sends HTTP, and it is the roles' fast path rather than their only
+one. A study whose attack is a broker protocol, a WebSocket or a `git` transport
+is still in scope: the roles reach it with a client that speaks it and record the
+exchange with `probe.py --record`. What you owe them is a target they can reach —
+if the bundle publishes no host port, or the attack needs the study's own
+attacker container, say so in `seeded` so a role is not left guessing.
 
 ### 3. SEED
 
@@ -158,7 +165,9 @@ argument for it. This is the judgment no script can make. Check the **entry**
 set, because a node declared `entry` leaves every cut; the **node boundaries**,
 because they set every number in the graph; and the **citations**, the one place
 the validator's containment check says nothing — an excerpt can carry the quoted
-string and still not support the claim.
+string and still not support the claim. Every citation should match a record in
+`<run>/probes.log`; the ones whose `source` says `attested` rest on a client
+other than `probe.py`, and are the ones to check hardest.
 
 Review writes no record of itself — you would be attesting to your own
 diligence, and a run that reviewed nothing could write the same words. What it

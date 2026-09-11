@@ -16,8 +16,8 @@ default. Its progress file is a trace, not part of the atomic output.
 | **Consumes** | `<study>`, `<registry>`, `<target>`, `<scripts>`, `<run>`, `<fragment>`, `<fault>`, `<seed>`, `<analysis>`, and the materials below |
 | **Materials** | [authoring.md](authoring.md), [graph-schema.md](graph-schema.md) |
 | **Produces** | On success, `<fragment>` (`<run>/expand.json`) — always, carrying no route when you found none — and the response below |
-| **May** | read `<study>` and SEED's inputs; inspect and use already-provisioned Docker resources to run attacker clients; send requests to `<target>` as its declared entry (`auth_header`, or anonymous when `null`); write `<fragment>`, `<run>/expand.progress`, and role-owned scratch under `<run>/expand/`; append `<run>/probes.log` |
-| **May not** | build, create, start, stop, replace, reconfigure, or tear down Docker resources; run a reproducer; write anything under `<study>`; introduce an `entry` SEED does not declare |
+| **May** | read `<study>` and SEED's inputs; inspect and use already-provisioned Docker resources to run attacker clients; use `<target>` with its declared entry credentials; write `<fragment>`, `<run>/expand.progress`, and role-owned scratch under `<run>/expand/`; append `<run>/probes.log` |
+| **May not** | build, create, start, stop, replace, reconfigure, or tear down Docker resources; run the stand-up command; discover, create, or change the declared entry credentials; write anything under `<study>`; introduce an `entry` SEED does not declare |
 | **Asserts on receipt** | `<study>`, `<registry>`, `<target>`, `<scripts>`, `<seed>`, and `<analysis>` are present and readable; `<run>` is writable; `<fragment>` is exactly `<run>/expand.json`; `<fault>` is populated. A failed assertion is returned as `REJECT: input — <what is missing>`, not worked around. |
 | **Must ensure** | the fragment passes the validation command below; `<run>/expand.progress` carries a UTC-timestamped line as you begin reading, probing, authoring, validating and returning; every unsettled claim carries `Blocked by` |
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Stand up a study's own bundle in a scratch copy, and tear it down again.
+"""Run a root-derived stand-up command in a study copy, and report what persists.
 
-Provisioning is the same sequence for every study — copy the bundle out of the study,
-run its reproducer there, find out what came up, write it down. What is *not* the
-same for every study is the reproducer's command and how it names things, so
-those are supplied and discovered rather than guessed: the script diffs Docker's
-own state across the run and reports what appeared, instead of parsing prose.
+Stage 3 supplies the build and reproduction materials, but its clean reproducer
+may intentionally tear everything down. The root derives the command that leaves
+the studied target available. This script copies the bundle, runs that command,
+and diffs Docker state. Compose metadata supplies useful suggestions; every new
+container is also reported so the root can map plain ``docker run`` deployments.
 
 It never writes inside the study. It hashes the study before and after and says
 so, because "read-only" is otherwise a claim nothing checks.
@@ -78,6 +78,19 @@ def published(ports: str) -> list[int]:
     return seen
 
 
+def container_candidates(appeared: dict[str, dict]) -> list[dict]:
+    """Raw containers for the root to interpret, without guessing their role."""
+    rows = []
+    for identifier, container in sorted(appeared.items(), key=lambda item: item[1]["name"]):
+        rows.append({
+            "id": identifier,
+            "name": container["name"],
+            "compose_project": container["project"] or None,
+            "published_ports": published(container["ports"]),
+        })
+    return rows
+
+
 def discover(appeared: dict[str, dict]) -> tuple[dict[str, dict], dict[str, set[str]]]:
     """One entry per compose project, and no guess about which service is the app.
 
@@ -124,7 +137,7 @@ def discover(appeared: dict[str, dict]) -> tuple[dict[str, dict], dict[str, set[
     return builds, facility
 
 
-def up(study: Path, run: Path, reproducer: str) -> int:
+def up(study: Path, run: Path, stand_up: str) -> int:
     env = run / "env"
     if env.exists():
         print(f"{env} already exists; provision writes a fresh copy", file=sys.stderr)
@@ -133,38 +146,47 @@ def up(study: Path, run: Path, reproducer: str) -> int:
     shutil.copytree(study, env)
     before = containers()
 
-    log = run / "reproduce.log"
-    print(f"running: {reproducer}\n  in {env}")
-    result = subprocess.run(reproducer, shell=True, cwd=env, capture_output=True, text=True)
+    log = run / "stand-up.log"
+    print(f"running: {stand_up}\n  in {env}")
+    result = subprocess.run(stand_up, shell=True, cwd=env, capture_output=True, text=True)
     log.write_text(result.stdout + result.stderr, encoding="utf-8")
     print(f"{log}: {len(result.stdout.splitlines())} lines, exit {result.returncode}")
 
-    # Ownership is the reproducer's own directory, not "appeared while we ran":
-    # another session starting a stack in this window would otherwise be recorded
-    # as ours and destroyed by --down.
-    mine = str(env.resolve())
-    appeared = {
-        k: v for k, v in containers().items()
-        if k not in before and v["working_dir"] and v["working_dir"].startswith(mine)
-    }
-    projects = sorted({c["project"] for c in appeared.values() if c["project"]})
-    builds, facility_found = discover(appeared)
+    after = containers()
+    appeared = {k: v for k, v in after.items() if k not in before}
+    candidates = container_candidates(appeared)
 
-    # Written before anything can fail below. Whatever came up is now decidably
-    # ours, and a run that stops here can still be torn down with --down; the
-    # alternative leaves live containers no tool path can reach.
+    # Compose's working-directory label is strong enough to establish ownership.
+    # Plain Docker has no corresponding label, so it stays a raw candidate until
+    # the root selects it in target.json; --down never guesses from this list.
+    mine = str(env.resolve())
+    compose_owned = {
+        k: v for k, v in appeared.items()
+        if v["project"] and v["working_dir"] and v["working_dir"].startswith(mine)
+    }
+    projects = sorted({c["project"] for c in compose_owned.values()})
+    builds, facility_found = discover(compose_owned)
+
+    # Written before the post-checks so the root can inspect and resolve every
+    # candidate even when the command or study-integrity check fails.
     target = run / "target.json"
     target.write_text(json.dumps({
-        "reproducer": {"compose_projects": projects},
+        "provision": {
+            "compose_projects": projects,
+            "containers": [],
+            "container_candidates": candidates,
+        },
         "builds": builds,
     }, indent=2) + "\n", encoding="utf-8")
-    print(f"{target}: {len(builds)} build(s) — {', '.join(sorted(builds)) or 'none discovered'}")
+    print(f"{target}: {len(builds)} suggested build(s) — "
+          f"{', '.join(sorted(builds)) or 'root must map the candidates'}")
     print(f"  projects: {', '.join(projects) or 'none'}")
+    print(f"  container candidates: {len(candidates)}")
     unresolved = sorted(n for n, b in builds.items() if not b["base_url"])
     if unresolved:
         print(f"  ambiguous or internal-only, base_url left null: {', '.join(unresolved)}")
-    print("  still yours to resolve: auth_header per build (null for anonymous), "
-          "and what the facility seeded.")
+    print("  still yours to resolve: exact builds, protocol-native credentials "
+          "(null for anonymous), and what the facility seeded.")
     for project, found in facility_found.items():
         # Printed here and nowhere else: target.json is handed to the roles, and
         # they get the entry principal and nothing more.
@@ -174,13 +196,13 @@ def up(study: Path, run: Path, reproducer: str) -> int:
 
     errors = []
     if result.returncode != 0:
-        errors.append(f"the reproducer exited {result.returncode}; see {log}")
+        errors.append(f"the stand-up command exited {result.returncode}; see {log}")
     if digest(study) != before_hashes:
         errors.append("the study directory changed during provisioning")
-    if not builds:
-        # Exit status is the one signal the caller is told to trust, and a target
-        # nothing came up in is not a provisioning that succeeded.
-        errors.append("no build was discovered; there is nothing for a role to probe")
+    if not candidates:
+        # Exit status is the one signal the caller is told to trust. A stand-up
+        # command that leaves no container cannot supply the roles a live target.
+        errors.append("no container was discovered; there is nothing for a role to probe")
     for error in errors:
         print(error, file=sys.stderr)
     return 1 if errors else 0
@@ -193,11 +215,13 @@ def down(run: Path) -> int:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         print(f"target.json could not be read: {exc}", file=sys.stderr)
         return 1
-    projects = record.get("reproducer", {}).get("compose_projects") or []
-    if not projects:
+    provision = record.get("provision") or {}
+    projects = provision.get("compose_projects") or []
+    selected = provision.get("containers") or []
+    if not projects and not selected:
         # Nothing recorded means nothing came up, which is not a teardown that
         # failed. Saying so on stdout keeps a clean run from reading as an error.
-        print("target.json names no compose project; there is nothing to tear down")
+        print("target.json names no provisioned resource; there is nothing to tear down")
         return 0
     failed = []
     for project in projects:
@@ -211,6 +235,14 @@ def down(run: Path) -> int:
         else:
             print(f"{project}: down, volumes removed; `--rmi local` may leave a "
                   f"tagged image standing, so check before calling the host clean")
+    for identifier in selected:
+        try:
+            _docker("rm", "-f", "-v", identifier)
+        except (RuntimeError, OSError) as exc:
+            failed.append(identifier)
+            print(f"{identifier}: {exc}", file=sys.stderr)
+        else:
+            print(f"{identifier}: container removed")
     return 1 if failed else 0
 
 
@@ -219,7 +251,10 @@ def main() -> int:
     parser.add_argument("study", type=Path, nargs="?",
                         help="the Stage 3 study directory, read-only; not used by --down")
     parser.add_argument("--run", type=Path, required=True, help="<run>")
-    parser.add_argument("--reproducer", help="the command to run in the bundle copy")
+    parser.add_argument(
+        "--stand-up",
+        help="root-derived command using the Stage 3 bundle that leaves the target running",
+    )
     parser.add_argument("--down", action="store_true", help="tear down what this run started")
     args = parser.parse_args()
 
@@ -232,15 +267,15 @@ def main() -> int:
     if args.study is None:
         print("the study directory is required", file=sys.stderr)
         return 2
-    if not args.reproducer:
-        print("--reproducer is required; the command differs per study", file=sys.stderr)
+    if not args.stand_up:
+        print("--stand-up is required; derive it from the Stage 3 bundle", file=sys.stderr)
         return 2
     if not (args.study / "STAGE3_STUDY.md").is_file():
         print(f"{args.study} has no STAGE3_STUDY.md", file=sys.stderr)
         return 1
     args.run.mkdir(parents=True, exist_ok=True)
     try:
-        return up(args.study.resolve(), args.run, args.reproducer)
+        return up(args.study.resolve(), args.run, args.stand_up)
     except (RuntimeError, OSError) as exc:
         print(exc, file=sys.stderr)
         return 1

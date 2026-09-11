@@ -1108,7 +1108,7 @@ def target(tmp_path):
     path = tmp_path / "target.json"
     path.write_text(json.dumps({"builds": {"vulnerable": {
         "base_url": f"http://127.0.0.1:{server.server_address[1]}",
-        "auth_header": "Authorization: token analyst:s3cret",
+        "credentials": {"headers": {"Authorization": "token analyst:s3cret"}},
     }}}), encoding="utf-8")
     yield path
     server.shutdown()
@@ -1188,7 +1188,7 @@ def test_a_probe_goes_out_as_the_entry_principal(tmp_path, target):
 
 def test_an_anonymous_entry_sends_no_authentication_header(tmp_path, target):
     spec = json.loads(target.read_text(encoding="utf-8"))
-    spec["builds"]["vulnerable"]["auth_header"] = None
+    spec["builds"]["vulnerable"]["credentials"] = None
     target.write_text(json.dumps(spec), encoding="utf-8")
 
     result = _probe(target)
@@ -1309,7 +1309,9 @@ def test_a_cookie_is_merged_into_a_cookie_principal_the_granted_one_winning(tmp_
     same cookie the granted value is the one the route is walked with.
     """
     spec = json.loads(target.read_text())
-    spec["builds"]["vulnerable"]["auth_header"] = "Cookie: i_like_gogs=GRANTED; seat=1"
+    spec["builds"]["vulnerable"]["credentials"] = {
+        "headers": {"Cookie": "i_like_gogs=GRANTED; seat=1"}
+    }
     target.write_text(json.dumps(spec), encoding="utf-8")
 
     result = _probe(target, "--header", "Cookie: session=MINTED; i_like_gogs=ROTATED",
@@ -1362,6 +1364,9 @@ def test_an_exchange_another_client_ran_can_be_recorded(tmp_path, target):
     captured.write_text(f"SUBACK 0x00\nretained: {WITNESS}\n", encoding="utf-8")
     spec = json.loads(target.read_text(encoding="utf-8"))
     spec["builds"]["vulnerable"]["base_url"] = None
+    spec["builds"]["vulnerable"]["credentials"] = {
+        "username": "analyst", "password": "s3cret"
+    }
     target.write_text(json.dumps(spec), encoding="utf-8")
     result = _probe(target, "--record", "--request", "MQTT SUBSCRIBE victim/+/report42",
                     "--response-file", str(captured), "--status", "0",
@@ -1426,10 +1431,31 @@ def test_discovery_keeps_an_internal_only_compose_project(monkeypatch):
     }
 
 
+def test_container_candidates_include_plain_docker():
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import graph_provision
+    finally:
+        sys.path.pop(0)
+    assert graph_provision.container_candidates({
+        "container-id": {
+            "name": "plain-target",
+            "project": "",
+            "working_dir": "",
+            "ports": "127.0.0.1:49152->8080/tcp",
+        }
+    }) == [{
+        "id": "container-id",
+        "name": "plain-target",
+        "compose_project": None,
+        "published_ports": [49152],
+    }]
+
+
 def test_provisioning_refuses_a_directory_that_is_not_a_study(tmp_path):
     """Provision must not discover that the study was missing."""
     result = _provision(str(tmp_path / "nowhere"), "--run", str(tmp_path / "run"),
-                        "--reproducer", "true")
+                        "--stand-up", "true")
     assert result.returncode == 1
     assert "no STAGE3_STUDY.md" in result.stderr, result.stderr
 
@@ -1456,16 +1482,16 @@ def test_provisioning_will_not_write_over_an_existing_bundle_copy(tmp_path):
     (study / "STAGE3_STUDY.md").write_text("# study\n", encoding="utf-8")
     run = tmp_path / "run"
     (run / "env").mkdir(parents=True)
-    result = _provision(str(study), "--run", str(run), "--reproducer", "true")
+    result = _provision(str(study), "--run", str(run), "--stand-up", "true")
     assert result.returncode == 1
     assert "already exists" in result.stderr, result.stderr
 
 # --- provisioning: what the exit status has to mean (needs Docker) ------------
 
-def test_provisioning_that_discovers_no_build_is_a_failure(tmp_path):
+def test_provisioning_that_discovers_no_container_is_a_failure(tmp_path):
     """Exit status is the one signal Provision tells the caller to trust.
 
-    Four studies in one batch ran a reproducer that passed and left nothing
+    Four studies in one batch ran a reproduction that passed and left nothing
     standing; the script wrote `"builds": {}` and exited 0, so provisioning
     that produced no target read as success and the next thing to notice would
     have been a role rejecting an empty `target.json` one dispatch later.
@@ -1474,6 +1500,6 @@ def test_provisioning_that_discovers_no_build_is_a_failure(tmp_path):
     (study / "evidence").mkdir(parents=True)
     (study / "STAGE3_STUDY.md").write_text("# study\n", encoding="utf-8")
     result = _provision(str(study), "--run", str(tmp_path / "run"),
-                        "--reproducer", "true")
+                        "--stand-up", "true")
     assert result.returncode == 1
-    assert "no build was discovered" in result.stderr, result.stderr
+    assert "no container was discovered" in result.stderr, result.stderr

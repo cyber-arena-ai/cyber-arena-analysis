@@ -61,27 +61,38 @@ def _cookie_pairs(raw: str) -> dict:
     return pairs
 
 
-def _headers(build: dict, extra: list[str]) -> tuple[dict, str | None, dict]:
-    """The headers to send, the entry principal's header name, and what was added."""
-    raw_principal = build["auth_header"]
+def _headers(build: dict, extra: list[str]) -> tuple[dict, dict]:
+    """HTTP headers for the declared entry, and the effective additions."""
+    credentials = build["credentials"]
     headers, added = {}, {}
-    name = None
-    if raw_principal is not None:
-        name, separator, value = raw_principal.partition(":")
-        name, value = name.strip(), value.strip()
-        if not separator or not name or not value:
+    principal_names = {}
+    if credentials is not None:
+        raw_headers = credentials.get("headers")
+        if not isinstance(raw_headers, dict) or not raw_headers:
             raise ValueError(
-                "auth_header must be '<header name>: <value>' or null for anonymous, "
-                f"got {raw_principal!r}"
+                "build credentials do not provide HTTP headers; use the protocol's "
+                "native client and record the exchange with --record"
             )
-        headers[name] = value
+        for raw_name, raw_value in raw_headers.items():
+            if not isinstance(raw_name, str) or not raw_name.strip() or not isinstance(
+                raw_value, str
+            ) or not raw_value.strip():
+                raise ValueError("credentials.headers must map header names to values")
+            name = raw_name.strip()
+            lowered = name.lower()
+            if lowered in principal_names:
+                raise ValueError(f"credentials.headers repeats {name!r} by case")
+            principal_names[lowered] = name
+            headers[name] = raw_value.strip()
     for raw in extra:
         other, separator, other_value = raw.partition(":")
         other, other_value = other.strip(), other_value.strip()
         if not separator or not other or not other_value:
             raise ValueError(f"each --header must be 'NAME: VALUE', got {raw!r}")
-        if name is not None and other.lower() == name.lower():
-            if other.lower() != "cookie":
+        lowered = other.lower()
+        if lowered in principal_names:
+            name = principal_names[lowered]
+            if lowered != "cookie":
                 # The entry principal is the identity the challenge granted. A
                 # header that replaced it would record a route somebody else walked.
                 raise ValueError(f"--header may not replace the entry principal's {name}")
@@ -92,7 +103,7 @@ def _headers(build: dict, extra: list[str]) -> tuple[dict, str | None, dict]:
         else:
             headers[other] = other_value
         added[other] = other_value
-    return headers, name, added
+    return headers, added
 
 
 def _body(data: str | None, form: list[str],
@@ -114,7 +125,7 @@ def send(build: dict, args: argparse.Namespace) -> dict:
     url = build["base_url"].rstrip("/") + args.path
     if args.param:
         url += "?" + urllib.parse.urlencode(_pairs(args.param, "--param"))
-    headers, _principal, added = _headers(build, args.header)
+    headers, added = _headers(build, args.header)
     payload, content_type, sent = _body(args.data, args.form, args.data_file)
     if content_type and not any(key.lower() == "content-type" for key in headers):
         headers["Content-Type"] = content_type
@@ -258,20 +269,21 @@ def main() -> int:
               f"{sorted(builds) if isinstance(builds, dict) else 'none'}", file=sys.stderr)
         return 1
     build = builds[args.build]
+    if not isinstance(build, dict):
+        print(f"build {args.build} must be an object", file=sys.stderr)
+        return 1
     if not args.record and (
         not isinstance(build.get("base_url"), str) or not build["base_url"].strip()
     ):
         print(f"build {args.build} has no base_url", file=sys.stderr)
         return 1
-    if "auth_header" not in build:
-        print(f"build {args.build} has no auth_header resolution", file=sys.stderr)
+    if "credentials" not in build:
+        print(f"build {args.build} has no credentials resolution", file=sys.stderr)
         return 1
-    auth_header = build["auth_header"]
-    if auth_header is not None and (
-        not isinstance(auth_header, str) or not auth_header.strip()
-    ):
+    credentials = build["credentials"]
+    if credentials is not None and not isinstance(credentials, dict):
         print(
-            f"build {args.build} auth_header must be a header string or null for anonymous",
+            f"build {args.build} credentials must be an object or null for anonymous",
             file=sys.stderr,
         )
         return 1

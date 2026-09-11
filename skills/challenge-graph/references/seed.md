@@ -16,8 +16,8 @@ default. Its progress file is a trace, not part of the atomic output.
 | **Consumes** | `<study>`, `<registry>`, `<target>`, `<scripts>`, `<run>`, `<fragment>`, `<target-id>`, `<repository>`, `<revision>`, `<revision-source>`, and the materials below |
 | **Materials** | [authoring.md](authoring.md), [graph-schema.md](graph-schema.md) |
 | **Produces** | `<fragment>` (`<run>/seed.json`), and the response below |
-| **May** | read `<study>`; inspect and use already-provisioned Docker resources to run attacker clients; send requests to `<target>` as its declared entry (`auth_header`, or anonymous when `null`); write `<fragment>`, `<run>/seed.progress`, and role-owned scratch under `<run>/seed/`; append `<run>/probes.log` |
-| **May not** | build, create, start, stop, replace, reconfigure, or tear down Docker resources; run a reproducer; write anything under `<study>` |
+| **May** | read `<study>`; inspect and use already-provisioned Docker resources to run attacker clients; use `<target>` with its declared entry credentials; write `<fragment>`, `<run>/seed.progress`, and role-owned scratch under `<run>/seed/`; append `<run>/probes.log` |
+| **May not** | build, create, start, stop, replace, reconfigure, or tear down Docker resources; run the stand-up command; discover, create, or change the declared entry credentials; write anything under `<study>` |
 | **Asserts on receipt** | `<study>`, `<registry>`, `<target>`, and `<scripts>` are present and readable; `<run>` is writable; `<fragment>` is exactly `<run>/seed.json`; every scalar binding is populated. A failed assertion is returned as `REJECT: input — <what is missing>`, not worked around. |
 | **Must ensure** | the fragment passes the validation command below before returning; `<run>/seed.progress` carries a UTC-timestamped line as you begin reading, probing, authoring, validating and returning |
 | **Owns** | the `entry`, and at least one route. Objectives are not yours alone: EXPAND declares any it reaches. |

@@ -81,7 +81,7 @@ item below. Use only the defaults stated here.
 |---|---|---|
 | Semantic study | `<study>/STAGE3_STUDY.md`, read in full | Required. It must identify the attacker identity and public entrypoint, attack chain, vulnerable outcome, trial witness, and authoring consequences. |
 | Graph identity | `target.id`; `repository`; and the exact reproduced revision | `target.id` defaults from `<study-name>` by the rule below, unless the semantic study names a short kebab-case challenge or study id. `repository` and revision are required from populated fields in `result.json`, otherwise from the semantic study. For the revision use `reproduced_commit`, then the legacy `commit` or `vulnerable_commit`; never substitute `primary_commit` or `repair_commit`. |
-| Runnable reproduction | The study's own reproduction command and every environment or reproduction artifact it names | Required. It must start the studied target from a disposable copy. No runnable bundle is a terminal failure; do not dispatch the roles. |
+| Runnable reproduction | The study's own reproduction command and every environment or reproduction artifact it names | Required. Together they must be sufficient to derive a stand-up command for the studied target from a disposable copy. No runnable bundle is a terminal failure; do not dispatch the roles. |
 | Retained observations | Vulnerable, repaired, lifecycle, or shortcut evidence named by the bundle | Every named file is required and remains read-only. It guides the rerun but is not evidence for the new graph. |
 | Repaired case | The bundle's repaired build and comparison, when supplied | Default: absent. Omit `advisory_cut` when the study supplies no repaired case. |
 | Stage 3 result | `<study>/result.json` | Default: absent. When present it is metadata and an artifact manifest; its `outcome` never gates this skill. |
@@ -104,34 +104,55 @@ resources.
 
 ```text
 python3 <scripts>/graph_provision.py <study> --run <run> \
-  --reproducer "<the study's own command>"
+  --stand-up "<the root-derived command>"
 ```
 
-This copies the bundle to `<run>/env/`, runs the reproducer there, and records
-what came up in `<run>/target.json`. It writes that file before later checks so
-the run remains tearable down. A non-zero exit is a terminal provisioning
-failure; do not dispatch a role.
+Derive the command from the retained environment and reproduction artifacts. It
+must run entirely from the copied bundle and leave the studied target live; the
+full Stage 3 reproduction command is unsuitable when it tears its target down.
+The script copies the bundle to `<run>/env/`, runs the command there, and records
+every new Docker container in `<run>/target.json`. A non-zero exit is a terminal
+provisioning failure; do not dispatch a role.
 
-Complete `target.json` in place without removing its teardown record:
+The reported containers are candidates, not interpreted builds. Compose
+projects rooted in the bundle copy are selected automatically; for plain Docker,
+put the exact container ids you select in `provision.containers` so teardown owns
+only the resolved resources. Then replace the suggested build mapping with the
+builds the study actually requires. Names are arbitrary and one Compose project
+may supply more than one build.
+
+Complete `target.json` in place without removing its provisioning record:
 
 ```json
-{"reproducer": {"compose_projects": ["..."]},
+{"provision": {"compose_projects": ["..."],
+                 "containers": ["<selected plain-Docker container id>"],
+                 "container_candidates": [{"id": "...", "name": "...",
+                   "compose_project": null,
+                   "published_ports": [49152]}]},
  "builds": {"<name>": {"base_url": "http://127.0.0.1:<port>",
-                          "auth_header": null}},
+                          "containers": ["<container name or id>"],
+                          "credentials": null}},
  "seeded": "<what the facility planted and how to recognise it>"}
 ```
 
+The three lists under `provision` default to the values the script emits, which
+may be empty. Each build's `containers` defaults to an empty list. `base_url`
+must be an HTTP URL or explicit `null`, and `credentials` has no implicit
+default: resolve it to an object or `null` before dispatch.
+
 Resolve any ambiguous `base_url` used for HTTP. An internal-only build keeps
-`base_url` null and names its provisioned containers. Set `auth_header` to the
-entry principal's `<header name>: <value>` and nothing more, or explicitly to
-`null` when the study declares anonymous entry. Make the seeded value
+`base_url` null and names its provisioned containers. Set `credentials` to a
+JSON object in the target protocol's native shape, or explicitly to `null` when
+the study declares anonymous entry. For HTTP, use `{"headers": {"Header":
+"value"}}`; other protocols may use fields such as usernames, passwords or
+client material understood by their native client. Make the seeded value
 recognisable.
 
 For a credentialed entry, create the principal declared by the study; do not
-reuse an identity the reproducer created. Use the facility credentials printed
-by `graph_provision.py` when needed and record only the entry principal in
-`auth_header`. For anonymous entry, do not invent a principal or credential.
-Verify the declared baseline before dispatching either form.
+reuse an identity the stand-up command created. Use the facility credentials
+printed by `graph_provision.py` when needed and record only the entry
+principal's credentials. For anonymous entry, do not invent a principal or
+credential. Verify the declared baseline before dispatching either form.
 
 `probe.py` sends HTTP, and it is the roles' fast path rather than their only
 one. A study whose attack is a broker protocol, a WebSocket or a `git` transport

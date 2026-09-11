@@ -8,10 +8,11 @@ format and semantic invariants.
 
 Use the supplied `target.json`. A build's `base_url` identifies its HTTP endpoint
 when present. When it is null, `containers` names the provisioned Docker
-resources and `seeded` describes the client path. `auth_header` is the
-credentialed HTTP entry principal, or `null` for anonymous entry. `seeded` also
-identifies the protected result. Do not change the target or substitute another
-identity.
+resources and `seeded` describes the client path. `credentials` is either
+`null` for anonymous entry or a JSON object in the target protocol's native
+shape. Select a client that understands that shape; `probe.py`'s HTTP fast path
+uses `credentials.headers`. `seeded` also identifies the protected result. Do
+not change the target or substitute another identity.
 
 ## Probe HTTP
 

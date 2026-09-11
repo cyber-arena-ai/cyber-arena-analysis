@@ -33,12 +33,26 @@ Resolve the directory holding this file as `<skill-root>`. Read
 contract the root later adjudicates.
 
 `references/seed.md` and `references/expand.md` are opaque role contracts. Do
-not read, copy, or restate them. Start each role with no inherited conversation
-or agent history (`fork_turns="none"` when using `spawn_agent`) and send only
-the bootstrap in its dispatch step. Neither role receives root-only
-instructions or the other role's contract. End each bootstrap
+not read, copy, or restate them. For its initial dispatch, start each role with
+no inherited conversation or agent history (`fork_turns="none"` when using
+`spawn_agent`) and send only the bootstrap in its dispatch step. Neither role
+receives root-only instructions or the other role's contract. End each bootstrap
 with: *Read the role contract in full, then only the instruction materials it
 names. Follow it with these input bindings and return its specified response.*
+
+A correction resumes the same role with its original bindings and materials;
+do not start a new role or resend its bootstrap. Send only this envelope:
+
+```text
+Correction:
+  finding = <the exact validator, analyzer, merge, adjudication, or finalizer finding>
+  output  = fragment | response
+```
+
+Both fields are required. The role's contract defines how it replaces that
+output and returns. If a root-owned input changed, this is not a correction:
+discard every dependent role output and make a fresh initial dispatch as the
+dependency rules in Adjudicate require.
 
 ### 2. Bind
 
@@ -181,13 +195,14 @@ Inputs:
 ```
 
 Handle a SEED rejection before reading its success response: `REJECT: validation`
-returns to SEED for correction; `REJECT: input`, `REJECT: execution`, or
+returns to SEED through the correction envelope with `output = fragment`;
+`REJECT: input`, `REJECT: execution`, or
 `REJECT: fault not reproduced` is terminal and delivers nothing. Otherwise
 assert the response contains one non-empty `Fault` sentence and bind it exactly
 as `<fault>`; return a missing sentence to SEED rather than inferring or
-rewriting it. While SEED runs, `<run>/seed.progress` is where you look: the age
-of its last line is how you tell a working role from a dead one. Then gate and
-analyze:
+rewriting it, using `output = response`. While SEED runs,
+`<run>/seed.progress` is where you look: the age of its last line is how you
+tell a working role from a dead one. Then gate and analyze:
 
 ```text
 python3 <scripts>/graph_validate.py <run>/seed.json --require-route \
@@ -197,8 +212,9 @@ python3 <scripts>/graph_analyze.py <run>/seed.json \
 ```
 
 The validator writes nothing; the analyzer writes geometry and objective
-coverage. Do not dispatch EXPAND unless both succeed. On rejection, return the
-message to SEED; never repair its fragment by hand.
+coverage. Do not dispatch EXPAND unless both succeed. On rejection, send the
+exact message to SEED with `output = fragment`; never repair its fragment by
+hand.
 
 ### 6. EXPAND
 
@@ -226,11 +242,12 @@ the attacker can reach from the entry: check any route whose precondition SEED
 created. Give it SEED's fragment and analysis alongside its own contract.
 
 Handle an EXPAND rejection before reading its success response:
-`REJECT: validation` returns to EXPAND for correction; `REJECT: input` is
-terminal and delivers nothing, as is `REJECT: execution`. Otherwise
+`REJECT: validation` returns to EXPAND through the correction envelope with
+`output = fragment`; `REJECT: input` is terminal and delivers nothing, as is
+`REJECT: execution`. Otherwise
 `<run>/expand.progress` is where you look while it runs. Assert its response:
 every unsettled claim carries `Blocked by`. A claim whose check EXPAND could
-have run is unfinished work — send it back.
+have run is unfinished work — send it back with `output = response`.
 
 ### 7. Merge
 
@@ -310,6 +327,10 @@ python3 <scripts>/graph_finalize.py <out> \
 This rejects a partial, invalid, stale, or unattributed deliverable and writes
 `graph.md` and `findings.md`. **Do not write either yourself.** Attribution
 comes from `merge.json`; refusals come from `graph.json`'s `advisory_cut`.
+On rejection, apply Adjudicate's ownership and dependency rules: root corrects
+root-owned provenance or reruns a stale derivation; a finding created by a role
+fragment returns to that role through the correction envelope with
+`output = fragment`. Repeat every dependent step through Finalize.
 
 ```text
 python3 <scripts>/graph_provision.py --run <run> --down

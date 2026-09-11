@@ -34,6 +34,14 @@ study says is defective and reproduce its manifestation through an owned route.
 The route's live evidence belongs in the fragment; the fault sentence stays out
 of the graph IR and is returned for root provenance.
 
+## Correction
+
+Accept a `Correction` only with the original bindings unchanged and `output`
+set to `fragment` or `response`. Correct only its exact `finding`. For
+`fragment`, replace `<fragment>` as a complete document and rerun Validate; for
+`response`, leave the validated fragment unchanged. Then return the complete
+Response below, or a defined Failure if the correction cannot be completed.
+
 ## Validate
 
 ```text

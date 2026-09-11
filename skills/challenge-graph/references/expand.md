@@ -60,6 +60,14 @@ that successful outcome.
 
 `<fault>` stays out of the IR. It is an input anchor, never a graph field.
 
+## Correction
+
+Accept a `Correction` only with the original bindings unchanged and `output`
+set to `fragment` or `response`. Correct only its exact `finding`. For
+`fragment`, replace `<fragment>` as a complete document and rerun Validate; for
+`response`, leave the validated fragment unchanged. Then return the complete
+Response below, or a defined Failure if the correction cannot be completed.
+
 ## Validate
 
 ```text

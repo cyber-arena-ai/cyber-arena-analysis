@@ -61,23 +61,26 @@ def _cookie_pairs(raw: str) -> dict:
     return pairs
 
 
-def _headers(build: dict, extra: list[str]) -> tuple[dict, str, dict]:
+def _headers(build: dict, extra: list[str]) -> tuple[dict, str | None, dict]:
     """The headers to send, the entry principal's header name, and what was added."""
-    name, separator, value = build["auth_header"].partition(":")
-    name, value = name.strip(), value.strip()
-    if not separator or not name or not value:
-        # Without this the header silently becomes empty and the request goes out
-        # anonymous, recording a route the entry principal was never shown to walk.
-        raise ValueError(
-            f"auth_header must be '<header name>: <value>', got {build['auth_header']!r}"
-        )
-    headers, added = {name: value}, {}
+    raw_principal = build["auth_header"]
+    headers, added = {}, {}
+    name = None
+    if raw_principal is not None:
+        name, separator, value = raw_principal.partition(":")
+        name, value = name.strip(), value.strip()
+        if not separator or not name or not value:
+            raise ValueError(
+                "auth_header must be '<header name>: <value>' or null for anonymous, "
+                f"got {raw_principal!r}"
+            )
+        headers[name] = value
     for raw in extra:
         other, separator, other_value = raw.partition(":")
         other, other_value = other.strip(), other_value.strip()
         if not separator or not other or not other_value:
             raise ValueError(f"each --header must be 'NAME: VALUE', got {raw!r}")
-        if other.lower() == name.lower():
+        if name is not None and other.lower() == name.lower():
             if other.lower() != "cookie":
                 # The entry principal is the identity the challenge granted. A
                 # header that replaced it would record a route somebody else walked.
@@ -255,10 +258,23 @@ def main() -> int:
               f"{sorted(builds) if isinstance(builds, dict) else 'none'}", file=sys.stderr)
         return 1
     build = builds[args.build]
-    for field in ("base_url", "auth_header"):
-        if not isinstance(build.get(field), str) or not build[field].strip():
-            print(f"build {args.build} has no {field}", file=sys.stderr)
-            return 1
+    if not args.record and (
+        not isinstance(build.get("base_url"), str) or not build["base_url"].strip()
+    ):
+        print(f"build {args.build} has no base_url", file=sys.stderr)
+        return 1
+    if "auth_header" not in build:
+        print(f"build {args.build} has no auth_header resolution", file=sys.stderr)
+        return 1
+    auth_header = build["auth_header"]
+    if auth_header is not None and (
+        not isinstance(auth_header, str) or not auth_header.strip()
+    ):
+        print(
+            f"build {args.build} auth_header must be a header string or null for anonymous",
+            file=sys.stderr,
+        )
+        return 1
 
     try:
         sent = attest(args) if args.record else send(build, args)

@@ -78,22 +78,32 @@ def _table(header: list[str], rows: list[list[str]]) -> str:
 
 def report(graph: Graph, analysis: dict) -> str:
     target = graph.document["target"]
+    cut = graph.advisory_cut
+    cut_rows = [
+        ["advisory", str(cut.get("advisory") or "—")],
+        ["nodes it guarded", ", ".join(cut.get("nodes") or []) or "—"],
+        ["routes that refused every request tried",
+         ", ".join(e["path"] for e in cut.get("refused") or []) or "—"],
+        ["routes it left open",
+         ", ".join(e["path"] for e in cut.get("survived") or []) or "—"],
+    ] if cut else []
+    cut_note = (
+        "This records the supplied upstream fix and its observed result against "
+        "each route. A route under **left open** reached the objective with this "
+        "repair applied."
+        if cut
+        else "No repaired comparison was supplied."
+    )
     parts = [
         f"# Challenge graph: {target['id']}",
         "",
         f"`{target['repository']}` at `{target['revision']}`. "
         f"Geometry **{', '.join(analysis['geometry']) or 'none'}**, "
-        f"`mincut_all` **{analysis['mincut_all']}**, "
         f"{len(graph.paths)} recorded path(s), {len(graph.by_role('objective'))} objective(s).",
         "",
-        "The min-cut is computed over the *recorded* routes and excludes the "
-        "terminals, so a larger size is sound while a small one may only mean no "
-        "further route was recorded yet. It says how many nodes a defender would "
-        "have to touch, never which ones are allowed to be touched — that needs "
-        "the functionality checker and belongs to challenge authoring. The entry "
-        "set is an unchecked author claim: a node declared `entry` leaves every "
-        "cut, so check that it really is the identity the challenge grants the "
-        "attacker.",
+        "Geometry describes the recorded routes only; it does not claim that no "
+        "additional route exists. The entry set must match the identity and "
+        "access the challenge grants the attacker.",
         "",
         diagram(graph),
         "",
@@ -117,7 +127,7 @@ def report(graph: Graph, analysis: dict) -> str:
         "## Routes",
         "",
         _table(
-            ["route", "objective", "walk", "advisories", "witnesses"],
+            ["route", "objective", "required nodes", "advisories", "witnesses"],
             [
                 [
                     path_id,
@@ -129,30 +139,20 @@ def report(graph: Graph, analysis: dict) -> str:
                 for path_id, path in graph.paths.items()
             ],
         ),
-        "## The cut the advisory accepted",
+        "## Repaired comparison",
         "",
         _table(
             ["", "value"],
-            [
-                ["advisory", str(cut.get("advisory") or "—")],
-                ["nodes it guarded", ", ".join(cut.get("nodes") or []) or "—"],
-                ["routes that refused every request tried",
-                 ", ".join(e["path"] for e in cut.get("refused") or []) or "—"],
-                ["routes it left open",
-                 ", ".join(e["path"] for e in cut.get("survived") or []) or "—"],
-            ] if (cut := graph.advisory_cut) else [],
+            cut_rows,
         ),
-        "This is the one cut here whose admissibility is known: upstream shipped "
-        "it and the project kept working. Every cut *size* above is a candidate "
-        "nobody has judged. A route under **left open** reached the objective "
-        "with this repair applied.",
+        cut_note,
         "",
         "## Objective coverage",
         "",
         _table(
-            ["objective", "scope", "routes", "mincut"],
+            ["objective", "scope", "routes"],
             [
-                [objective, str(detail["scope"]), str(detail["routes"]), str(detail["mincut"])]
+                [objective, str(detail["scope"]), str(detail["routes"])]
                 for objective, detail in analysis["objective_coverage"].items()
             ],
         ),

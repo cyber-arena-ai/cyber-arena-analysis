@@ -1,8 +1,8 @@
 # EXPAND contract
 
 EXPAND reads this file, the shared authoring procedure and the graph schema; it
-does not receive the root workflow or SEED's contract. The
-root's invocation supplies the concrete input paths and SEED artifacts.
+does not receive the root workflow or SEED's contract. The root's invocation
+supplies the concrete input bindings and SEED artifacts.
 
 Assert those inputs first, then read both materials below in full before
 probing or authoring.
@@ -13,13 +13,13 @@ default. Its progress file is a trace, not part of the atomic output.
 
 | | |
 |---|---|
-| **Consumes** | `<study>`, `<registry>`, `<target>`, `<scripts>`, `<run>/seed.json`, `<run>/seed-analysis.json`, and the materials below |
+| **Consumes** | `<study>`, `<registry>`, `<target>`, `<scripts>`, `<run>`, `<fragment>`, `<fault>`, `<seed>`, `<analysis>`, and the materials below |
 | **Materials** | [authoring.md](authoring.md), [graph-schema.md](graph-schema.md) |
-| **Produces** | `<run>/expand.json` — always, carrying no route when you found none — and the response below |
-| **May** | read `<study>` and SEED's inputs; send requests to `<target>` as that build's `auth_header`; write `<run>/expand.json` |
-| **May not** | start, stop or build a container; run a reproducer; use host Docker; write anything under `<study>`; introduce an `entry` SEED does not declare |
-| **Asserts on receipt** | every input above present and readable. A missing one is returned as `REJECT: <what is missing>`, not worked around. |
-| **Must ensure** | the fragment passes the validation command below; `<run>/expand.progress` carries a UTC-timestamped line as you begin reading, probing, authoring, validating and returning; every unsettled claim carries `Blocked by`; `Needs study` names a search, never a missing citation |
+| **Produces** | On success, `<fragment>` (`<run>/expand.json`) — always, carrying no route when you found none — and the response below |
+| **May** | read `<study>` and SEED's inputs; inspect and use already-provisioned Docker resources to run attacker clients; send requests to `<target>` as its declared entry (`auth_header`, or anonymous when `null`); write `<fragment>`, `<run>/expand.progress`, and role-owned scratch under `<run>/expand/`; append `<run>/probes.log` |
+| **May not** | build, create, start, stop, replace, reconfigure, or tear down Docker resources; run a reproducer; write anything under `<study>`; introduce an `entry` SEED does not declare |
+| **Asserts on receipt** | `<study>`, `<registry>`, `<target>`, `<scripts>`, `<seed>`, and `<analysis>` are present and readable; `<run>` is writable; `<fragment>` is exactly `<run>/expand.json`; `<fault>` is populated. A failed assertion is returned as `REJECT: input — <what is missing>`, not worked around. |
+| **Must ensure** | the fragment passes the validation command below; `<run>/expand.progress` carries a UTC-timestamped line as you begin reading, probing, authoring, validating and returning; every unsettled claim carries `Blocked by` |
 
 ## Fragment ownership
 
@@ -27,13 +27,16 @@ Copy SEED's `target` object and entry rather than drafting either. Redeclare a
 shared node under SEED's exact id and `symbol`; `title` and `evidence` may
 differ, and SEED's are kept. Narrow its `predecessors` to the ones your routes
 use; the merge unions them. Declare any objective you reach on the target.
+When you find no additional route, copy SEED's validated fragment, set `paths`
+to `[]`, and remove `advisory_cut`; this is the complete default fragment for
+that successful outcome.
 
 ## Expanding
 
-1. **Name the fault.** Read what `STAGE3_STUDY.md` says is defective, then
-   establish it against the running target. Never substitute a min-cut for the
-   fault: a min-cut is arithmetic over the recorded routes and claims nothing
-   about what is defective.
+1. **Start from SEED.** Treat `<fault>` as the established pivot and SEED's
+   validated fragment as the known route to it. Use SEED's analysis to see the
+   recorded coverage and its fragment to locate shared nodes. Do not rename the
+   fault or repeat SEED's route merely to establish it again.
 
 2. **Expand from the fault.** It is one named thing in the application, so this
    is bounded:
@@ -42,23 +45,20 @@ use; the merge unions them. Declare any objective you reach on the target.
    - other objectives the same fault exposes — **declare them**, with a scope
      from the registry, when you reached one on the target. Nothing at Stage 3
      declares the objective; both roles reconstruct it, so yours stands beside
-     SEED's. You may not introduce an `entry` SEED does not declare: that is
-     the identity the challenge grants, and a second one lowers every cut.
+   SEED's. You may not introduce an `entry` SEED does not declare: that is
+   the identity the challenge grants, and a second one changes the starting
+   authority.
 
 3. **Then, only where the study's own evidence suggests a second defect,** look
    for a route that avoids the nodes the routes you have already share.
    Secondary and speculative. Do not go looking for ways around functions that
    work.
 
-4. **Run it, then record it.** Run the check with `probe.py`, or with a client
-   that can send it and then `probe.py --record`, and carry what it prints into
-   the graph as the observation itself.
+4. **Run additions, then record them.** Run every proposed additional route with
+   `probe.py`, or with a client that can send it and then `probe.py --record`,
+   and carry what it prints into the graph as the observation itself.
 
-5. **Score what you did.** Do not assert a new `mincut_all`; the root re-runs
-   the analyzer.
-
-Root cause stays out of the IR: it lives in your response as a stated reading,
-and never as a field.
+`<fault>` stays out of the IR. It is an input anchor, never a graph field.
 
 ## Validate
 
@@ -73,7 +73,6 @@ Return only:
 
 ```text
 Role: EXPAND
-Fault: <one sentence>
 Fragment: <absolute path — always written, even carrying no route>
 Routes added: <path ids, or none>
 Unsettled:
@@ -81,16 +80,17 @@ Unsettled:
   Reaches the fault by: <one sentence>
   Check: <the one command or request that would settle it>
   Blocked by: <the wall that stopped you running it>
-Needs study: <when no route was found: the fault, and the search that failed>
 ```
 
-**`Needs study` is a claim about a search**: you looked, and the fault reached
-nothing further you could find. It is never "I found a route and could not
-record it" — you can run the target, so run it, write the output to record it
-as a probe observation. A hypothesis you *could* have run is not an unsettled
-claim; it is unfinished work.
+Write `Unsettled: none` when no claim remains. A hypothesis you could have run
+is unfinished work, not an unsettled claim: run it before returning.
 
 ## Failure
 
-Return a validation rejection to the root; do not weaken or work around the
-check.
+Write no fragment and return exactly one rejection:
+
+- `REJECT: input — <what is missing>` when an input assertion fails;
+- `REJECT: execution — <failed check>` when a required live check cannot finish;
+- `REJECT: validation — <the validator message>` when the fragment is rejected.
+
+Do not weaken or work around a failed check.

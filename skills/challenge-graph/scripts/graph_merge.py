@@ -35,11 +35,11 @@ def _header_errors(seed: dict, expand: dict) -> list[str]:
 def _terminal_errors(seed: Graph, expand: Graph) -> list[str]:
     """Only the entry is SEED's alone.
 
-    An entry is the identity the challenge grants, and a node declared `entry`
-    leaves every cut, so a second one silently lowers the min-cut. An objective
-    is different: at Stage 3 nothing declares it — both roles reconstruct it
-    from what the target returned — and rejecting EXPAND's discarded a reachable
-    asset the scope registry already had a name for.
+    An entry is the identity the challenge grants, so a second one changes the
+    starting authority. An objective is different: at Stage 3 nothing declares
+    it — both roles reconstruct it from what the target returned — and rejecting
+    EXPAND's discarded a reachable asset the scope registry already had a name
+    for.
     """
     return [
         f"EXPAND introduced entry node {node_id}, which SEED does not declare; "
@@ -95,15 +95,15 @@ def merge(seed: dict, expand: dict) -> tuple[dict | None, dict, list[str]]:
         errors += node_errors
 
     source_paths = [("seed", path) for path in seed_graph.paths.values()]
-    # An id is only a reference, so it cannot be what says two routes differ: the
-    # walk is. Two ids over one walk is one route recorded twice.
-    walks = {tuple(path["nodes"]) for _, path in source_paths}
+    # An id is only a reference, so it cannot be what says two routes differ:
+    # their ordered nodes do. Two ids over one sequence is one route recorded twice.
+    routes_by_nodes = {tuple(path["nodes"]) for _, path in source_paths}
     for path_id, path in expand_graph.paths.items():
-        walk = tuple(path["nodes"])
-        if walk in walks:
-            errors.append(f"EXPAND route {path_id} walks nodes SEED already recorded")
+        ordered_nodes = tuple(path["nodes"])
+        if ordered_nodes in routes_by_nodes:
+            errors.append(f"EXPAND route {path_id} repeats a route SEED already recorded")
             continue
-        walks.add(walk)
+        routes_by_nodes.add(ordered_nodes)
         source_paths.append(("expand", path))
 
     if errors:

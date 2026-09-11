@@ -14,6 +14,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("graph", type=Path)
     parser.add_argument(
+        "--require-route",
+        action="store_true",
+        help="reject an otherwise valid fragment whose paths list is empty",
+    )
+    parser.add_argument(
         "--scope-registry",
         type=Path,
         required=True,
@@ -22,6 +27,13 @@ def main() -> int:
     args = parser.parse_args()
 
     document, errors = load(args.graph, args.scope_registry)
+    if (
+        args.require_route
+        and isinstance(document, dict)
+        and isinstance(document.get("paths"), list)
+        and not document["paths"]
+    ):
+        errors.append("graph must record at least one route")
     for error in errors:
         print(error, file=sys.stderr)
     if errors:

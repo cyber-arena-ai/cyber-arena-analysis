@@ -6,9 +6,12 @@ format and semantic invariants.
 
 ## Use the target
 
-Use the supplied `target.json`. Each build's `base_url` and `auth_header` are
-the reachable service and entry principal; `seeded` identifies the protected
-result. Do not change the target or substitute another identity.
+Use the supplied `target.json`. A build's `base_url` identifies its HTTP endpoint
+when present. When it is null, `containers` names the provisioned Docker
+resources and `seeded` describes the client path. `auth_header` is the
+credentialed HTTP entry principal, or `null` for anonymous entry. `seeded` also
+identifies the protected result. Do not change the target or substitute another
+identity.
 
 ## Probe HTTP
 
@@ -51,19 +54,11 @@ of which client produced it.
 2. Probe every node and route you intend to record. Anything you cannot
    establish on the target is not a graph element; handle it under the role's
    reporting or failure contract.
-3. Model the confirmed result under the role's ownership and the graph schema.
-   Use one objective for each confirmed witness-and-scope pair. A function node
-   must name an application function, route, or handler. Split two functions
-   when a mitigation can stop one without stopping the other; otherwise model
-   one node.
-4. Record each route as the shortest confirmed walk from the entry to an
-   objective. A replay is another witness for that route, not another route.
-5. When the study supplies a repaired case and your fragment records routes,
-   read the supplied fix and set `advisory_cut.nodes` to the function nodes it
-   guarded. Run every route in your fragment against the repaired build and
-   classify each one. Put a route in `survived` only when it still reaches the
-   objective. For a refusal, try materially different payload shapes and state
-   them in `tried`; refusal does not prove closure. If testing is incomplete,
-   return failure rather than omitting a route. Omit `advisory_cut` only when
-   there is no repaired case or your fragment has no route.
-6. Validate and correct the fragment using the command in the role contract.
+3. Model the confirmed result under the role's ownership using the graph
+   schema.
+4. When the study supplies a repaired case and your fragment records routes,
+   read the supplied fix and run every route against the repaired build. For a
+   refusal, try materially different payload shapes. If testing is incomplete,
+   return `REJECT: execution — <failed check>`. Encode the completed comparison
+   as `advisory_cut` using the graph schema.
+5. Validate and correct the fragment using the command in the role contract.

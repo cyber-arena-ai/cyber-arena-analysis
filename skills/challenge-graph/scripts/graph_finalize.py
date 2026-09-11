@@ -42,10 +42,6 @@ def provenance_errors(record: object) -> list[str]:
             for field in ("claim", "reaches_fault_by", "check", "blocked_by"):
                 if not _text(item.get(field)):
                     errors.append(f"unsettled {index} must carry {field}")
-    notes = record.get("notes")
-    if notes is not None and (not isinstance(notes, list) or not all(_text(n) for n in notes)):
-        # A string here renders one bullet per character.
-        errors.append("provenance.notes must be a list of strings")
     return errors
 
 
@@ -66,6 +62,15 @@ def merge_errors(merged: object, graph: Graph) -> list[str]:
     errors += [f"merge.json names {p}, which is not a route in the graph"
                for p in sorted(set(routes) - set(graph.paths))]
     return errors
+
+
+def finalized_graph_errors(graph: Graph) -> list[str]:
+    """A final graph contains only nodes belonging to a recorded route."""
+    used = {node_id for path_id in graph.paths for node_id in graph.path_nodes(path_id)}
+    unused = sorted(set(graph.nodes) - used)
+    if unused:
+        return [f"graph.json has nodes outside every recorded route: {', '.join(unused)}"]
+    return []
 
 
 def derived_errors(out: Path, graph: Graph) -> list[str]:
@@ -106,9 +111,6 @@ def findings(record: dict, merged: dict, graph: Graph) -> str:
         f"\n  - check: {item['check']}\n  - blocked by: {item['blocked_by']}"
         for item in record.get("unsettled") or []
     ] or ["_none_"]
-    parts += ["", "## Notes", ""]
-    notes = record.get("notes") or []
-    parts += [f"- {note}" for note in notes] or ["_none — the analysis and the study agreed_"]
     parts += ["", "## Attribution", ""]
     parts += [f"- `{path}` — {role}" for path, role in sorted(merged["routes"].items())]
     return "\n".join(parts) + "\n"
@@ -152,7 +154,8 @@ def main() -> int:
             return 1
     record, merged = payload["provenance.json"], payload["merge.json"]
 
-    errors = (provenance_errors(record) + derived_errors(args.out, graph)
+    errors = (provenance_errors(record) + finalized_graph_errors(graph)
+              + derived_errors(args.out, graph)
               + merge_errors(merged, graph))
     if errors:
         for error in errors:

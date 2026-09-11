@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compute cuts, geometry, and objective coverage for a challenge graph."""
+"""Compute geometry and objective coverage for a challenge graph."""
 
 from __future__ import annotations
 
@@ -33,8 +33,7 @@ def main() -> int:
     graph = Graph(document)
     analysis = analyze(graph)
     args.out.write_text(json.dumps(analysis, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"{args.out}: geometry={','.join(analysis['geometry']) or 'none'} "
-          f"mincut_all={analysis['mincut_all']}")
+    print(f"{args.out}: geometry={','.join(analysis['geometry']) or 'none'}")
     return 0
 
 

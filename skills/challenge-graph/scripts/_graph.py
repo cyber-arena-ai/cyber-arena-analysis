@@ -126,13 +126,14 @@ def analyze(graph: Graph) -> dict:
     interiors = {p: graph.interior(p) for p in paths}
 
     per_objective: dict[str, dict] = {}
+    objective_cuts: dict[str, int | None] = {}
     for objective in objectives:
         members = [p for p in paths if graph.paths[p].get("objective") == objective]
         per_objective[objective] = {
             "scope": graph.nodes[objective].get("scope"),
             "routes": len(members),
-            "mincut": minimal_cuts([interiors[p] for p in members]),
         }
+        objective_cuts[objective] = minimal_cuts([interiors[p] for p in members])
 
     mincut_all = minimal_cuts([interiors[p] for p in paths])
 
@@ -146,7 +147,10 @@ def analyze(graph: Graph) -> dict:
     }
     if any(len(reached) >= 2 for reached in spans.values()):
         labels.append("fan_out")
-    if any(d["routes"] >= 2 and d["mincut"] == 1 for d in per_objective.values()):
+    if any(
+        per_objective[objective]["routes"] >= 2 and cut == 1
+        for objective, cut in objective_cuts.items()
+    ):
         labels.append("fan_in")
     if mincut_all is not None and mincut_all >= 2:
         labels.append("disjoint")
@@ -155,7 +159,6 @@ def analyze(graph: Graph) -> dict:
     # its evidence is. Restating it here was a projection nothing derived.
     return {
         "geometry": sorted(set(labels)),
-        "mincut_all": mincut_all,
         "objective_coverage": per_objective,
     }
 
@@ -259,16 +262,24 @@ def structural_errors(document: object) -> list[str]:
 
     for path_id, path in graph.paths.items():
         errors.extend(_path_errors(graph, path_id, path))
-    # A route *is* its walk. Two entries over the same nodes are one route
+    # A route is its ordered nodes. Two entries over the same sequence are one route
     # recorded twice, which inflates the route count and can manufacture a
     # `fan_in` reading out of a single way in.
-    walks: dict[tuple, str] = {}
+    routes_by_nodes: dict[tuple, str] = {}
     for path_id, path in graph.paths.items():
-        walk = tuple(path.get("nodes") or [])
-        if walk in walks:
-            errors.append(f"route {path_id} walks the same nodes as route {walks[walk]}")
+        raw_ordered_nodes = path.get("nodes")
+        if not isinstance(raw_ordered_nodes, list) or any(
+            not isinstance(node_id, str) for node_id in raw_ordered_nodes
+        ):
+            continue
+        ordered_nodes = tuple(raw_ordered_nodes)
+        if ordered_nodes in routes_by_nodes:
+            errors.append(
+                f"route {path_id} lists the same ordered nodes as route "
+                f"{routes_by_nodes[ordered_nodes]}"
+            )
         else:
-            walks[walk] = path_id
+            routes_by_nodes[ordered_nodes] = path_id
 
     errors.extend(_advisory_cut_errors(graph, document))
     errors.extend(_cycle_errors(graph))
@@ -394,7 +405,7 @@ def _path_errors(graph: Graph, path_id: str, path: dict) -> list[str]:
         return errors + [f"route {path_id} has unknown nodes: {listed}"]
     repeated = sorted({n for n in nodes if nodes.count(n) > 1})
     if repeated:
-        # A route is a walk over distinct nodes; a repeat only inflates the node
+        # A route lists distinct nodes; a repeat only inflates the node
         # count the renderer prints, since every computed set ignores it.
         return errors + [f"route {path_id} lists {', '.join(repeated)} more than once"]
 
@@ -450,13 +461,7 @@ def _advisory_cut_errors(graph: Graph, document: dict) -> list[str]:
     closed. So `refused` records what this run sent, never that the fix severed
     the route, and each entry says which payload shapes it tried.
 
-    Every other cut this tool reports is a candidate nobody has judged — the
-    cheapest is routinely a shared executor every legitimate request needs, so
-    severing it is feature amputation. This one shipped upstream with the
-    feature intact, which makes it an exemplar: these nodes could be guarded,
-    and the project accepted the result.
-
-    `nodes` is what the fix touched. `refused` and `survived` are what that
+    `nodes` is what the fix guarded. `refused` and `survived` are what that
     achieved over the recorded routes, so an accepted cut that leaves a route
     open is sayable — which is the whole reason to record it rather than trust
     it.
@@ -485,10 +490,10 @@ def _advisory_cut_errors(graph: Graph, document: dict) -> list[str]:
                       "upstream commit where the fix shipped without one")
     nodes = raw.get("nodes")
     if not isinstance(nodes, list) or not nodes:
-        errors.append("advisory_cut.nodes must be a non-empty list of the nodes the fix touched")
+        errors.append("advisory_cut.nodes must be a non-empty list of the nodes the fix guarded")
     else:
         for node_id in nodes:
-            if node_id not in graph.nodes:
+            if not isinstance(node_id, str) or node_id not in graph.nodes:
                 errors.append(f"advisory_cut.nodes names {node_id}, which is not a node")
             elif graph.role(node_id) != "function":
                 # A fix that severed a terminal would be removing the identity the
@@ -520,6 +525,11 @@ def _advisory_cut_errors(graph: Graph, document: dict) -> list[str]:
                     f"advisory_cut.refused {path_ref} must say what was tried; "
                     "refusing every request of one shape is not severance"
                 )
+    missing = set(graph.paths) - seen
+    if missing:
+        errors.append(
+            "advisory_cut does not classify routes: " + ", ".join(sorted(missing))
+        )
     if not recorded:
         errors.append("advisory_cut records no route; leave it out instead")
     return errors

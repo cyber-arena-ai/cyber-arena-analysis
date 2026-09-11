@@ -87,10 +87,12 @@ def discover(appeared: dict[str, dict]) -> tuple[dict[str, dict], dict[str, set[
     written down and `base_url` stays null for a human to settle.
     """
     candidates: dict[str, list[dict]] = {}
+    owned: dict[str, list[str]] = {}
     facility: dict[str, set[str]] = {}
     for identifier, container in appeared.items():
         if not container["project"]:
             continue
+        owned.setdefault(container["project"], []).append(container["name"])
         try:
             facility.setdefault(container["project"], set()).update(environment(identifier))
         except (RuntimeError, OSError):
@@ -103,16 +105,18 @@ def discover(appeared: dict[str, dict]) -> tuple[dict[str, dict], dict[str, set[
                 {"container": container["name"], "base_url": f"http://127.0.0.1:{port}"}
             )
     builds: dict[str, dict] = {}
-    for project, found in candidates.items():
+    for project in sorted(owned):
+        found = candidates.get(project, [])
         name = project.rsplit("-", 1)[-1]
         if name in builds:
             # Two projects ending in the same segment. Overwriting would drop a
             # build out of target.json with nothing said about it.
             name = project
-        entry = {"base_url": found[0]["base_url"] if len(found) == 1 else None,
-                 "auth_header": None}
+        entry = {"base_url": found[0]["base_url"] if len(found) == 1 else None}
         if len(found) > 1:
             entry["candidates"] = found
+        elif not found:
+            entry["containers"] = sorted(owned[project])
         builds[name] = entry
     # facility comes back beside the builds and is printed to the root only:
     # target.json is handed to the roles, and they get the entry principal and
@@ -158,14 +162,15 @@ def up(study: Path, run: Path, reproducer: str) -> int:
     print(f"  projects: {', '.join(projects) or 'none'}")
     unresolved = sorted(n for n, b in builds.items() if not b["base_url"])
     if unresolved:
-        print(f"  ambiguous, base_url left null: {', '.join(unresolved)} — see candidates")
-    print("  still yours to fill: auth_header per build, and what the facility seeded.")
+        print(f"  ambiguous or internal-only, base_url left null: {', '.join(unresolved)}")
+    print("  still yours to resolve: auth_header per build (null for anonymous), "
+          "and what the facility seeded.")
     for project, found in facility_found.items():
         # Printed here and nowhere else: target.json is handed to the roles, and
         # they get the entry principal and nothing more.
         print(f"  facility credentials in {project}: {', '.join(sorted(found)) or 'none found'}")
-    print("  read their values with `docker inspect` and provision the entry")
-    print("  principal with them; they are yours, not the roles'.")
+    print("  for credentialed entry, read their values with `docker inspect` and")
+    print("  provision the entry principal; they are yours, not the roles'.")
 
     errors = []
     if result.returncode != 0:

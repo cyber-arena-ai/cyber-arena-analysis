@@ -84,15 +84,18 @@ For a filled multi-route document, see
 - A function has a unique `symbol`. Model separately guardable functions as
   separate nodes; use one node when guarding it necessarily guards every named
   use.
-- An objective's `scope` comes from the supplied registry or is a fully defined
-  `custom.<challenge_id>.*` scope. Before Stage 4, `store` names the trial witness.
-- A path is the shortest confirmed walk from an entry through at least one
-  function to its objective. Its node ids are distinct and ordered; do not
-  record the same walk twice. Fragments may use `"paths": []`; a finalized
-  graph must have a route.
-- Fragment route ids are `PATH-1`, `PATH-2`, and so on in document order. Merge
-  renumbers them SEED first, then EXPAND. The ordered walk in `nodes`, not the
-  id, identifies the route.
+- Use one objective for each confirmed witness-and-scope pair. Its `scope`
+  comes from the supplied registry or is a fully defined
+  `custom.<challenge_id>.*` scope. Before Stage 4, `store` names the trial
+  witness.
+- A path is a minimal confirmed route from an entry through at least one
+  function to its objective. Its required node ids are distinct and
+  topologically ordered; do not record the same ordered route twice. Fragments
+  may use `"paths": []`; a finalized graph must have a route. A replay adds a
+  witness to that route rather than another route.
+- Fragment route ids are unique local references. Merge assigns `PATH-1`,
+  `PATH-2`, and so on in SEED-then-EXPAND order. The ordered route in `nodes`,
+  not the local id, identifies the route.
 - Every function evidence object, path witness, and cut result is a response
   recorded in `<run>/probes.log`. `observed` is at least eight characters and
   appears literally in `excerpt`; `source` identifies the request.
@@ -103,7 +106,8 @@ For a filled multi-route document, see
   do not place one on both sides. Omit the whole cut only when the supplied
   target has no repaired case or the fragment has no path.
 - `advisories` only identifies what a route reproduced; it does not affect
-  analysis. Cuts and geometry are computed later, never authored here.
+  analysis. Geometry and objective coverage are computed later, never authored
+  here.
 
 The role contract supplies the validation command. Validation enforces the
 shape, ids, references, scopes, evidence containment, path reachability and

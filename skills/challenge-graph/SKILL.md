@@ -1,12 +1,12 @@
 ---
 name: challenge-graph
-description: "Build the attack-graph intermediate representation for one completed Cyber Arena Stage 3 study, then compute its cuts, geometry, and coverage and render a diagram. Stands up the study's own bundle and probes the running target, so it starts containers and sends attacker traffic. Use when analyzing or visualizing what a challenge's reproduced attack structure is, or when checking whether a study's recorded decision matches its own evidence. Do not use to promote, reject, or review a challenge."
+description: "Build the attack-graph intermediate representation for one completed Cyber Arena Stage 3 study, then compute its geometry and objective coverage and render a diagram. Stands up the study's own bundle and probes the running target, so it starts containers and sends attacker traffic. Use when analyzing or visualizing what a challenge's reproduced attack structure is. Do not use to promote, reject, or review a challenge."
 ---
 
 # Challenge graph
 
 Turn one completed Stage 3 study into a graph of the attack structure it
-reproduced, compute cuts and geometry over it, and draw it.
+reproduced, compute its geometry and objective coverage, and draw it.
 
 You are the **root**: the executor. You call functions — scripts and subagents —
 and own every deliverable. You do not author the graph you adjudicate.
@@ -19,8 +19,8 @@ and own every deliverable. You do not author the graph you adjudicate.
 | 2 | Bind | the invocation | `<study>`, `<out>`, `<run>`, tools |
 | 3 | Inspect inputs | the Stage 3 bundle | verified semantic and runtime inputs |
 | 4 | Provision | the verified bundle | `<target>` |
-| 5 | SEED | `<target>`, role materials | `<run>/seed.json`, `<run>/seed-analysis.json` |
-| 6 | EXPAND | SEED's fragment and analysis | `<run>/expand.json`, the EXPAND response |
+| 5 | SEED | `<target>`, role materials | `<run>/seed.json`, `<run>/seed-analysis.json`, `<fault>` |
+| 6 | EXPAND | SEED's fault, fragment, and analysis | `<run>/expand.json`, the EXPAND response |
 | 7 | Merge | both fragments | `graph.json`, `<run>/merge.json` |
 | 8 | Adjudicate | `graph.json`, `<study>`, `<target>` | repaired fragments, or nothing |
 | 9 | Derive | `graph.json` | `analysis.json` |
@@ -95,12 +95,12 @@ Reject an incomplete bundle. Otherwise bind `<target-id>`, `<repository>`,
 receives those resolved values; EXPAND inherits them from SEED's validated
 fragment. Neither role repairs, discovers, or defaults the bundle inputs.
 
-The semantic study, not `result.json`, supplies the attack chain, witness, and
-authoring consequences consumed during Adjudicate and Finalize.
-
 ### 4. Provision
 
-**You are the only frame that touches Docker.**
+**You alone own Docker lifecycle and deployment mutation.** Roles may inspect
+and use the already-provisioned Docker environment to run attacker clients, but
+only you build, create, start, stop, replace, reconfigure, or tear down its
+resources.
 
 ```text
 python3 <scripts>/graph_provision.py <study> --run <run> \
@@ -117,17 +117,21 @@ Complete `target.json` in place without removing its teardown record:
 ```json
 {"reproducer": {"compose_projects": ["..."]},
  "builds": {"<name>": {"base_url": "http://127.0.0.1:<port>",
-                          "auth_header": "<header name>: <value>"}},
+                          "auth_header": null}},
  "seeded": "<what the facility planted and how to recognise it>"}
 ```
 
-Resolve any ambiguous `base_url`, set each `auth_header` to the entry principal
-and nothing more, and make the seeded value recognisable.
+Resolve any ambiguous `base_url` used for HTTP. An internal-only build keeps
+`base_url` null and names its provisioned containers. Set `auth_header` to the
+entry principal's `<header name>: <value>` and nothing more, or explicitly to
+`null` when the study declares anonymous entry. Make the seeded value
+recognisable.
 
-Create the entry principal declared by the study; do not reuse an identity the
-reproducer created. Use the facility credentials printed by
-`graph_provision.py` when needed, record only the entry principal in
-`auth_header`, and verify its baseline before dispatching.
+For a credentialed entry, create the principal declared by the study; do not
+reuse an identity the reproducer created. Use the facility credentials printed
+by `graph_provision.py` when needed and record only the entry principal in
+`auth_header`. For anonymous entry, do not invent a principal or credential.
+Verify the declared baseline before dispatching either form.
 
 `probe.py` sends HTTP, and it is the roles' fast path rather than their only
 one. A study whose attack is a broker protocol, a WebSocket or a `git` transport
@@ -155,25 +159,30 @@ Inputs:
   revision_source = <revision-source>
 ```
 
-While it runs, `<run>/seed.progress`
-is where you look: the age of its last line is how you tell a working role from a
-dead one. Then gate and analyze:
+Handle a SEED rejection before reading its success response: `REJECT: validation`
+returns to SEED for correction; `REJECT: input`, `REJECT: execution`, or
+`REJECT: fault not reproduced` is terminal and delivers nothing. Otherwise
+assert the response contains one non-empty `Fault` sentence and bind it exactly
+as `<fault>`; return a missing sentence to SEED rather than inferring or
+rewriting it. While SEED runs, `<run>/seed.progress` is where you look: the age
+of its last line is how you tell a working role from a dead one. Then gate and
+analyze:
 
 ```text
-python3 <scripts>/graph_validate.py <run>/seed.json \
+python3 <scripts>/graph_validate.py <run>/seed.json --require-route \
   --scope-registry <registry>
 python3 <scripts>/graph_analyze.py <run>/seed.json \
   --out <run>/seed-analysis.json --scope-registry <registry>
 ```
 
-The validator writes nothing; the analyzer writes cuts, geometry, and objective
+The validator writes nothing; the analyzer writes geometry and objective
 coverage. Do not dispatch EXPAND unless both succeed. On rejection, return the
 message to SEED; never repair its fragment by hand.
 
 ### 6. EXPAND
 
 After SEED returns, dispatch EXPAND with only this bootstrap, after resolving
-every path:
+every binding:
 
 ```text
 Role contract: <skill-root>/references/expand.md
@@ -185,19 +194,22 @@ Inputs:
   target   = <run>/target.json
   seed     = <run>/seed.json
   analysis = <run>/seed-analysis.json
+  fault    = <fault>
   fragment = <run>/expand.json
 ```
 
 The two roles never overlap. They do share one
 instance, and SEED's probing mutates it, so **EXPAND inherits whatever state
 SEED left**. A route EXPAND reaches only because of that state is not a route
-the attacker can walk from the entry: check any route whose precondition SEED
+the attacker can reach from the entry: check any route whose precondition SEED
 created. Give it SEED's fragment and analysis alongside its own contract.
 
+Handle an EXPAND rejection before reading its success response:
+`REJECT: validation` returns to EXPAND for correction; `REJECT: input` is
+terminal and delivers nothing, as is `REJECT: execution`. Otherwise
 `<run>/expand.progress` is where you look while it runs. Assert its response:
-every unsettled claim carries `Blocked by`, and `Needs study`, when EXPAND found
-no route, names a search. A claim whose check EXPAND could have run is
-unfinished work — send it back.
+every unsettled claim carries `Blocked by`. A claim whose check EXPAND could
+have run is unfinished work — send it back.
 
 ### 7. Merge
 
@@ -216,28 +228,28 @@ re-dispatching its author.
 
 ### 8. Adjudicate
 
-Re-read every cited construct in full. You saw SEED's reasoning as its
-dispatcher, so the artifact and its evidence are what you check, not the
-argument for it. This is the judgment no script can make. Check the **entry**
-set, because a node declared `entry` leaves every cut; the **node boundaries**,
-because they set every number in the graph; and the **citations**, the one place
-the validator's containment check says nothing — an excerpt can carry the quoted
-string and still not support the claim. Every citation should match a record in
-`<run>/probes.log`; the ones whose `source` says `attested` rest on a client
-other than `probe.py`, and are the ones to check hardest.
-
-Review writes no record of itself — you would be attesting to your own
-diligence, and a run that reviewed nothing could write the same words. What it
-leaves behind is the change it caused, in `graph.json`.
+Inspect every evidence object and its matching record in `<run>/probes.log`.
+Judge each fragment from its persisted artifact and recorded evidence, not from
+an unstated argument by its author. This is the judgment no script can make.
+Check the **entry** set because it defines the granted starting authority; the
+**node boundaries** because they define the geometry; and the **evidence
+claims** because containment alone cannot show that an excerpt supports its
+claim. Evidence whose `source` says `attested` rests on a client other than
+`probe.py` and deserves the closest check.
 
 Route a rejection to the owner of its input: root corrects root-owned inputs;
 SEED or EXPAND corrects a fragment named in the error; an error created by the
 union is adjudicated here. Never repair a role artifact or merged graph by hand.
 
-Repair a `Repair` finding by re-dispatching the role that wrote the subject.
-**Changing SEED's node set invalidates EXPAND's fragment** — its routes name ids
-and symbols that no longer exist — so re-dispatch EXPAND too and return to
-EXPAND. Otherwise return to Merge. At most two passes; then abort.
+A correction to a root-owned input already dispatched invalidates every role
+output that consumed it and everything downstream; return to the earliest
+dependent step. Correcting `target.json` or graph identity returns to Step 5
+and reruns both roles.
+
+A correction to SEED's fragment returns to Step 5: validate the replacement,
+recompute `seed-analysis.json`, and re-dispatch EXPAND because its output
+derives from those inputs. A correction to EXPAND's fragment returns to Step 6,
+then Merge. At most two adjudication passes; then abort.
 
 ### 9. Derive
 
@@ -250,35 +262,20 @@ The analyzer writes only facts over the recorded routes:
 
 | Field | Meaning |
 |---|---|
-| `mincut_all` | Smallest number of function nodes that intersects every route; entries and objectives are excluded. |
-| `objective_coverage` | Each objective's scope, route count, and route min-cut. |
-| `geometry` | Shape labels: `fan_out` when one function reaches multiple objectives, `fan_in` when multiple routes to one objective share a one-node cut, and `disjoint` when `mincut_all` is at least two. No label is also valid. |
+| `objective_coverage` | Each objective's scope and route count. |
+| `geometry` | Shape labels: `fan_out` when one function reaches multiple objectives, `fan_in` when multiple routes to one objective share a function, and `disjoint` when no function lies on every route. No label is also valid. |
 
-Adding routes can raise a min-cut size. A small size may therefore mean only
-that no further route was recorded. Geometry names the recorded shape; it is
-not a verdict.
+Geometry names the recorded shape; it is not a verdict.
 
 ### 10. Finalize
 
-Reconcile the analysis against the study's own recorded decision — `geometry`,
-`mincut_all`. Raise a `NOTE` for exactly these disagreements and no others:
-
-- the study reports the advisory's fix closing the attack but `advisory_cut`
-  records a surviving route, or the reverse;
-- EXPAND's fault and the study's own account of it disagree;
-- the graph records a route the study does not describe, or omits one it does —
-  a run found a third route that moved `mincut_all` from 1 to 2 and had nowhere
-  to say so.
-
-**Never adjust the graph to make it agree** — the disagreement is the finding.
-
-Write `<out>/provenance.json`; `unsettled` and `notes` default to empty lists:
+Write `<out>/provenance.json`; `unsettled` defaults to an empty list:
 
 ```json
-{"fault": {"statement": "..."},
+{"fault": {"statement": "<fault>"},
  "unsettled": [{"claim": "...", "reaches_fault_by": "...",
-                 "check": "...", "blocked_by": "..."}],
- "notes": ["..."]}
+                 "check": "...", "blocked_by": "..."}]
+}
 ```
 
 Carry EXPAND's `Reaches the fault by` text into `reaches_fault_by`.
@@ -306,9 +303,9 @@ from successful and failed work.
 ```text
 artifacts/projects/<PROJECT>/graph/<study-name>/
 ├── graph.json        the IR
-├── analysis.json     cuts, geometry, coverage
+├── analysis.json     geometry and objective coverage
 ├── graph.md          the diagram and summary tables, written by graph_finalize.py
-├── provenance.json   the record: fault, unsettled claims, NOTEs
+├── provenance.json   the record: fault and unsettled claims
 └── findings.md       rendered from it by graph_finalize.py, never by hand
 ```
 
@@ -317,18 +314,16 @@ Nothing is named for the role that produced it: attribution reaches
 nothing here points outside itself — the deliverable is readable with the study
 gone.
 
-Report the study and revision, geometry and `mincut_all`, which routes the
-advisory's own fix left open, every `NOTE`, EXPAND's fault, and what it left
-unsettled.
+Report the study and revision, geometry, which routes the advisory's own fix
+left open, SEED's fault, and what EXPAND left unsettled.
 
 ## Boundaries
 
 - The graph never promotes or rejects a challenge, and no skill may treat a
   graph property as an admission criterion.
-- Never report a min-cut as proof that no other attack path exists.
 - Root cause never becomes a node or a field.
-- The graph is a complete exploit map for the routes it holds, and an
-  observation this pass ran carries a working request verbatim. It stays in the
-  Git-ignored `artifacts/` tree; the fragments under `<run>` are the same map
-  in pieces, so `/tmp` is as far as they go. Neither reaches an agent-visible
+- The graph is a complete exploit map for the routes it holds, and every
+  observation was produced by a request executed in this pass. It stays in the
+  Git-ignored `artifacts/` tree; the fragments under `<run>` are the same map in
+  pieces, so `/tmp` is as far as they go. Neither reaches an agent-visible
   surface.

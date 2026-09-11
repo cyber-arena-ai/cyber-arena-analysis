@@ -141,6 +141,15 @@ def _fails(tmp_path, mutate, needle):
     return result
 
 
+def test_seed_gate_requires_a_route_while_other_fragments_may_be_empty(tmp_path):
+    graph = _graph()
+    graph["paths"] = []
+    assert _validate(tmp_path, graph).returncode == 0
+    result = _run("graph_validate.py", tmp_path, graph, "--require-route")
+    assert result.returncode == 1
+    assert "must record at least one route" in result.stderr
+
+
 # --- the advisory's own fix -------------------------------------------------
 
 
@@ -196,13 +205,31 @@ def test_a_refusal_must_say_what_it_tried(tmp_path):
     _fails(tmp_path, drop, "must say what was tried")
 
 
+def test_an_advisory_cut_must_classify_every_recorded_route(tmp_path):
+    _fails(
+        tmp_path,
+        lambda g: _cut(g, survived=()),
+        "advisory_cut does not classify routes: PATH-alt",
+    )
+
+
+def test_malformed_route_and_cut_collections_are_rejected_without_a_traceback(tmp_path):
+    graph = _cut(_graph())
+    graph["paths"][0]["nodes"] = 1
+    graph["advisory_cut"]["nodes"] = [{}]
+    result = _validate(tmp_path, graph)
+    assert result.returncode == 1
+    assert "route PATH-pov.nodes must be a non-empty list" in result.stderr
+    assert "advisory_cut.nodes names {}" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 # --- the fixture itself -----------------------------------------------------
 
 
 def test_two_disjoint_routes_read_as_disjoint(tmp_path):
     analysis = _analyze(tmp_path, _graph())
     assert analysis["geometry"] == ["disjoint"]
-    assert analysis["mincut_all"] == 2
 
 
 # --- schema 2 migration -----------------------------------------------------
@@ -233,7 +260,7 @@ def test_the_removed_evidence_fields_are_rejected_rather_than_ignored(tmp_path):
         )
 
 
-# --- a route walks its predecessors -----------------------------------------
+# --- a route follows its predecessors ---------------------------------------
 
 
 def test_a_route_must_reach_each_node_through_a_predecessor(tmp_path):
@@ -271,10 +298,6 @@ def test_a_shared_node_reached_by_either_branch_reads_as_fan_in(tmp_path):
     """The Airflow shape: two routes, one shared function, so one fix covers both."""
     analysis = _analyze(tmp_path, _shared_serializer(_graph()))
     assert analysis["geometry"] == ["fan_in"]
-    assert analysis["mincut_all"] == 1
-
-
-# --- terminals are never cut ------------------------------------------------
 
 
 # --- geometry ---------------------------------------------------------------
@@ -297,12 +320,10 @@ def _shortcut(graph):
 
 
 def test_a_one_node_route_is_recorded_like_any_other(tmp_path):
-    """A one-function route is still a route: it raises the min-cut and takes
-    whatever label the shape earns, rather than blanking the reading."""
+    """A one-function route is still a route and earns the resulting geometry."""
     graph = _graph()
     _shortcut(graph)
     analysis = _analyze(tmp_path, graph)
-    assert analysis["mincut_all"] == 3
     assert "disjoint" in analysis["geometry"]
 
 
@@ -493,17 +514,17 @@ def test_the_report_names_each_node_s_code_symbol(tmp_path):
     assert "ShareController.create" in _render(tmp_path, _graph())
 
 
-def test_the_report_says_it_does_not_judge_admissibility(tmp_path):
-    """Both claims travel with graph.md, so they are part of the deliverable."""
+def test_the_report_bounds_geometry_to_the_recorded_routes(tmp_path):
     body = _render(tmp_path, _graph())
-    assert "never which ones are allowed to be touched" in body
-    assert "unchecked author claim" in body
+    assert "does not claim that no additional route exists" in body
+    assert "must match the identity and access the challenge grants" in body
+    assert "No repaired comparison was supplied" in body
 
 
 # --- cut search -------------------------------------------------------------
 
 
-def test_a_wide_disjoint_graph_still_reports_its_mincut(tmp_path):
+def test_a_wide_disjoint_graph_still_reports_its_geometry(tmp_path):
     graph = _graph()
     graph["paths"] = []
     _node(graph, "N-obj")["predecessors"] = []
@@ -525,7 +546,7 @@ def test_a_wide_disjoint_graph_still_reports_its_mincut(tmp_path):
                 "witnesses": [_cite("vulnerable build · GET /pov · 200 #L2", "recovered victim report")],
             }
         )
-    assert _analyze(tmp_path, graph)["mincut_all"] == 6
+    assert _analyze(tmp_path, graph)["geometry"] == ["disjoint"]
 
 
 def test_an_exhausted_cut_search_reports_unknown_rather_than_guessing():
@@ -582,7 +603,6 @@ def test_the_same_route_validates_once_the_dependency_is_declared_honestly(tmp_p
     graph = _nested_or(_graph())
     _node(graph, "N-resolve-share")["predecessors"] = ["N-upload"]
     assert _validate(tmp_path, graph).returncode == 0
-    assert _analyze(tmp_path, graph)["mincut_all"] == 2
 
 
 def test_a_conjunction_route_is_not_forced_into_adjacency(tmp_path):
@@ -603,7 +623,6 @@ def test_a_conjunction_route_is_not_forced_into_adjacency(tmp_path):
         }
     ]
     assert _validate(tmp_path, graph).returncode == 0
-    assert _analyze(tmp_path, graph)["mincut_all"] == 1, "either conjunct alone cuts it"
 
 
 # --- the guard against an unsound-small cut ---------------------------------
@@ -699,7 +718,6 @@ def test_merge_reunites_the_fragments_into_the_disjoint_reading(tmp_path):
 
     analysis = _analyze(tmp_path, merged)
     assert analysis["geometry"] == ["disjoint"]
-    assert analysis["mincut_all"] == 2
 
     written = json.loads(record.read_text(encoding="utf-8"))
     assert written["routes"] == {"PATH-1": "seed", "PATH-2": "expand"}
@@ -901,7 +919,7 @@ def _merge_record(graph, **override):
 def _provenance(graph, **override):
     record = {
         "fault": {"statement": "the share resolver skips the owner check"},
-        "unsettled": [], "notes": [],
+        "unsettled": [],
     }
     record.update(override)
     return record
@@ -962,7 +980,7 @@ def test_an_analysis_of_an_older_graph_cannot_ship(tmp_path):
     assert result.returncode == 0, result.stderr
 
     stale = json.loads((out / "analysis.json").read_text(encoding="utf-8"))
-    stale["mincut_all"] += 1
+    stale["geometry"] = []
     (out / "analysis.json").write_text(json.dumps(stale, indent=2), encoding="utf-8")
     again = subprocess.run(
         [sys.executable, str(SCRIPTS / "graph_finalize.py"), str(out),
@@ -981,6 +999,22 @@ def test_a_deliverable_recording_no_route_is_refused(tmp_path):
     result, _ = _finalize(tmp_path, graph, _provenance(graph))
     assert result.returncode == 1
     assert "records no route" in result.stderr, result.stderr
+
+
+def test_a_deliverable_rejects_a_node_outside_every_route(tmp_path):
+    graph = _graph()
+    graph["nodes"].append(
+        _fn(
+            "N-orphan",
+            "unused function",
+            ["N-entry"],
+            "vulnerable build · GET /unused · 200",
+            "unused response",
+        )
+    )
+    result, _ = _finalize(tmp_path, graph, _provenance(graph), derive=True)
+    assert result.returncode == 1
+    assert "nodes outside every recorded route: N-orphan" in result.stderr
 
 
 def test_every_route_must_say_which_role_found_it(tmp_path):
@@ -1152,6 +1186,16 @@ def test_a_probe_goes_out_as_the_entry_principal(tmp_path, target):
     assert json.loads(json.loads(result.stdout)["body"])["auth"] == "token analyst:s3cret"
 
 
+def test_an_anonymous_entry_sends_no_authentication_header(tmp_path, target):
+    spec = json.loads(target.read_text(encoding="utf-8"))
+    spec["builds"]["vulnerable"]["auth_header"] = None
+    target.write_text(json.dumps(spec), encoding="utf-8")
+
+    result = _probe(target)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(json.loads(result.stdout)["body"])["auth"] is None
+
+
 def test_a_study_with_no_runnable_bundle_is_not_probed(tmp_path):
     """`none: true` is the root saying there is nothing to reach."""
     path = tmp_path / "target.json"
@@ -1316,6 +1360,9 @@ def test_an_exchange_another_client_ran_can_be_recorded(tmp_path, target):
     """
     captured = tmp_path / "captured.txt"
     captured.write_text(f"SUBACK 0x00\nretained: {WITNESS}\n", encoding="utf-8")
+    spec = json.loads(target.read_text(encoding="utf-8"))
+    spec["builds"]["vulnerable"]["base_url"] = None
+    target.write_text(json.dumps(spec), encoding="utf-8")
     result = _probe(target, "--record", "--request", "MQTT SUBSCRIBE victim/+/report42",
                     "--response-file", str(captured), "--status", "0",
                     "--observed", WITNESS)
@@ -1357,6 +1404,26 @@ def _provision(*args):
         [sys.executable, str(SCRIPTS / "graph_provision.py"), *args],
         capture_output=True, text=True,
     )
+
+
+def test_discovery_keeps_an_internal_only_compose_project(monkeypatch):
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import graph_provision
+    finally:
+        sys.path.pop(0)
+    monkeypatch.setattr(graph_provision, "environment", lambda _identifier: set())
+    builds, _facility = graph_provision.discover({
+        "container-id": {
+            "name": "study-app-1",
+            "project": "study-vulnerable",
+            "working_dir": "/tmp/study",
+            "ports": "",
+        }
+    })
+    assert builds == {
+        "vulnerable": {"base_url": None, "containers": ["study-app-1"]}
+    }
 
 
 def test_provisioning_refuses_a_directory_that_is_not_a_study(tmp_path):

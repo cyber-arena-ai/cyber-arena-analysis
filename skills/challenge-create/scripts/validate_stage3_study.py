@@ -12,7 +12,7 @@ from pathlib import Path
 
 HEX40 = re.compile(r"[0-9a-f]{40}")
 HEX64 = re.compile(r"[0-9a-f]{64}")
-OUTCOMES = {"ready_for_authoring", "needs_study", "rejected"}
+OUTCOMES = {"ready_for_authoring", "rejected"}
 
 
 def _text(value: object) -> bool:

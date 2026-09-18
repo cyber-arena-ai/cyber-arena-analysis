@@ -100,8 +100,7 @@ build logs are unnecessary unless they explain a material result.
 
 Write `STAGE3_STUDY.md` under these short headings:
 
-- **Decision** — `ready_for_authoring`, `needs_study`, or `rejected`, with the
-  decisive reason.
+- **Decision** — `ready_for_authoring` or `rejected`, with the decisive reason.
 - **Target and observations** — exact commit, environment, vulnerable result,
   and fixed comparison.
 - **Attack chain** — identity, entrypoint, affected features, vulnerable
@@ -144,8 +143,8 @@ Write `STAGE3_STUDY.md` under these short headings:
 When `fallback_search_used` is false, `reproduced_commit` must equal
 `primary_commit`. When it is true, `STAGE3_STUDY.md` must explain the bounded
 search and why the final commit is within the selected claim. Do not retain the
-intermediate search attempts. A `rejected` or `needs_study` result may use
-`null` when no vulnerable commit was reproduced; `ready_for_authoring` may not.
+intermediate search attempts. A `rejected` result may use `null` when no
+vulnerable commit was reproduced; `ready_for_authoring` may not.
 
 `environment` lists every retained file needed to construct the Docker or
 Compose environment, including source archives or lockfiles, and must include a

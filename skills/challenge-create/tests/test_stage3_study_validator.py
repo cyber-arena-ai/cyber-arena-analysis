@@ -165,7 +165,7 @@ def test_ready_study_requires_vulnerable_and_fixed_evidence(tmp_path):
 def test_artifacts_cannot_escape_study_directory(tmp_path):
     packet = _packet(tmp_path)
     review = _review(tmp_path, packet)
-    study = _study(tmp_path, packet, outcome="needs_study")
+    study = _study(tmp_path, packet, outcome="rejected")
     result_path = study / "result.json"
     payload = json.loads(result_path.read_text(encoding="utf-8"))
     payload["artifacts"]["study"] = "../outside.md"
@@ -217,3 +217,14 @@ def test_rejected_study_may_record_no_reproduced_commit(tmp_path):
     result = _run(packet, review, study)
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_needs_study_outcome_is_no_longer_valid(tmp_path):
+    packet = _packet(tmp_path)
+    review = _review(tmp_path, packet)
+    study = _study(tmp_path, packet, outcome="needs_study")
+
+    result = _run(packet, review, study)
+
+    assert result.returncode == 1
+    assert "outcome is invalid" in result.stdout

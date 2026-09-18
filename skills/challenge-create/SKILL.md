@@ -322,9 +322,8 @@ python3 <skill-root>/scripts/validate_stage3_study.py \
   --study-dir artifacts/projects/OWNER__PROJECT/stage3/<study-name>
 ```
 
-Only `ready_for_authoring` studies proceed to Stage 4. `needs_study` names one
-decisive unresolved fact; `rejected` records why authoring would measure the
-wrong capability or admit an obvious shortcut.
+Only `ready_for_authoring` studies proceed to Stage 4. `rejected` records why
+authoring would measure the wrong capability or admit an obvious shortcut.
 
 ## Stage 4: author and register
 

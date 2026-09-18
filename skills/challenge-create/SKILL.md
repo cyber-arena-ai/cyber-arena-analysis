@@ -323,7 +323,8 @@ python3 <skill-root>/scripts/validate_stage3_study.py \
 ```
 
 Only `ready_for_authoring` studies proceed to Stage 4. `rejected` records why
-authoring would measure the wrong capability or admit an obvious shortcut.
+the candidate does not proceed: the fault did not reproduce, or authoring would
+measure the wrong capability or admit an obvious shortcut.
 
 ## Stage 4: author and register
 

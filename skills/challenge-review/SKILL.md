@@ -115,10 +115,12 @@ overall verdict.
    specialist; give the attack-scope registry to static and exploitability.
    Give each dynamic specialist `<orche-root>`, the sanitized verifier status,
    frozen objective matrix, relevant canonical verifier pointer/value pairs,
-   and their dedicated workspace. Also give the CHEAT specialist the resolved
-   `<skill-root>` for its bundled game-preparation helper. Each dynamic
-   specialist owns its isolated game instances and cleanup, uses distinct
-   runtime names and state, and writes review artifacts only to its workspace.
+   and their dedicated workspace. Include the game tier's `packaged PoV` result
+   and its `events from <dir>` run locator for the exploitability specialist.
+   Also give the CHEAT specialist the resolved `<skill-root>` for its bundled
+   game-preparation helper. Each dynamic specialist owns its isolated game
+   instances and cleanup, uses distinct runtime names and state, and writes
+   review artifacts only to its workspace.
    Give only the filtered verifier evidence above, and keep each specialist's
    runtime state, evidence, and results private from the others until
    adjudication. If independent agents are unavailable, record the affected
